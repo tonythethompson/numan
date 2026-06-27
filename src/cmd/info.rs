@@ -1,7 +1,7 @@
-use anyhow::Result;
-use crate::core::registry::RegistryManager;
-use crate::core::platform::Platform;
 use crate::core::nu_version::NuVersion;
+use crate::core::platform::Platform;
+use crate::core::registry::RegistryManager;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn execute(id: &str, root: &Path) -> Result<()> {
@@ -38,10 +38,7 @@ pub fn execute(id: &str, root: &Path) -> Result<()> {
             format!(" ({})", flags.join(", "))
         };
 
-        println!(
-            "  v{}  [nu {}]{}",
-            ver.version, ver.nu_version, flag_str
-        );
+        println!("  v{}  [nu {}]{}", ver.version, ver.nu_version, flag_str);
 
         if !ver.verified_with.is_empty() {
             println!("    tested with: {}", ver.verified_with.join(", "));

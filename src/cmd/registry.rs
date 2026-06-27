@@ -1,7 +1,7 @@
-use anyhow::{bail, Result};
-use clap::Subcommand;
 use crate::core::registry::RegistryManager;
 use crate::core::trust::TrustStore;
+use anyhow::{bail, Result};
+use clap::Subcommand;
 use std::path::Path;
 
 #[derive(Subcommand)]
@@ -72,7 +72,10 @@ fn sync_registries(root: &Path) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to fetch registry '{name}': {e}"))?;
 
         if !response.status().is_success() {
-            bail!("Failed to fetch registry '{name}': HTTP {}", response.status());
+            bail!(
+                "Failed to fetch registry '{name}': HTTP {}",
+                response.status()
+            );
         }
 
         let index_content = response.text()?;
@@ -161,15 +164,15 @@ fn list_packages(root: &Path) -> Result<()> {
     println!("Packages in '{default_reg}' ({}):\n", index.packages.len());
 
     for pkg in &index.packages {
-        let latest = pkg.versions.last().map(|v| v.version.to_string()).unwrap_or_else(|| "n/a".to_string());
+        let latest = pkg
+            .versions
+            .last()
+            .map(|v| v.version.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
         println!(
             "  {}/{}  v{}  [{}]
     {}",
-            pkg.id.owner,
-            pkg.id.name,
-            latest,
-            pkg.package_type,
-            pkg.description
+            pkg.id.owner, pkg.id.name, latest, pkg.package_type, pkg.description
         );
     }
 

@@ -41,14 +41,15 @@ impl TrustStore {
     }
 
     pub fn add_key(&mut self, registry_name: &str, public_key_b64: &str) -> Result<String> {
-        let key_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            public_key_b64,
-        )
-        .context("Invalid base64 public key")?;
+        let key_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, public_key_b64)
+                .context("Invalid base64 public key")?;
 
         if key_bytes.len() != 32 {
-            bail!("Ed25519 public key must be 32 bytes, got {}", key_bytes.len());
+            bail!(
+                "Ed25519 public key must be 32 bytes, got {}",
+                key_bytes.len()
+            );
         }
 
         let mut key_array = [0u8; 32];
@@ -89,10 +90,8 @@ impl TrustStore {
 
         let verifying_key = VerifyingKey::from_bytes(&key_array)?;
 
-        let sig_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            signature_b64,
-        )?;
+        let sig_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature_b64)?;
 
         let mut sig_array = [0u8; 64];
         sig_array.copy_from_slice(&sig_bytes);
@@ -112,10 +111,13 @@ pub fn compute_fingerprint(public_key: &[u8; 32]) -> String {
 
 fn chrono_now() -> String {
     // Simple timestamp without pulling in chrono
-    format!("{:?}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs())
+    format!(
+        "{:?}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    )
 }
 
 #[cfg(test)]
@@ -208,6 +210,8 @@ mod tests {
             &signature.to_bytes(),
         );
 
-        assert!(!store.verify_signature("test", b"tampered data", &sig_b64).unwrap());
+        assert!(!store
+            .verify_signature("test", b"tampered data", &sig_b64)
+            .unwrap());
     }
 }

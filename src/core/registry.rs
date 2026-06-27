@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::core::package::{Package, RegistryIndex};
 use crate::core::trust::TrustStore;
@@ -10,26 +10,29 @@ pub struct RegistryManager {
 }
 
 impl RegistryManager {
-    pub fn new(root: &PathBuf) -> Result<Self> {
+    pub fn new(root: &Path) -> Result<Self> {
         let trust = TrustStore::load(root)?;
         Ok(Self {
-            root: root.clone(),
+            root: root.to_path_buf(),
             trust,
         })
     }
 
     pub fn index_path(&self, registry_name: &str) -> PathBuf {
-        self.root.join(format!("registry/{registry_name}/index.json"))
+        self.root
+            .join(format!("registry/{registry_name}/index.json"))
     }
 
     pub fn sig_path(&self, registry_name: &str) -> PathBuf {
-        self.root.join(format!("registry/{registry_name}/index.json.sig"))
+        self.root
+            .join(format!("registry/{registry_name}/index.json.sig"))
     }
 
     pub fn load_index(&self, registry_name: &str) -> Result<RegistryIndex> {
         let path = self.index_path(registry_name);
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("Registry '{registry_name}' not synced. Run 'numan registry sync'."))?;
+        let content = std::fs::read_to_string(&path).with_context(|| {
+            format!("Registry '{registry_name}' not synced. Run 'numan registry sync'.")
+        })?;
         let index: RegistryIndex = serde_json::from_str(&content)?;
         Ok(index)
     }
@@ -73,7 +76,9 @@ impl RegistryManager {
                 );
             }
 
-            let valid = self.trust.verify_signature(registry_name, &index_content, &sig_b64)?;
+            let valid = self
+                .trust
+                .verify_signature(registry_name, &index_content, &sig_b64)?;
             if !valid {
                 anyhow::bail!(
                     "Registry '{registry_name}' signature verification failed. \
@@ -95,7 +100,9 @@ impl RegistryManager {
             .filter(|p| {
                 p.id.to_string().to_lowercase().contains(&query_lower)
                     || p.description.to_lowercase().contains(&query_lower)
-                    || p.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                    || p.tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&query_lower))
             })
             .collect();
 

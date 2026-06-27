@@ -117,11 +117,7 @@ fn parse_version(v: &str) -> Result<(u64, u64, u64)> {
     if parts.len() != 3 {
         bail!("Invalid version: '{v}'");
     }
-    Ok((
-        parts[0].parse()?,
-        parts[1].parse()?,
-        parts[2].parse()?,
-    ))
+    Ok((parts[0].parse()?, parts[1].parse()?, parts[2].parse()?))
 }
 
 fn version_gte(a: &NuVersion, b: &(u64, u64, u64)) -> bool {

@@ -35,6 +35,8 @@ enum Commands {
     },
     /// Install a package
     Install(cmd::install::InstallArgs),
+    /// Activate installed plugins with Nu
+    Activate(cmd::activate::ActivateArgs),
     /// List all installed packages
     List,
     /// Registry management
@@ -46,7 +48,9 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let platform = core::platform::Platform::detect();
-    let root = cli.root.unwrap_or_else(|| config::Config::resolve_root(&platform));
+    let root = cli
+        .root
+        .unwrap_or_else(|| config::Config::resolve_root(&platform));
 
     // Ensure root directory exists
     std::fs::create_dir_all(&root)?;
@@ -55,6 +59,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Search { query } => cmd::search::execute(&query, &root),
         Commands::Info { id } => cmd::info::execute(&id, &root),
         Commands::Install(args) => cmd::install::execute(&args, &root),
+        Commands::Activate(args) => cmd::activate::execute(&args, &root),
         Commands::List => cmd::list::execute(&root),
         Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
     }

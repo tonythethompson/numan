@@ -1,9 +1,11 @@
-use anyhow::Result;
+use crate::nu::paths::NuPaths;
 use crate::state::lockfile::Lockfile;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn execute(root: &Path) -> Result<()> {
     let lockfile = Lockfile::load(root)?;
+    let nu_paths = NuPaths::load(root).ok();
 
     if lockfile.is_empty() {
         println!("No packages installed.");
@@ -13,7 +15,18 @@ pub fn execute(root: &Path) -> Result<()> {
     println!("Installed packages ({}):\n", lockfile.packages.len());
 
     for (id, entry) in &lockfile.packages {
-        let status = if entry.activated { "activated" } else { "installed" };
+        let status = match &nu_paths {
+            Some(p)
+                if entry.is_active_for(
+                    &p.nu_executable_hash,
+                    &p.nu_version,
+                    &p.plugin_registry_path,
+                ) =>
+            {
+                "activated"
+            }
+            _ => "installed",
+        };
         println!(
             "  {}  v{}  [{}]  {}",
             id, entry.version, entry.package_type, status

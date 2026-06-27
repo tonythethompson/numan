@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::core::registry::RegistryManager;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn execute(query: &str, root: &Path) -> Result<()> {
@@ -14,15 +14,15 @@ pub fn execute(query: &str, root: &Path) -> Result<()> {
     println!("Found {} package(s) matching '{}':\n", results.len(), query);
 
     for pkg in &results {
-        let latest = pkg.versions.last().map(|v| v.version.to_string()).unwrap_or_else(|| "n/a".to_string());
+        let latest = pkg
+            .versions
+            .last()
+            .map(|v| v.version.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
         println!(
             "  {}/{}  v{}  [{}]
     {}",
-            pkg.id.owner,
-            pkg.id.name,
-            latest,
-            pkg.package_type,
-            pkg.description
+            pkg.id.owner, pkg.id.name, latest, pkg.package_type, pkg.description
         );
     }
 
