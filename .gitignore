@@ -24,3 +24,6 @@ desktop.ini
 
 # OpenCode project config
 .opencode/
+
+# Serena MCP project config
+.serena/
