@@ -325,7 +325,7 @@ fn build_include_checker(patterns: Option<&[String]>) -> Result<IncludeChecker> 
         // Normalize: interpret `*` as a glob on a single path component
         // and `**` as crossing directory boundaries
         let glob_str = if pattern.contains('/') || pattern.contains('\\') {
-            // Path-aware pattern ΓÇö normalize separators
+            // Path-aware pattern — normalize separators
             pattern.replace('\\', "/")
         } else {
             // Simple filename pattern
