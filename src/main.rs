@@ -37,6 +37,8 @@ enum Commands {
         /// Package ID (owner/name)
         id: String,
     },
+    /// Install a package
+    Install(cmd::install::InstallArgs),
     /// List all installed packages
     List,
     /// Registry management
@@ -56,6 +58,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Search { query } => cmd::search::execute(&query, &root),
         Commands::Info { id } => cmd::info::execute(&id, &root),
+        Commands::Install(args) => cmd::install::execute(&args, &root),
         Commands::List => cmd::list::execute(&root),
         Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
     }
