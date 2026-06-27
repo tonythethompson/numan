@@ -77,18 +77,19 @@ pub fn execute_with_registrar(
             "{}  Reconciling interrupted activation journal…",
             console::style("⚠").yellow()
         );
-        // Persist any `registered` entries that the lockfile does not yet record
+        // Persist any `registered` entries to the lockfile.
+        // Unconditionally overwrite — the journal was written for the current Nu
+        // identity (checked above), so a stale activation from a prior identity
+        // must be replaced with the current one.
         for entry in &existing.entries {
             if entry.status == PendingStatus::Registered {
                 if let Some(pkg) = lockfile.packages.get_mut(&entry.package_id) {
-                    if pkg.activation.is_none() {
-                        pkg.activation = Some(PluginActivation {
-                            plugin_registry_path: nu_paths.plugin_registry_path.clone(),
-                            nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
-                            nu_version: nu_paths.nu_version.clone(),
-                            activated_at: format_timestamp(),
-                        });
-                    }
+                    pkg.activation = Some(PluginActivation {
+                        plugin_registry_path: nu_paths.plugin_registry_path.clone(),
+                        nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
+                        nu_version: nu_paths.nu_version.clone(),
+                        activated_at: format_timestamp(),
+                    });
                 }
             }
         }
