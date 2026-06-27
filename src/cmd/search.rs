@@ -1,8 +1,8 @@
 use anyhow::Result;
 use crate::core::registry::RegistryManager;
-use std::path::PathBuf;
+use std::path::Path;
 
-pub fn execute(query: &str, root: &PathBuf) -> Result<()> {
+pub fn execute(query: &str, root: &Path) -> Result<()> {
     let mgr = RegistryManager::new(root)?;
     let results = mgr.search(query)?;
 

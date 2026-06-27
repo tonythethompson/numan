@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+﻿use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use globset::{Glob, GlobSetBuilder};
 use sha2::{Digest, Sha256};
@@ -13,6 +13,7 @@ const MAX_FILE_COUNT: usize = 10_000;
 /// Maximum uncompressed size (100 MB).
 const MAX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
 /// Maximum compression ratio (100:1) to guard on zip bombs.
+#[allow(dead_code)]
 const MAX_COMPRESSION_RATIO: u64 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +71,7 @@ pub struct ExtractResult {
     pub entry_found: bool,
 }
 
-/// Extract an archive. `format` must be provided explicitly — never inferred from the filename.
+/// Extract an archive. `format` must be provided explicitly ΓÇö never inferred from the filename.
 pub fn extract_archive(
     archive_path: &Path,
     dest_dir: &Path,
@@ -183,7 +184,7 @@ fn extract_zip(
             .with_context(|| format!("Failed to read zip entry: {raw_name}"))?;
         std::fs::write(&out_path, contents)?;
 
-        // Check entry point — compare against full relative path
+        // Check entry point ΓÇö compare against full relative path
         if let Some(ref entry_pattern) = config.entry {
             if relative_path_matches(&relative_path, entry_pattern) {
                 entry_found = true;
@@ -295,7 +296,7 @@ fn extract_tar_inner<R: Read>(
             .unpack(&out_path)
             .with_context(|| format!("Failed to extract: {}", entry_path.display()))?;
 
-        // Check entry point — compare against full relative path
+        // Check entry point ΓÇö compare against full relative path
         if let Some(ref entry_pattern) = config.entry {
             if relative_path_matches(&relative_path, entry_pattern) {
                 entry_found = true;
@@ -324,7 +325,7 @@ fn build_include_checker(patterns: Option<&[String]>) -> Result<IncludeChecker> 
         // Normalize: interpret `*` as a glob on a single path component
         // and `**` as crossing directory boundaries
         let glob_str = if pattern.contains('/') || pattern.contains('\\') {
-            // Path-aware pattern — normalize separators
+            // Path-aware pattern ΓÇö normalize separators
             pattern.replace('\\', "/")
         } else {
             // Simple filename pattern
@@ -400,7 +401,7 @@ fn strip_leading_component(path: &Path, root: &str) -> Option<PathBuf> {
 }
 
 /// Check if a path string contains dangerous traversal.
-/// Only rejects leading `..` or absolute paths — inner `..` is fine.
+/// Only rejects leading `..` or absolute paths ΓÇö inner `..` is fine.
 fn has_path_traversal_str(path: &str) -> bool {
     let normalized = path.replace('\\', "/");
     // Reject leading ..
@@ -685,7 +686,7 @@ mod tests {
         assert!(has_path_traversal_str(".."));
         assert!(has_path_traversal_str("/etc/passwd"));
         assert!(!has_path_traversal_str("foo/bar"));
-        // Inner .. is fine — only leading/absolute traversal is dangerous
+        // Inner .. is fine ΓÇö only leading/absolute traversal is dangerous
         assert!(!has_path_traversal_str("foo/../bar/baz"));
     }
 

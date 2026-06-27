@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::core::platform::Platform;
 
@@ -129,7 +129,7 @@ fn default_max_cache_size() -> String {
 }
 
 impl Config {
-    pub fn load(root: &PathBuf) -> Result<Self> {
+    pub fn load(root: &Path) -> Result<Self> {
         let config_path = root.join("config.toml");
         if !config_path.exists() {
             return Ok(Self::default());
@@ -141,7 +141,7 @@ impl Config {
         Ok(config)
     }
 
-    pub fn save(&self, root: &PathBuf) -> Result<()> {
+    pub fn save(&self, root: &Path) -> Result<()> {
         let config_path = root.join("config.toml");
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&config_path, content)?;

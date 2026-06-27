@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use clap::Subcommand;
 use crate::core::registry::RegistryManager;
 use crate::core::trust::TrustStore;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Subcommand)]
 pub enum RegistryCommands {
@@ -29,7 +29,7 @@ pub enum RegistryCommands {
     Packages,
 }
 
-pub fn execute(cmd: RegistryCommands, root: &PathBuf) -> Result<()> {
+pub fn execute(cmd: RegistryCommands, root: &Path) -> Result<()> {
     match cmd {
         RegistryCommands::List => list_registries(root),
         RegistryCommands::Sync => sync_registries(root),
@@ -39,7 +39,7 @@ pub fn execute(cmd: RegistryCommands, root: &PathBuf) -> Result<()> {
     }
 }
 
-fn list_registries(root: &PathBuf) -> Result<()> {
+fn list_registries(root: &Path) -> Result<()> {
     let config = crate::config::Config::load(root)?;
     if config.registries.is_empty() {
         println!("No registries configured.");
@@ -56,7 +56,7 @@ fn list_registries(root: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn sync_registries(root: &PathBuf) -> Result<()> {
+fn sync_registries(root: &Path) -> Result<()> {
     let config = crate::config::Config::load(root)?;
     let _mgr = RegistryManager::new(root)?;
 
@@ -99,7 +99,7 @@ fn sync_registries(root: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn add_registry(root: &PathBuf, name: &str, url: &str, key_b64: &str) -> Result<()> {
+fn add_registry(root: &Path, name: &str, url: &str, key_b64: &str) -> Result<()> {
     let mut config = crate::config::Config::load(root)?;
 
     if config.registries.contains_key(name) {
@@ -131,7 +131,7 @@ fn add_registry(root: &PathBuf, name: &str, url: &str, key_b64: &str) -> Result<
     Ok(())
 }
 
-fn remove_registry(root: &PathBuf, name: &str) -> Result<()> {
+fn remove_registry(root: &Path, name: &str) -> Result<()> {
     let mut config = crate::config::Config::load(root)?;
 
     if !config.registries.contains_key(name) {
@@ -151,7 +151,7 @@ fn remove_registry(root: &PathBuf, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn list_packages(root: &PathBuf) -> Result<()> {
+fn list_packages(root: &Path) -> Result<()> {
     let config = crate::config::Config::load(root)?;
     let mgr = RegistryManager::new(root)?;
 

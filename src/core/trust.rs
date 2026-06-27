@@ -3,7 +3,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustStore {
@@ -18,7 +18,7 @@ pub struct TrustedKey {
 }
 
 impl TrustStore {
-    pub fn load(root: &PathBuf) -> Result<Self> {
+    pub fn load(root: &Path) -> Result<Self> {
         let trust_path = root.join("registry/trust.json");
         if !trust_path.exists() {
             return Ok(Self {
@@ -30,7 +30,7 @@ impl TrustStore {
         Ok(store)
     }
 
-    pub fn save(&self, root: &PathBuf) -> Result<()> {
+    pub fn save(&self, root: &Path) -> Result<()> {
         let trust_path = root.join("registry/trust.json");
         if let Some(parent) = trust_path.parent() {
             std::fs::create_dir_all(parent)?;

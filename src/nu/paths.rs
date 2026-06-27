@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NuPaths {
@@ -14,7 +14,7 @@ pub struct NuPaths {
 }
 
 impl NuPaths {
-    pub fn load(root: &PathBuf) -> Result<Self> {
+    pub fn load(root: &Path) -> Result<Self> {
         let paths_path = root.join("nu_state/paths.json");
         if !paths_path.exists() {
             anyhow::bail!(
@@ -27,7 +27,7 @@ impl NuPaths {
         Ok(paths)
     }
 
-    pub fn save(&self, root: &PathBuf) -> Result<()> {
+    pub fn save(&self, root: &Path) -> Result<()> {
         let paths_path = root.join("nu_state/paths.json");
         if let Some(parent) = paths_path.parent() {
             std::fs::create_dir_all(parent)?;
