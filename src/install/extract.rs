@@ -1,4 +1,4 @@
-﻿use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use globset::{Glob, GlobSetBuilder};
 use sha2::{Digest, Sha256};
