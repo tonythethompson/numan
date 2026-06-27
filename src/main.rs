@@ -1,0 +1,62 @@
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+mod cmd;
+mod config;
+mod core;
+mod install;
+mod nu;
+mod nupm_compat;
+mod state;
+
+#[derive(Parser)]
+#[command(
+    name = "numan",
+    about = "A cross-platform package manager for Nushell",
+    version,
+    after_help = "Run 'numan <command> --help' for more information on a command."
+)]
+struct Cli {
+    /// Path to numan root directory
+    #[arg(long, global = true)]
+    root: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Search registry by name/description/tags
+    Search {
+        /// Search query
+        query: String,
+    },
+    /// Show package details, versions, platforms
+    Info {
+        /// Package ID (owner/name)
+        id: String,
+    },
+    /// List all installed packages
+    List,
+    /// Registry management
+    #[command(subcommand)]
+    Registry(cmd::registry::RegistryCommands),
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    let platform = core::platform::Platform::detect();
+    let root = cli.root.unwrap_or_else(|| config::Config::resolve_root(&platform));
+
+    // Ensure root directory exists
+    std::fs::create_dir_all(&root)?;
+
+    match cli.command {
+        Commands::Search { query } => cmd::search::execute(&query, &root),
+        Commands::Info { id } => cmd::info::execute(&id, &root),
+        Commands::List => cmd::list::execute(&root),
+        Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
+    }
+}

@@ -1,0 +1,235 @@
+use anyhow::{bail, Result};
+use semver::Version;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ScopedId {
+    pub owner: String,
+    pub name: String,
+}
+
+impl ScopedId {
+    pub fn new(owner: &str, name: &str) -> Self {
+        Self {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    pub fn parse(input: &str) -> Result<Self> {
+        let parts: Vec<&str> = input.split('/').collect();
+        if parts.len() == 2 {
+            let owner = parts[0];
+            let name = parts[1];
+            if owner.is_empty() || name.is_empty() {
+                bail!("Invalid scoped ID: '{input}' (owner and name must be non-empty)");
+            }
+            Ok(Self::new(owner, name))
+        } else if parts.len() == 1 {
+            bail!("Invalid scoped ID: '{input}' (must be owner/name)");
+        } else {
+            bail!("Invalid scoped ID: '{input}' (too many slashes)");
+        }
+    }
+
+    pub fn alias(owner: &str, name: &str) -> Self {
+        Self::new(owner, name)
+    }
+}
+
+impl fmt::Display for ScopedId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.owner, self.name)
+    }
+}
+
+impl FromStr for ScopedId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::parse(s)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PackageType {
+    Plugin,
+    Module,
+    Script,
+    Completion,
+}
+
+impl PackageType {
+    pub fn dir_name(&self) -> &str {
+        match self {
+            PackageType::Plugin => "plugins",
+            PackageType::Module => "modules",
+            PackageType::Script => "scripts",
+            PackageType::Completion => "completions",
+        }
+    }
+}
+
+impl fmt::Display for PackageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PackageType::Plugin => write!(f, "plugin"),
+            PackageType::Module => write!(f, "module"),
+            PackageType::Script => write!(f, "script"),
+            PackageType::Completion => write!(f, "completion"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    pub id: ScopedId,
+    pub description: String,
+    pub repo: String,
+    #[serde(rename = "type")]
+    pub package_type: PackageType,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub versions: Vec<VersionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionEntry {
+    pub version: Version,
+    pub nu_version: String,
+    #[serde(default)]
+    pub verified_with: Vec<String>,
+    pub artifact: Artifact,
+    #[serde(default)]
+    pub source: Option<SourceInfo>,
+    #[serde(default)]
+    pub dependencies: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    pub kind: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub targets: std::collections::HashMap<String, TargetArtifact>,
+    #[serde(default)]
+    pub archive_root: Option<String>,
+    #[serde(default)]
+    pub include: Option<Vec<String>>,
+    #[serde(default)]
+    pub entry: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetArtifact {
+    pub url: String,
+    pub sha256: String,
+    pub executable_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceInfo {
+    pub git: String,
+    pub rev: String,
+    pub cargo_name: String,
+    #[serde(default)]
+    pub cargo_lock_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryIndex {
+    pub version: u32,
+    pub updated_at: String,
+    #[serde(default)]
+    pub registry_revision: Option<String>,
+    pub packages: Vec<Package>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_scoped_id() {
+        let id = ScopedId::parse("fdncred/file").unwrap();
+        assert_eq!(id.owner, "fdncred");
+        assert_eq!(id.name, "file");
+        assert_eq!(id.to_string(), "fdncred/file");
+    }
+
+    #[test]
+    fn parse_scoped_id_no_slash() {
+        assert!(ScopedId::parse("file").is_err());
+    }
+
+    #[test]
+    fn parse_scoped_id_empty_owner() {
+        assert!(ScopedId::parse("/file").is_err());
+    }
+
+    #[test]
+    fn parse_scoped_id_empty_name() {
+        assert!(ScopedId::parse("fdncred/").is_err());
+    }
+
+    #[test]
+    fn parse_scoped_id_too_many_slashes() {
+        assert!(ScopedId::parse("a/b/c").is_err());
+    }
+
+    #[test]
+    fn scoped_id_from_str() {
+        let id: ScopedId = "owner/name".parse().unwrap();
+        assert_eq!(id.owner, "owner");
+        assert_eq!(id.name, "name");
+    }
+
+    #[test]
+    fn package_type_dir_names() {
+        assert_eq!(PackageType::Plugin.dir_name(), "plugins");
+        assert_eq!(PackageType::Module.dir_name(), "modules");
+        assert_eq!(PackageType::Script.dir_name(), "scripts");
+        assert_eq!(PackageType::Completion.dir_name(), "completions");
+    }
+
+    #[test]
+    fn parse_version_entry() {
+        let json = r#"{
+            "version": "0.25.2",
+            "nu_version": ">=0.113.0 <0.114.0",
+            "verified_with": ["0.113.0", "0.113.1"],
+            "artifact": {
+                "kind": "binary",
+                "targets": {
+                    "x86_64-pc-windows-msvc": {
+                        "url": "https://example.com/plugin.zip",
+                        "sha256": "abc123",
+                        "executable_path": "nu_plugin_file.exe"
+                    }
+                }
+            }
+        }"#;
+        let entry: VersionEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.version, Version::new(0, 25, 2));
+        assert_eq!(entry.artifact.kind, "binary");
+        assert!(entry.artifact.targets.contains_key("x86_64-pc-windows-msvc"));
+    }
+
+    #[test]
+    fn parse_registry_index() {
+        let json = r#"{
+            "version": 1,
+            "updated_at": "2026-06-27T00:00:00Z",
+            "registry_revision": "abc123",
+            "packages": []
+        }"#;
+        let index: RegistryIndex = serde_json::from_str(json).unwrap();
+        assert_eq!(index.version, 1);
+        assert!(index.packages.is_empty());
+    }
+}
