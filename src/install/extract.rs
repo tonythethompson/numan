@@ -71,7 +71,7 @@ pub struct ExtractResult {
     pub entry_found: bool,
 }
 
-/// Extract an archive. `format` must be provided explicitly ΓÇö never inferred from the filename.
+/// Extract an archive. `format` must be provided explicitly — never inferred from the filename.
 pub fn extract_archive(
     archive_path: &Path,
     dest_dir: &Path,
