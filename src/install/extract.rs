@@ -686,7 +686,7 @@ mod tests {
         assert!(has_path_traversal_str(".."));
         assert!(has_path_traversal_str("/etc/passwd"));
         assert!(!has_path_traversal_str("foo/bar"));
-        // Inner .. is fine ΓÇö only leading/absolute traversal is dangerous
+        // Inner .. is fine — only leading/absolute traversal is dangerous
         assert!(!has_path_traversal_str("foo/../bar/baz"));
     }
 
