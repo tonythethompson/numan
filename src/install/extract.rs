@@ -184,7 +184,7 @@ fn extract_zip(
             .with_context(|| format!("Failed to read zip entry: {raw_name}"))?;
         std::fs::write(&out_path, contents)?;
 
-        // Check entry point ΓÇö compare against full relative path
+        // Check entry point — compare against full relative path
         if let Some(ref entry_pattern) = config.entry {
             if relative_path_matches(&relative_path, entry_pattern) {
                 entry_found = true;
