@@ -28,6 +28,7 @@ reqwest = { version = "0.12", features = ["blocking"] }
 tar = "0.4"
 flate2 = "1"
 zip = "2"
+globset = "0.4"
 
 # Integrity
 sha2 = "0.10"

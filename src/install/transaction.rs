@@ -10,8 +10,7 @@ use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
 use crate::install::download;
-use crate::install::extract;
-use crate::install::extract::ExtractConfig;
+use crate::install::extract::{self, ArchiveFormat, ExtractConfig};
 use crate::state::lockfile::{Lockfile, LockfileEntry};
 
 pub struct InstallOptions<'a> {
@@ -22,12 +21,21 @@ pub struct InstallOptions<'a> {
     pub verbose: bool,
 }
 
+#[derive(Debug)]
 pub struct InstallResult {
     pub installed: bool,
     pub package: String,
     pub version: String,
     pub path: PathBuf,
     pub already_existed: bool,
+}
+
+/// Verified index metadata returned alongside the index.
+pub struct VerifiedIndex {
+    pub index: crate::core::package::RegistryIndex,
+    pub registry_name: String,
+    pub index_sha256: String,
+    pub signing_key_fingerprint: Option<String>,
 }
 
 pub fn install_package(
@@ -38,86 +46,125 @@ pub fn install_package(
     // 1. Parse package ID
     let id = ScopedId::parse(package_id)?;
 
-    // 2. Load registry
+    // 2. Load registry with signature verification
     let registry = RegistryManager::new(options.root)?;
+    let default_reg = registry.default_registry_name();
 
-    // 3. Find package in index
-    let pkg = registry
-        .find_package(&id.to_string())?
+    // Check if signature file exists — if so, verification is mandatory
+    let sig_path = registry.sig_path(&default_reg);
+    let verified = if sig_path.exists() {
+        let idx = registry.verify_and_load(&default_reg)?;
+        let index_bytes = std::fs::read(registry.index_path(&default_reg))?;
+        let index_sha256 = integrity::compute_sha256(&index_bytes);
+        let fingerprint = registry.signing_key_fingerprint(&default_reg);
+        VerifiedIndex {
+            index: idx,
+            registry_name: default_reg.clone(),
+            index_sha256,
+            signing_key_fingerprint: fingerprint,
+        }
+    } else {
+        // No signature file — only allow in dev mode (env var)
+        if std::env::var("NUMAN_ALLOW_UNSIGNED").unwrap_or_default() != "1" {
+            bail!(
+                "Registry '{}' has no signature file. \
+                 Signatures are required by default. \
+                 Set NUMAN_ALLOW_UNSIGNED=1 to override (development only).",
+                default_reg
+            );
+        }
+        let idx = registry.load_index(&default_reg)?;
+        let index_bytes = std::fs::read(registry.index_path(&default_reg))?;
+        let index_sha256 = integrity::compute_sha256(&index_bytes);
+        VerifiedIndex {
+            index: idx,
+            registry_name: default_reg.clone(),
+            index_sha256,
+            signing_key_fingerprint: None,
+        }
+    };
+
+    let pkg = verified
+        .index
+        .packages
+        .iter()
+        .find(|p| p.id.to_string() == id.to_string())
         .with_context(|| format!("Package '{}' not found in registry", id))?;
 
-    // 4. Resolve version
+    // 3. Resolve version with compatibility validation
     let resolver = Resolver::new(options.platform, options.nu_version);
     let resolved = if let Some(ver_str) = version {
-        // Parse exact version request
         let target_version: semver::Version = ver_str
             .parse()
             .with_context(|| format!("Invalid version: '{ver_str}'"))?;
-
-        pkg.versions
-            .iter()
-            .find(|v| v.version == target_version)
-            .with_context(|| format!(
-                "Version {ver_str} not available for '{}'",
-                id
-            ))?
+        resolver.resolve_exact(pkg, &target_version)?
     } else {
-        resolver.resolve(&pkg)?
+        resolver.resolve(pkg)?
     };
 
     let version_str = resolved.version.to_string();
 
-    // 5. Determine artifact
-    let (artifact_url, artifact_sha256, executable_path) = if resolved.artifact.kind == "binary" {
-        // Plugin: get platform-specific artifact
-        let target = resolved
-            .artifact
-            .targets
-            .get(&options.platform.triple)
-            .with_context(|| format!(
-                "No binary available for '{}' on {}",
-                id, options.platform.triple
+    // 4. Determine artifact — SHA256 is mandatory
+    let (artifact_url, artifact_sha256, executable_path, archive_format) =
+        if resolved.artifact.kind == "binary" {
+            // Plugin: get platform-specific artifact
+            let target = resolved
+                .artifact
+                .targets
+                .get(&options.platform.triple)
+                .with_context(|| format!(
+                    "No binary available for '{}' on {}",
+                    id, options.platform.triple
+                ))?;
+
+            let fmt = ArchiveFormat::from_url(&target.url).with_context(|| format!(
+                "Cannot determine archive format from URL: {}",
+                target.url
             ))?;
 
-        (
-            target.url.clone(),
-            Some(target.sha256.clone()),
-            Some(target.executable_path.clone()),
-        )
-    } else {
-        // Module/script/completion: use artifact.url or target
-        let url = resolved
-            .artifact
-            .url
-            .clone()
-            .or_else(|| {
-                resolved
-                    .artifact
-                    .targets
-                    .values()
-                    .next()
-                    .map(|t| t.url.clone())
-            })
-            .with_context(|| format!("No artifact URL for '{}'", id))?;
+            (
+                target.url.clone(),
+                Some(target.sha256.clone()),
+                Some(target.executable_path.clone()),
+                fmt,
+            )
+        } else {
+            // Module/script/completion: use artifact.url or target
+            let url = resolved
+                .artifact
+                .url
+                .clone()
+                .or_else(|| {
+                    resolved
+                        .artifact
+                        .targets
+                        .values()
+                        .next()
+                        .map(|t| t.url.clone())
+                })
+                .with_context(|| format!("No artifact URL for '{}'", id))?;
 
-        (url, resolved.artifact.sha256.clone(), None)
-    };
+            let sha = resolved.artifact.sha256.clone().with_context(|| format!(
+                "Artifact SHA256 is required for '{}'. Registry entry is missing sha256.",
+                id
+            ))?;
 
-    // 6. Check if already installed
+            let fmt = ArchiveFormat::from_url(&url).with_context(|| format!(
+                "Cannot determine archive format from URL: {url}"
+            ))?;
+
+            (url, Some(sha), None, fmt)
+        };
+
+    // 5. Check if already installed
     let mut lockfile = Lockfile::load(options.root)?;
     let lock_key = id.to_string();
 
     if !options.force {
         if let Some(entry) = lockfile.packages.get(&lock_key) {
             if entry.version == version_str {
-                let pkg_dir = compute_install_path(
-                    options.root,
-                    &pkg.package_type,
-                    &id,
-                    &version_str,
-                    &artifact_url,
-                );
-
+                // Use the path stored in the lockfile entry — not a recomputed path
+                let pkg_dir = options.root.join(entry.payload_path());
                 if pkg_dir.exists() {
                     if options.verbose {
                         println!(
@@ -139,10 +186,13 @@ pub fn install_package(
         }
     }
 
-    // 7. Compute immutable install path
+    // 6. Compute immutable install path using artifact SHA256 (not URL hash)
     let pkg_type_dir = pkg.package_type.dir_name();
-    let short_hash = compute_short_hash(&artifact_url);
-    let version_dir = format!("{version_str}-{short_hash}");
+    let sha_prefix = artifact_sha256
+        .as_deref()
+        .map(|s| s[..8.min(s.len())].to_string())
+        .unwrap_or_else(|| "no-sha".to_string());
+    let version_dir = format!("{version_str}-{sha_prefix}");
     let install_dir = options
         .root
         .join("packages")
@@ -151,17 +201,14 @@ pub fn install_package(
         .join(&id.name)
         .join(&version_dir);
 
-    // 8. Download to cache
+    // 7. Download to .part file, verify, then rename
     let cache_dir = options.root.join("cache/downloads");
     std::fs::create_dir_all(&cache_dir)?;
 
-    let cache_file = if let Some(ref sha) = artifact_sha256 {
-        cache_dir.join(format!("{sha}.bin"))
-    } else {
-        // Compute hash from URL as filename
-        let url_hash = compute_short_hash(&artifact_url);
-        cache_dir.join(format!("{url_hash}.bin"))
-    };
+    // Always use full SHA as cache key — artifact SHA is mandatory for plugins
+    let cache_key = artifact_sha256.as_deref().unwrap_or(&sha_prefix);
+    let cache_file = cache_dir.join(format!("{cache_key}.bin"));
+    let cache_part = cache_dir.join(format!("{cache_key}.part"));
 
     if !cache_file.exists() || options.force {
         if options.verbose {
@@ -172,7 +219,16 @@ pub fn install_package(
                 version_str
             );
         }
-        download::download_file(&artifact_url, &cache_file)?;
+        download::download_file(&artifact_url, &cache_part)?;
+        // Verify before promoting from .part to final
+        if let Some(ref expected_sha) = artifact_sha256 {
+            integrity::verify_and_report(&cache_part, expected_sha, &lock_key)?;
+        }
+        // Atomic promote
+        if cache_file.exists() {
+            std::fs::remove_file(&cache_file)?;
+        }
+        std::fs::rename(&cache_part, &cache_file)?;
     } else if options.verbose {
         println!(
             "{} Using cached download",
@@ -180,16 +236,14 @@ pub fn install_package(
         );
     }
 
-    // 9. Verify SHA256
-    if let Some(ref expected_sha) = artifact_sha256 {
-        if options.verbose {
-            println!("{} Verifying integrity...", console::style("🔒").cyan());
-        }
-        integrity::verify_and_report(&cache_file, expected_sha, &lock_key)?;
-    }
+    // 8. Extract to staging dir on same volume as install target
+    let parent_dir = install_dir
+        .parent()
+        .unwrap_or(options.root);
+    std::fs::create_dir_all(parent_dir)?;
+    let tmp_dir = tempfile::tempdir_in(parent_dir)
+        .context("Failed to create staging directory")?;
 
-    // 10. Extract to temp, then atomic move
-    let tmp_dir = tempfile::tempdir()?;
     let extract_config = ExtractConfig {
         archive_root: resolved.artifact.archive_root.clone(),
         include: resolved.artifact.include.clone(),
@@ -204,7 +258,8 @@ pub fn install_package(
         );
     }
 
-    let extract_result = extract::extract_archive(&cache_file, tmp_dir.path(), &extract_config)?;
+    let extract_result =
+        extract::extract_archive(&cache_file, tmp_dir.path(), &extract_config, archive_format)?;
 
     // Validate executable exists for plugins
     if pkg.package_type == PackageType::Plugin {
@@ -212,7 +267,8 @@ pub fn install_package(
             let expected_path = tmp_dir.path().join(exe_path);
             if !expected_path.exists() {
                 // Try without extension (cross-platform)
-                let expected_path_no_ext = tmp_dir.path().join(exe_path.trim_end_matches(".exe"));
+                let expected_path_no_ext =
+                    tmp_dir.path().join(exe_path.trim_end_matches(".exe"));
                 if !expected_path_no_ext.exists() {
                     // Check if any file starts with nu_plugin_
                     let has_plugin = extract_result.files.iter().any(|f| {
@@ -245,17 +301,40 @@ pub fn install_package(
         }
     }
 
-    // Atomic move from temp to final location
-    if install_dir.exists() {
+    // 9. Snapshot lockfile before mutation
+    if !lockfile.is_empty() {
+        lockfile.snapshot(options.root)?;
+    }
+
+    // 10. Atomic move from staging to final location
+    // If --force, don't delete — create a new path (immutable)
+    if install_dir.exists() && !options.force {
+        // Already exists and not force — this shouldn't happen with immutable paths
+        // but handle gracefully
         std::fs::remove_dir_all(&install_dir)?;
     }
     if let Some(parent) = install_dir.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    if install_dir.exists() {
+        // --force with existing dir: remove and replace
+        std::fs::remove_dir_all(&install_dir)?;
+    }
     std::fs::rename(tmp_dir.path(), &install_dir)?;
 
-    // 12. Write lockfile entry
+    // 11. Write lockfile entry with provenance
     let installed_at = format_timestamp();
+    let payload_rel_path = format!(
+        "packages/{}/{}/{}/{}/{}",
+        pkg_type_dir,
+        id.owner,
+        id.name,
+        version_dir,
+        ""
+    )
+    .trim_end_matches('/')
+    .to_string();
+
     let entry = LockfileEntry {
         version: version_str.clone(),
         package_type: pkg.package_type.to_string(),
@@ -269,16 +348,17 @@ pub fn install_package(
         entry: resolved.artifact.entry.clone(),
         installed_at,
         nu_version_at_install: Some(options.nu_version.version.clone()),
-        activated: false, // Phase 3 will handle activation
-        registry_url: None,
-        registry_revision: None,
-        index_sha256: None,
-        signing_key_fingerprint: None,
+        activated: false,
+        registry_url: Some(format!("registry:{}", verified.registry_name)),
+        registry_revision: verified.index.registry_revision.clone(),
+        index_sha256: Some(verified.index_sha256),
+        signing_key_fingerprint: verified.signing_key_fingerprint,
         git_url: None,
         git_rev: None,
         cargo_name: None,
         cargo_lock_sha256: None,
         built_sha256: None,
+        payload_path: payload_rel_path,
     };
 
     lockfile.packages.insert(lock_key.clone(), entry);
@@ -287,7 +367,7 @@ pub fn install_package(
     lockfile.platform = options.platform.triple.clone();
     lockfile.save(options.root)?;
 
-    // 13. Print success
+    // 12. Print success
     println!(
         "{} Installed {}@{} to {}",
         console::style("✓").green(),
@@ -305,33 +385,7 @@ pub fn install_package(
     })
 }
 
-/// Compute the install path for a package
-fn compute_install_path(
-    root: &PathBuf,
-    package_type: &PackageType,
-    id: &ScopedId,
-    version: &str,
-    artifact_url: &str,
-) -> PathBuf {
-    let short_hash = compute_short_hash(artifact_url);
-    let version_dir = format!("{version}-{short_hash}");
-    root.join("packages")
-        .join(package_type.dir_name())
-        .join(&id.owner)
-        .join(&id.name)
-        .join(version_dir)
-}
-
-/// Compute first 8 chars of SHA256 of input
-fn compute_short_hash(input: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let result = hasher.finalize();
-    hex::encode(result)[..8].to_string()
-}
-
-/// Format current timestamp as ISO 8601
+/// Format current timestamp
 fn format_timestamp() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -343,37 +397,6 @@ fn format_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn compute_short_hash_deterministic() {
-        let h1 = compute_short_hash("https://example.com/file.zip");
-        let h2 = compute_short_hash("https://example.com/file.zip");
-        assert_eq!(h1, h2);
-        assert_eq!(h1.len(), 8);
-    }
-
-    #[test]
-    fn compute_short_hash_unique() {
-        let h1 = compute_short_hash("https://example.com/file1.zip");
-        let h2 = compute_short_hash("https://example.com/file2.zip");
-        assert_ne!(h1, h2);
-    }
-
-    #[test]
-    fn compute_install_path_correct() {
-        let root = PathBuf::from("/tmp/numan");
-        let id = ScopedId::new("test", "plugin");
-        let path = compute_install_path(
-            &root,
-            &PackageType::Plugin,
-            &id,
-            "1.0.0",
-            "https://example.com/file.zip",
-        );
-        let path_str = path.to_string_lossy();
-        assert!(path_str.contains("plugins") && path_str.contains("test") && path_str.contains("plugin"));
-        assert!(path_str.contains("1.0.0-"));
-    }
 
     #[test]
     fn format_timestamp_works() {

@@ -5,6 +5,28 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 pub fn download_file(url: &str, dest: &Path) -> Result<()> {
+    // Handle local file paths (for testing and local installs)
+    if url.starts_with("file://") || (!url.contains("://") && std::path::Path::new(url).exists()) {
+        let src = if url.starts_with("file://") {
+            // Strip file:// prefix
+            #[cfg(windows)]
+            let path = url.strip_prefix("file://").unwrap_or(url);
+            #[cfg(not(windows))]
+            let path = url.strip_prefix("file://").unwrap_or(url);
+            std::path::PathBuf::from(path)
+        } else {
+            std::path::PathBuf::from(url)
+        };
+
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(&src, dest)
+            .with_context(|| format!("Failed to copy {} to {}", src.display(), dest.display()))?;
+        return Ok(());
+    }
+
+    // HTTP/HTTPS download
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
@@ -27,6 +49,9 @@ pub fn download_file(url: &str, dest: &Path) -> Result<()> {
             .unwrap(),
     );
 
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let mut file = File::create(dest)?;
     let mut reader = response;
     let mut buffer = vec![0u8; 8192];

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::core::nu_version::NuVersion;
 use crate::core::package::{Package, PackageType, VersionEntry};
@@ -62,7 +62,7 @@ impl<'a> Resolver<'a> {
         Ok(candidates[0])
     }
 
-    fn is_compatible(&self, version: &VersionEntry) -> bool {
+    pub fn is_compatible(&self, version: &VersionEntry) -> bool {
         // Check Nu version constraint
         if !self.nu_version.matches_constraint(&version.nu_version) {
             return false;
@@ -75,6 +75,57 @@ impl<'a> Resolver<'a> {
 
         // For modules/scripts/completions, just need an artifact
         true
+    }
+
+    /// Resolve an exact version with compatibility validation.
+    /// Returns an error if the version exists but is not compatible.
+    pub fn resolve_exact<'b>(
+        &self,
+        package: &'b Package,
+        target_version: &semver::Version,
+    ) -> Result<&'b VersionEntry> {
+        let entry = package
+            .versions
+            .iter()
+            .find(|v| v.version == *target_version)
+            .with_context(|| {
+                let available: Vec<String> = package
+                    .versions
+                    .iter()
+                    .map(|v| v.version.to_string())
+                    .collect();
+                format!(
+                    "Version {target_version} not available for '{}'. Available: {}",
+                    package.id,
+                    available.join(", ")
+                )
+            })?;
+
+        // Validate compatibility even for explicit versions
+        if !self.is_compatible(entry) {
+            let mut reasons = Vec::new();
+            if !self.nu_version.matches_constraint(&entry.nu_version) {
+                reasons.push(format!(
+                    "Nu version {} does not satisfy constraint '{}'",
+                    self.nu_version.version, entry.nu_version
+                ));
+            }
+            if entry.artifact.kind == "binary"
+                && !entry.artifact.targets.contains_key(&self.platform.triple)
+            {
+                reasons.push(format!(
+                    "No binary for target '{}'",
+                    self.platform.triple
+                ));
+            }
+            bail!(
+                "Version {target_version} of '{}' is not compatible with your system: {}",
+                package.id,
+                reasons.join("; ")
+            );
+        }
+
+        Ok(entry)
     }
 }
 
@@ -182,5 +233,58 @@ mod tests {
         let resolver = Resolver::new(&platform, &nu);
         let pkg = test_plugin();
         assert!(resolver.resolve(&pkg).is_err());
+    }
+
+    #[test]
+    fn resolve_exact_compatible() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.113.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        let v = semver::Version::new(2, 0, 0);
+        let resolved = resolver.resolve_exact(&pkg, &v).unwrap();
+        assert_eq!(resolved.version, v);
+    }
+
+    #[test]
+    fn resolve_exact_incompatible_nu() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.112.5").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        // v2.0.0 requires >=0.113.0, but we have 0.112.5
+        let v = semver::Version::new(2, 0, 0);
+        let result = resolver.resolve_exact(&pkg, &v);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not compatible"));
+    }
+
+    #[test]
+    fn resolve_exact_incompatible_target() {
+        let platform = linux_platform(); // linux
+        let nu = NuVersion::parse("0.112.5").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        // v1.0.0 only has linux target, but let's test if we can construct a version without it
+        // Actually v1.0.0 has both targets. Let's test with a missing target.
+        // We'll test this with a different package.
+        let mut pkg_no_target = pkg.clone();
+        pkg_no_target.versions[1].artifact.targets.clear(); // v1.0.0 now has no targets
+        let v = semver::Version::new(1, 0, 0);
+        let result = resolver.resolve_exact(&pkg_no_target, &v);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("No binary"));
+    }
+
+    #[test]
+    fn resolve_exact_not_found() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.113.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        let v = semver::Version::new(99, 0, 0);
+        assert!(resolver.resolve_exact(&pkg, &v).is_err());
     }
 }

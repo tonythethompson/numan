@@ -1,11 +1,51 @@
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
+use globset::{Glob, GlobSetBuilder};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::Archive as TarArchive;
 use zip::ZipArchive;
+
+/// Maximum number of files we'll extract from a single archive.
+const MAX_FILE_COUNT: usize = 10_000;
+/// Maximum uncompressed size (100 MB).
+const MAX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
+/// Maximum compression ratio (100:1) to guard on zip bombs.
+const MAX_COMPRESSION_RATIO: u64 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveFormat {
+    Zip,
+    TarGz,
+    Tar,
+}
+
+impl ArchiveFormat {
+    /// Detect format from a URL or filename. Does NOT inspect file contents.
+    pub fn from_url(url: &str) -> Option<Self> {
+        let lower = url.to_lowercase();
+        if lower.ends_with(".zip") {
+            Some(ArchiveFormat::Zip)
+        } else if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+            Some(ArchiveFormat::TarGz)
+        } else if lower.ends_with(".tar") {
+            Some(ArchiveFormat::Tar)
+        } else {
+            None
+        }
+    }
+
+    /// Return the canonical file extension for this format.
+    pub fn extension(&self) -> &'static str {
+        match self {
+            ArchiveFormat::Zip => "zip",
+            ArchiveFormat::TarGz => "tar.gz",
+            ArchiveFormat::Tar => "tar",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ExtractConfig {
@@ -30,41 +70,29 @@ pub struct ExtractResult {
     pub entry_found: bool,
 }
 
+/// Extract an archive. `format` must be provided explicitly — never inferred from the filename.
 pub fn extract_archive(
     archive_path: &Path,
     dest_dir: &Path,
     config: &ExtractConfig,
+    format: ArchiveFormat,
 ) -> Result<ExtractResult> {
-    let extension = archive_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    let result = match extension {
-        "zip" => extract_zip(archive_path, dest_dir, config),
-        "gz" => {
-            // Check if it's .tar.gz
-            let stem = archive_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
-            if stem.ends_with(".tar") {
-                extract_tar_gz(archive_path, dest_dir, config)
-            } else {
-                extract_tar_gz(archive_path, dest_dir, config)
-            }
+    match format {
+        ArchiveFormat::Zip => extract_zip(archive_path, dest_dir, config),
+        ArchiveFormat::TarGz => {
+            let file = File::open(archive_path)
+                .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
+            let decoder = GzDecoder::new(file);
+            let mut archive = TarArchive::new(decoder);
+            extract_tar_inner(&mut archive, dest_dir, config)
         }
-        "tar" => extract_tar(archive_path, dest_dir, config),
-        "xz" => {
-            // Check for .tar.xz
-            extract_tar_xz(archive_path, dest_dir, config)
+        ArchiveFormat::Tar => {
+            let file = File::open(archive_path)
+                .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
+            let mut archive = TarArchive::new(file);
+            extract_tar_inner(&mut archive, dest_dir, config)
         }
-        _ => bail!(
-            "Unsupported archive format: .{extension}. Supported: .zip, .tar.gz, .tar.xz"
-        ),
-    };
-
-    result
+    }
 }
 
 fn extract_zip(
@@ -79,41 +107,65 @@ fn extract_zip(
 
     let mut extracted_files = Vec::new();
     let mut entry_found = false;
+    let mut file_count: usize = 0;
+    let mut total_bytes: u64 = 0;
     let archive_root = config.archive_root.as_deref();
+    let include_checker = build_include_checker(config.include.as_deref())?;
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| anyhow::anyhow!("Zip entry error: {e}"))?;
-        let entry_path = entry
-            .mangled_name()
-            .to_owned();
+
+        // Validate the raw name BEFORE any mangling
+        let raw_name = entry.name().to_owned();
+        if has_path_traversal_str(&raw_name) {
+            bail!("Path traversal detected in archive: {raw_name}");
+        }
 
         // Skip directories
         if entry.is_dir() {
             continue;
         }
 
+        let entry_path = entry.mangled_name().to_owned();
+
         // Get relative path (strip archive_root if present)
         let relative_path = if let Some(root) = archive_root {
             strip_leading_component(&entry_path, root)
         } else {
-            strip_first_component_if_single(&entry_path)
+            Some(entry_path.clone())
         };
 
         let relative_path = match relative_path {
             Some(p) => p,
-            None => continue, // Skip if path doesn't match archive_root
+            None => continue,
         };
 
         // Check include filter
-        if !include_matches(&relative_path, config.include.as_deref()) {
+        if !include_checker.matches(&relative_path) {
             continue;
         }
 
-        // Validate path (no traversal)
+        // Validate resolved path (no traversal after stripping root)
         if has_path_traversal(&relative_path) {
             bail!(
                 "Path traversal detected in archive: {}",
-                entry_path.display()
+                raw_name
+            );
+        }
+
+        // Archive bomb limits
+        file_count += 1;
+        if file_count > MAX_FILE_COUNT {
+            bail!(
+                "Archive contains more than {MAX_FILE_COUNT} files. \
+                 This may be an archive bomb."
+            );
+        }
+        total_bytes += entry.size();
+        if total_bytes > MAX_UNCOMPRESSED_BYTES {
+            bail!(
+                "Archive uncompressed size exceeds {MAX_UNCOMPRESSED_BYTES} bytes. \
+                 This may be an archive bomb."
             );
         }
 
@@ -128,12 +180,12 @@ fn extract_zip(
         let mut contents = Vec::new();
         entry
             .read_to_end(&mut contents)
-            .with_context(|| format!("Failed to read zip entry: {}", entry_path.display()))?;
+            .with_context(|| format!("Failed to read zip entry: {raw_name}"))?;
         std::fs::write(&out_path, contents)?;
 
-        // Check entry point
-        if let Some(ref entry_name) = config.entry {
-            if relative_path.file_name().and_then(|f| f.to_str()) == Some(entry_name) {
+        // Check entry point — compare against full relative path
+        if let Some(ref entry_pattern) = config.entry {
+            if relative_path_matches(&relative_path, entry_pattern) {
                 entry_found = true;
             }
         }
@@ -147,45 +199,6 @@ fn extract_zip(
     })
 }
 
-fn extract_tar_gz(
-    archive_path: &Path,
-    dest_dir: &Path,
-    config: &ExtractConfig,
-) -> Result<ExtractResult> {
-    let file = File::open(archive_path)
-        .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
-    let decoder = GzDecoder::new(file);
-    let mut archive = TarArchive::new(decoder);
-
-    extract_tar_inner(&mut archive, dest_dir, config)
-}
-
-fn extract_tar(
-    archive_path: &Path,
-    dest_dir: &Path,
-    config: &ExtractConfig,
-) -> Result<ExtractResult> {
-    let file = File::open(archive_path)
-        .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
-    let mut archive = TarArchive::new(file);
-
-    extract_tar_inner(&mut archive, dest_dir, config)
-}
-
-fn extract_tar_xz(
-    archive_path: &Path,
-    _dest_dir: &Path,
-    _config: &ExtractConfig,
-) -> Result<ExtractResult> {
-    // xz decompression - use a basic approach
-    // For now, we'll error and ask user to convert to tar.gz
-    // Full xz support requires the xz2 crate which isn't in dependencies
-    bail!(
-        "xz archives not yet supported. Please convert to .tar.gz or .zip format. Got: {}",
-        archive_path.display()
-    )
-}
-
 fn extract_tar_inner<R: Read>(
     archive: &mut TarArchive<R>,
     dest_dir: &Path,
@@ -193,7 +206,10 @@ fn extract_tar_inner<R: Read>(
 ) -> Result<ExtractResult> {
     let mut extracted_files = Vec::new();
     let mut entry_found = false;
+    let mut file_count: usize = 0;
+    let mut total_bytes: u64 = 0;
     let archive_root = config.archive_root.as_deref();
+    let include_checker = build_include_checker(config.include.as_deref())?;
 
     for entry in archive.entries().map_err(|e| anyhow::anyhow!("Failed to read tar entries: {e}"))? {
         let mut entry = entry.map_err(|e| anyhow::anyhow!("Tar entry error: {e}"))?;
@@ -202,16 +218,35 @@ fn extract_tar_inner<R: Read>(
             .map_err(|e| anyhow::anyhow!("Failed to get tar entry path: {e}"))?
             .into_owned();
 
-        // Skip directories
-        if entry.header().entry_type() == tar::EntryType::Directory {
-            continue;
+        let entry_type = entry.header().entry_type();
+
+        // Skip directories and special entries
+        match entry_type {
+            tar::EntryType::Directory => continue,
+            tar::EntryType::Regular | tar::EntryType::Continuous => {}
+            tar::EntryType::Symlink
+            | tar::EntryType::Link
+            | tar::EntryType::Char
+            | tar::EntryType::Block
+            | tar::EntryType::Fifo => {
+                bail!(
+                    "Refusing to extract non-regular tar entry type {:?}: {}",
+                    entry_type,
+                    entry_path.display()
+                );
+            }
+            _ => {
+                // GNULongLink, GNULongName, GNUSparse, XHeader, XGlobalHeader
+                // These are metadata entries, skip them
+                continue;
+            }
         }
 
         // Get relative path (strip archive_root if present)
         let relative_path = if let Some(root) = archive_root {
             strip_leading_component(&entry_path, root)
         } else {
-            strip_first_component_if_single(&entry_path)
+            Some(entry_path.clone())
         };
 
         let relative_path = match relative_path {
@@ -219,16 +254,32 @@ fn extract_tar_inner<R: Read>(
             None => continue,
         };
 
-        // Check include filter
-        if !include_matches(&relative_path, config.include.as_deref()) {
-            continue;
-        }
-
         // Validate path (no traversal)
         if has_path_traversal(&relative_path) {
             bail!(
                 "Path traversal detected in archive: {}",
                 entry_path.display()
+            );
+        }
+
+        // Check include filter
+        if !include_checker.matches(&relative_path) {
+            continue;
+        }
+
+        // Archive bomb limits
+        file_count += 1;
+        if file_count > MAX_FILE_COUNT {
+            bail!(
+                "Archive contains more than {MAX_FILE_COUNT} files. \
+                 This may be an archive bomb."
+            );
+        }
+        total_bytes += entry.header().size().unwrap_or(0);
+        if total_bytes > MAX_UNCOMPRESSED_BYTES {
+            bail!(
+                "Archive uncompressed size exceeds {MAX_UNCOMPRESSED_BYTES} bytes. \
+                 This may be an archive bomb."
             );
         }
 
@@ -244,9 +295,9 @@ fn extract_tar_inner<R: Read>(
             .unpack(&out_path)
             .with_context(|| format!("Failed to extract: {}", entry_path.display()))?;
 
-        // Check entry point
-        if let Some(ref entry_name) = config.entry {
-            if relative_path.file_name().and_then(|f| f.to_str()) == Some(entry_name) {
+        // Check entry point — compare against full relative path
+        if let Some(ref entry_pattern) = config.entry {
+            if relative_path_matches(&relative_path, entry_pattern) {
                 entry_found = true;
             }
         }
@@ -258,6 +309,74 @@ fn extract_tar_inner<R: Read>(
         files: extracted_files,
         entry_found,
     })
+}
+
+/// Build a glob-based include checker from patterns.
+/// Patterns use standard glob syntax: `*.nu`, `git/**`, `bin/*`, etc.
+fn build_include_checker(patterns: Option<&[String]>) -> Result<IncludeChecker> {
+    let patterns = match patterns {
+        Some(p) if !p.is_empty() => p.to_vec(),
+        _ => return Ok(IncludeChecker::PassAll),
+    };
+
+    let mut builder = GlobSetBuilder::new();
+    for pattern in &patterns {
+        // Normalize: interpret `*` as a glob on a single path component
+        // and `**` as crossing directory boundaries
+        let glob_str = if pattern.contains('/') || pattern.contains('\\') {
+            // Path-aware pattern — normalize separators
+            pattern.replace('\\', "/")
+        } else {
+            // Simple filename pattern
+            pattern.clone()
+        };
+
+        let glob = Glob::new(&glob_str)
+            .with_context(|| format!("Invalid glob pattern: '{pattern}'"))?;
+        builder.add(glob);
+    }
+
+    let glob_set = builder.build()
+        .context("Failed to compile glob patterns")?;
+    Ok(IncludeChecker::Glob(glob_set))
+}
+
+enum IncludeChecker {
+    PassAll,
+    Glob(globset::GlobSet),
+}
+
+impl IncludeChecker {
+    fn matches(&self, path: &Path) -> bool {
+        match self {
+            IncludeChecker::PassAll => true,
+            IncludeChecker::Glob(glob) => {
+                // Normalize the path to use forward slashes for matching
+                let path_str = path.to_string_lossy().replace('\\', "/");
+                glob.is_match(&path_str)
+            }
+        }
+    }
+}
+
+/// Check if a resolved entry path matches an entry pattern.
+/// Compares against the full normalized relative path, not just the basename.
+fn relative_path_matches(path: &Path, pattern: &str) -> bool {
+    let path_str = path.to_string_lossy().replace('\\', "/");
+    let pattern_norm = pattern.replace('\\', "/");
+
+    // Exact match
+    if path_str == pattern_norm {
+        return true;
+    }
+
+    // Glob match
+    if let Ok(glob) = Glob::new(&pattern_norm) {
+        let compiled = glob.compile_matcher();
+        return compiled.is_match(&path_str);
+    }
+
+    false
 }
 
 /// Strip the archive_root prefix from a path
@@ -280,21 +399,19 @@ fn strip_leading_component(path: &Path, root: &str) -> Option<PathBuf> {
     Some(components[1..].iter().collect())
 }
 
-/// Strip first component if it looks like a single package directory
-fn strip_first_component_if_single(path: &Path) -> Option<PathBuf> {
-    let components: Vec<&std::ffi::OsStr> = path.components().map(|c| c.as_os_str()).collect();
-    if components.len() <= 1 {
-        return Some(path.to_path_buf());
+/// Check if a path string contains dangerous traversal.
+/// Only rejects leading `..` or absolute paths — inner `..` is fine.
+fn has_path_traversal_str(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    // Reject leading ..
+    if normalized.starts_with("../") || normalized == ".." {
+        return true;
     }
-
-    // Check if it's a directory-like first component (common in archives)
-    let first = components[0].to_str().unwrap_or("");
-    if first.contains('-') || first.contains('_') || first.ends_with(".zip") || first.ends_with(".tar") {
-        // Looks like a package directory, strip it
-        Some(components[1..].iter().collect())
-    } else {
-        Some(path.to_path_buf())
+    // Reject absolute paths
+    if normalized.starts_with('/') {
+        return true;
     }
+    false
 }
 
 /// Check if a path contains traversal components
@@ -306,51 +423,6 @@ fn has_path_traversal(path: &Path) -> bool {
             _ => {}
         }
     }
-    false
-}
-
-/// Check if a file path matches any of the include patterns
-fn include_matches(path: &Path, patterns: Option<&[String]>) -> bool {
-    let patterns = match patterns {
-        Some(p) if !p.is_empty() => p,
-        _ => return true, // No filter = include all
-    };
-
-    let path_str = path.to_string_lossy().to_lowercase();
-    let file_name = path
-        .file_name()
-        .map(|f| f.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-
-    for pattern in patterns {
-        let pattern_lower = pattern.to_lowercase();
-
-        // Simple glob matching
-        if pattern_lower == "*" {
-            return true;
-        }
-
-        if pattern_lower.starts_with("*.") {
-            // Extension match: *.nu, *.exe, etc.
-            let ext = &pattern_lower[1..]; // e.g., ".nu"
-            if path_str.ends_with(ext) {
-                return true;
-            }
-        } else if pattern_lower.ends_with("/*") {
-            // Directory prefix match: nu_plugin_*/*
-            let prefix = &pattern_lower[..pattern_lower.len() - 2];
-            if file_name.starts_with(prefix) {
-                return true;
-            }
-        } else if file_name == pattern_lower {
-            // Exact filename match
-            return true;
-        } else if path_str.contains(&pattern_lower) {
-            // Substring match
-            return true;
-        }
-    }
-
     false
 }
 
@@ -407,7 +479,13 @@ mod tests {
         let dest = tmp.path().join("extracted");
         std::fs::create_dir(&dest).unwrap();
 
-        let result = extract_archive(&zip_path, &dest, &ExtractConfig::default()).unwrap();
+        let result = extract_archive(
+            &zip_path,
+            &dest,
+            &ExtractConfig::default(),
+            ArchiveFormat::Zip,
+        )
+        .unwrap();
         assert_eq!(result.files.len(), 2);
         assert!(dest.join("test.txt").exists());
         assert!(dest.join("subdir/nested.txt").exists());
@@ -433,7 +511,8 @@ mod tests {
             entry: None,
         };
 
-        let result = extract_archive(&zip_path, &dest, &config).unwrap();
+        let result =
+            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert_eq!(result.files.len(), 2);
         assert!(dest.join("file.txt").exists());
         assert!(dest.join("inner/other.txt").exists());
@@ -460,7 +539,8 @@ mod tests {
             entry: None,
         };
 
-        let result = extract_archive(&zip_path, &dest, &config).unwrap();
+        let result =
+            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert_eq!(result.files.len(), 2);
         assert!(dest.join("main.nu").exists());
         assert!(dest.join("lib.nu").exists());
@@ -468,12 +548,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_zip_with_entry_point() {
+    fn extract_zip_with_path_include_filter() {
         let tmp = TempDir::new().unwrap();
         let zip_path = create_test_zip(
             tmp.path(),
             &[
-                ("main.nu", b"main script"),
+                ("git/mod.nu", b"module"),
+                ("git/README.md", b"readme"),
                 ("other.nu", b"other"),
             ],
         );
@@ -483,24 +564,72 @@ mod tests {
 
         let config = ExtractConfig {
             archive_root: None,
-            include: None,
-            entry: Some("main.nu".to_string()),
+            include: Some(vec!["git/**".to_string()]),
+            entry: None,
         };
 
-        let result = extract_archive(&zip_path, &dest, &config).unwrap();
+        let result =
+            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
+        assert_eq!(result.files.len(), 2);
+        assert!(dest.join("git/mod.nu").exists());
+        assert!(dest.join("git/README.md").exists());
+        assert!(!dest.join("other.nu").exists());
+    }
+
+    #[test]
+    fn extract_zip_with_entry_full_path() {
+        let tmp = TempDir::new().unwrap();
+        let zip_path = create_test_zip(
+            tmp.path(),
+            &[
+                ("git/mod.nu", b"module"),
+                ("git/other.nu", b"other"),
+            ],
+        );
+
+        let dest = tmp.path().join("extracted");
+        std::fs::create_dir(&dest).unwrap();
+
+        let config = ExtractConfig {
+            archive_root: None,
+            include: None,
+            entry: Some("git/mod.nu".to_string()),
+        };
+
+        let result =
+            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert!(result.entry_found);
     }
 
     #[test]
-    fn extract_zip_rejects_traversal() {
+    fn extract_zip_rejects_traversal_raw_name() {
         let tmp = TempDir::new().unwrap();
-        // The zip crate's mangled_name() sanitizes `..` components,
-        // so we test at the path validation level instead
-        let path_with_traversal = std::path::PathBuf::from("../../etc/passwd");
-        assert!(has_path_traversal(&path_with_traversal));
 
-        let safe_path = std::path::PathBuf::from("subdir/file.txt");
-        assert!(!has_path_traversal(&safe_path));
+        // Build a zip with a traversal entry manually
+        let zip_path = tmp.path().join("traversal.zip");
+        {
+            let file = File::create(&zip_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            zip.start_file(
+                "../../etc/passwd",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(b"bad").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let dest = tmp.path().join("extracted");
+        std::fs::create_dir(&dest).unwrap();
+
+        let result =
+            extract_archive(&zip_path, &dest, &ExtractConfig::default(), ArchiveFormat::Zip);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Path traversal"),
+            "Expected path traversal error, got: {err}"
+        );
     }
 
     #[test]
@@ -519,16 +648,25 @@ mod tests {
 
     #[test]
     fn include_matches_extension() {
-        let path = PathBuf::from("script.nu");
-        assert!(include_matches(&path, Some(&["*.nu".to_string()])));
-        assert!(!include_matches(&path, Some(&["*.rs".to_string()])));
+        let checker =
+            build_include_checker(Some(&["*.nu".to_string()])).unwrap();
+        assert!(checker.matches(&PathBuf::from("script.nu")));
+        assert!(!checker.matches(&PathBuf::from("script.rs")));
+    }
+
+    #[test]
+    fn include_matches_path_glob() {
+        let checker =
+            build_include_checker(Some(&["git/**".to_string()])).unwrap();
+        assert!(checker.matches(&PathBuf::from("git/mod.nu")));
+        assert!(checker.matches(&PathBuf::from("git/README.md")));
+        assert!(!checker.matches(&PathBuf::from("other.nu")));
     }
 
     #[test]
     fn include_matches_no_filter() {
-        let path = PathBuf::from("anything.txt");
-        assert!(include_matches(&path, None));
-        assert!(include_matches(&path, Some(&[])));
+        let checker = build_include_checker(None).unwrap();
+        assert!(checker.matches(&PathBuf::from("anything.txt")));
     }
 
     #[test]
@@ -541,6 +679,57 @@ mod tests {
     }
 
     #[test]
+    fn has_path_traversal_str_works() {
+        assert!(has_path_traversal_str("../../etc/passwd"));
+        assert!(has_path_traversal_str("../foo"));
+        assert!(has_path_traversal_str(".."));
+        assert!(has_path_traversal_str("/etc/passwd"));
+        assert!(!has_path_traversal_str("foo/bar"));
+        // Inner .. is fine — only leading/absolute traversal is dangerous
+        assert!(!has_path_traversal_str("foo/../bar/baz"));
+    }
+
+    #[test]
+    fn relative_path_matches_full_path() {
+        assert!(relative_path_matches(
+            &PathBuf::from("git/mod.nu"),
+            "git/mod.nu"
+        ));
+        assert!(relative_path_matches(
+            &PathBuf::from("git/mod.nu"),
+            "git/*.nu"
+        ));
+        assert!(!relative_path_matches(
+            &PathBuf::from("other/mod.nu"),
+            "git/mod.nu"
+        ));
+    }
+
+    #[test]
+    fn archive_format_from_url() {
+        assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.zip"),
+            Some(ArchiveFormat::Zip)
+        );
+        assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.tar.gz"),
+            Some(ArchiveFormat::TarGz)
+        );
+        assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.tgz"),
+            Some(ArchiveFormat::TarGz)
+        );
+        assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.tar"),
+            Some(ArchiveFormat::Tar)
+        );
+        assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.bin"),
+            None
+        );
+    }
+
+    #[test]
     fn compute_file_sha256_deterministic() {
         let tmp = TempDir::new().unwrap();
         let file_path = tmp.path().join("test.bin");
@@ -549,6 +738,6 @@ mod tests {
         let hash1 = compute_file_sha256(&file_path).unwrap();
         let hash2 = compute_file_sha256(&file_path).unwrap();
         assert_eq!(hash1, hash2);
-        assert_eq!(hash1.len(), 64); // SHA256 hex string
+        assert_eq!(hash1.len(), 64);
     }
 }

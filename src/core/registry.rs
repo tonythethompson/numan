@@ -118,6 +118,19 @@ impl RegistryManager {
         }
         "official".to_string()
     }
+
+    /// Get the default registry name (public).
+    pub fn default_registry_name(&self) -> String {
+        self.default_registry()
+    }
+
+    /// Get the signing key fingerprint for a registry, if a trusted key exists.
+    pub fn signing_key_fingerprint(&self, registry_name: &str) -> Option<String> {
+        self.trust
+            .keys
+            .get(registry_name)
+            .map(|k| k.fingerprint.clone())
+    }
 }
 
 #[cfg(test)]

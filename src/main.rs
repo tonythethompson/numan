@@ -1,13 +1,9 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod cmd;
-mod config;
-mod core;
-mod install;
-mod nu;
-mod nupm_compat;
-mod state;
+use numan_cli::cmd;
+use numan_cli::config;
+use numan_cli::core;
 
 #[derive(Parser)]
 #[command(

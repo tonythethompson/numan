@@ -56,6 +56,17 @@ pub struct LockfileEntry {
     pub cargo_lock_sha256: Option<String>,
     #[serde(default)]
     pub built_sha256: Option<String>,
+    /// Relative path to the installed payload directory from the numan root.
+    /// E.g., "packages/plugins/fdncred/file/0.25.2-abc12345"
+    #[serde(default)]
+    pub payload_path: String,
+}
+
+impl LockfileEntry {
+    /// Returns the relative payload path for this entry.
+    pub fn payload_path(&self) -> &str {
+        &self.payload_path
+    }
 }
 
 impl Lockfile {
@@ -146,7 +157,7 @@ mod tests {
                 installed_at: "2026-06-27T12:00:00Z".to_string(),
                 nu_version_at_install: Some("0.113.1".to_string()),
                 activated: false,
-                registry_url: Some("https://github.com/numan/numan-registry".to_string()),
+                registry_url: Some("registry:official".to_string()),
                 registry_revision: Some("abc123".to_string()),
                 index_sha256: Some("def456".to_string()),
                 signing_key_fingerprint: Some("sha256:789".to_string()),
@@ -155,12 +166,14 @@ mod tests {
                 cargo_name: None,
                 cargo_lock_sha256: None,
                 built_sha256: None,
+                payload_path: "packages/plugins/test/pkg/1.0.0-abc12345".to_string(),
             },
         );
 
         let json = serde_json::to_string_pretty(&lock).unwrap();
         let parsed: Lockfile = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.packages.len(), 1);
-        assert!(parsed.packages.contains_key("test/pkg"));
+        let entry = parsed.packages.get("test/pkg").unwrap();
+        assert_eq!(entry.payload_path, "packages/plugins/test/pkg/1.0.0-abc12345");
     }
 }
