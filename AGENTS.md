@@ -13,7 +13,7 @@ cargo run -- search <query>
 cargo run -- info <owner/name>
 cargo run -- list
 
-# Test (all 38 tests)
+# Test (all 106 tests)
 cargo test
 
 # Test single module
@@ -21,6 +21,7 @@ cargo test core::platform
 cargo test core::package
 cargo test core::resolve
 cargo test state::lockfile
+cargo test cmd::activate
 ```
 
 ## Project Structure
@@ -41,12 +42,17 @@ src/
     info.rs            — Info subcommand
     list.rs            — List subcommand
     registry.rs        — Registry management subcommands
+    activate.rs        — Plugin activation (Phase 3)
   install/
     download.rs        — HTTP download with progress
+    transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
   state/
-    lockfile.rs        — Lockfile with registry fields, snapshot support
+    lockfile.rs        — Lockfile with PluginActivation per-Nu-identity record
+    journal.rs         — Pending-activation journal for crash recovery
   nu/
-    paths.rs           — Nu path cache (detect, load, save)
+    paths.rs           — Nu path cache (detect, load, save, validate_drift)
+  util/
+    atomic.rs          — write_json_atomic helper (tempfile+persist)
   nupm_compat/         — nupm interoperability adapter (future)
 tests/                 — Integration tests
 ```
@@ -61,6 +67,12 @@ tests/                 — Integration tests
 - **Platform detection**: `#[cfg(target_env)]` from binary's build target, not `std::env::consts`
 - **Trust**: Ed25519 keys, `--key <base64-public-key>` for onboarding
 - **Immutability**: `packages/<type>/<scoped-name>/<version-hash>/` paths, never overwrite
+- **Activate testability**: `execute_with_registrar(args, root, registrar)` is the public entry point; inject a fake registrar in tests — never spawn a real Nu binary in unit tests
+- **Nu invocation**: paths only via env vars (`NUMAN_PLUGIN_BINARY`, `NUMAN_PLUGIN_CONFIG`); the Nu program string is a compile-time constant with no runtime interpolation
+- **Activation scope**: `PluginActivation` struct stores `(nu_executable_sha256, nu_version, plugin_registry_path)`; a plugin is "active" only when all three match the current `NuPaths` — bare `bool` would go stale after `numan init --refresh`
+- **Journal**: `state/pending-activation.json` written as all-`prepared` before first registration; each entry advances to `registered` atomically before lockfile update; reconciled on next `activate` run if process is interrupted
+- **Atomic writes**: all JSON state files (lockfile, journal, nu_state/paths.json) use `write_json_atomic` (tempfile in same dir + persist) — no partial-write corruption
+- **Function signatures**: use `&Path` not `&PathBuf` in function parameters (clippy::ptr_arg is CI-enforced)
 
 ## Architecture Rules
 1. **Install is always inert** — no Nu integration, only writes to `$NUMAN_ROOT`
@@ -72,7 +84,7 @@ tests/                 — Integration tests
 ## Development Workflow
 1. Create feature branch from `main`
 2. Implement with tests
-3. `cargo test` — all 38+ tests must pass
+3. `cargo test` — all 106+ tests must pass
 4. Update AGENTS.md if structure/conventions change
 5. Open PR with description
 
@@ -83,9 +95,9 @@ tests/                 — Integration tests
 
 ## Phase Status
 - [x] Phase 1: Foundation (types, platform, config, lockfile, registry, trust, CLI skeleton)
-- [ ] Phase 2: Install transaction (download, verify, extract, lockfile write)
-- [ ] Phase 3: Activate command (plugin registration, autoload generation)
-- [ ] Phase 4: Module/script/completion install
+- [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
+- [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
+- [ ] Phase 4: Activate modules/scripts/completions (autoload generation)
 - [ ] Phase 5: Source builds, update, remove
 - [ ] Phase 6: nupm interop
 - [ ] Phase 7: Polish, CI, distribution

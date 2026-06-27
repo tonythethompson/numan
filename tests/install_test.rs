@@ -1,7 +1,9 @@
 use ed25519_dalek::{Signer, SigningKey};
-use numan_cli::core::package::{Artifact, Package, PackageType, RegistryIndex, ScopedId, TargetArtifact, VersionEntry};
-use numan_cli::core::platform::{Arch, Env, Os, Platform};
 use numan_cli::core::nu_version::NuVersion;
+use numan_cli::core::package::{
+    Artifact, Package, PackageType, RegistryIndex, ScopedId, TargetArtifact, VersionEntry,
+};
+use numan_cli::core::platform::{Arch, Env, Os, Platform};
 use numan_cli::install::transaction::{self, InstallOptions};
 use numan_cli::state::lockfile::Lockfile;
 use rand_core::OsRng;
@@ -85,7 +87,8 @@ fn integration_full_install_from_signed_registry() {
     // Setup: plugin artifact
     let artifacts_dir = root.join("artifacts");
     std::fs::create_dir_all(&artifacts_dir).unwrap();
-    let (zip_url, zip_sha) = create_plugin_zip(&artifacts_dir, "nu_plugin_test.exe", b"plugin binary");
+    let (zip_url, zip_sha) =
+        create_plugin_zip(&artifacts_dir, "nu_plugin_test.exe", b"plugin binary");
 
     // Setup: registry with the package
     let package = Package {
@@ -123,7 +126,8 @@ fn integration_full_install_from_signed_registry() {
         }],
     };
 
-    let (_index_sha, _revision) = create_signed_registry(&root, "official", vec![package], &signing_key);
+    let (_index_sha, _revision) =
+        create_signed_registry(&root, "official", vec![package], &signing_key);
 
     // Setup: config
     std::fs::write(
@@ -169,7 +173,7 @@ fn integration_full_install_from_signed_registry() {
     assert!(entry.payload_path.contains("packages/plugins/test/plugin/"));
     assert!(entry.index_sha256.is_some());
     assert!(entry.signing_key_fingerprint.is_some());
-    assert!(!entry.activated);
+    assert!(entry.activation.is_none());
 
     // Assert: second install says "already installed"
     let result2 = transaction::install_package("test/plugin", None, &options).unwrap();
@@ -221,7 +225,10 @@ fn integration_install_rejects_unsigned_registry() {
     let result = transaction::install_package("test/plugin", None, &options);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("no signature"), "Expected unsigned registry error, got: {err}");
+    assert!(
+        err.contains("no signature"),
+        "Expected unsigned registry error, got: {err}"
+    );
 }
 
 #[test]
@@ -277,7 +284,10 @@ fn integration_install_rejects_tampered_signature() {
     let result = transaction::install_package("test/plugin", None, &options);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("signature verification failed"), "Expected tampered sig error, got: {err}");
+    assert!(
+        err.contains("signature verification failed"),
+        "Expected tampered sig error, got: {err}"
+    );
 }
 
 #[test]
@@ -348,7 +358,10 @@ fn integration_resolve_exact_rejects_incompatible() {
     let result = transaction::install_package("test/plugin", Some("1.0.0"), &options);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("not compatible"), "Expected compatibility error, got: {err}");
+    assert!(
+        err.contains("not compatible"),
+        "Expected compatibility error, got: {err}"
+    );
 }
 
 #[test]
@@ -360,7 +373,8 @@ fn integration_snapshot_before_install() {
 
     let artifacts_dir = root.join("artifacts");
     std::fs::create_dir_all(&artifacts_dir).unwrap();
-    let (zip_url, zip_sha) = create_plugin_zip(&artifacts_dir, "nu_plugin_test.exe", b"plugin binary");
+    let (zip_url, zip_sha) =
+        create_plugin_zip(&artifacts_dir, "nu_plugin_test.exe", b"plugin binary");
 
     let package = Package {
         id: ScopedId::new("test", "plugin"),
@@ -421,10 +435,14 @@ fn integration_snapshot_before_install() {
 
     // First install — no snapshot (lockfile was empty)
     transaction::install_package("test/plugin", None, &options).unwrap();
-    assert!(!root.join("snapshots").exists(), "Should not snapshot from empty lockfile");
+    assert!(
+        !root.join("snapshots").exists(),
+        "Should not snapshot from empty lockfile"
+    );
 
     // Create a second package to trigger snapshot
-    let (zip_url2, zip_sha2) = create_plugin_zip(&artifacts_dir, "nu_plugin_other.exe", b"other binary");
+    let (zip_url2, zip_sha2) =
+        create_plugin_zip(&artifacts_dir, "nu_plugin_other.exe", b"other binary");
     let package2 = Package {
         id: ScopedId::new("test", "other"),
         description: "Another plugin".to_string(),

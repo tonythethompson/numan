@@ -105,56 +105,58 @@ pub fn install_package(
     let version_str = resolved.version.to_string();
 
     // 4. Determine artifact — SHA256 is mandatory
-    let (artifact_url, artifact_sha256, executable_path, archive_format) =
-        if resolved.artifact.kind == "binary" {
-            // Plugin: get platform-specific artifact
-            let target = resolved
-                .artifact
-                .targets
-                .get(&options.platform.triple)
-                .with_context(|| format!(
+    let (artifact_url, artifact_sha256, executable_path, archive_format) = if resolved.artifact.kind
+        == "binary"
+    {
+        // Plugin: get platform-specific artifact
+        let target = resolved
+            .artifact
+            .targets
+            .get(&options.platform.triple)
+            .with_context(|| {
+                format!(
                     "No binary available for '{}' on {}",
                     id, options.platform.triple
-                ))?;
+                )
+            })?;
 
-            let fmt = ArchiveFormat::from_url(&target.url).with_context(|| format!(
-                "Cannot determine archive format from URL: {}",
-                target.url
-            ))?;
+        let fmt = ArchiveFormat::from_url(&target.url)
+            .with_context(|| format!("Cannot determine archive format from URL: {}", target.url))?;
 
-            (
-                target.url.clone(),
-                Some(target.sha256.clone()),
-                Some(target.executable_path.clone()),
-                fmt,
-            )
-        } else {
-            // Module/script/completion: use artifact.url or target
-            let url = resolved
-                .artifact
-                .url
-                .clone()
-                .or_else(|| {
-                    resolved
-                        .artifact
-                        .targets
-                        .values()
-                        .next()
-                        .map(|t| t.url.clone())
-                })
-                .with_context(|| format!("No artifact URL for '{}'", id))?;
+        (
+            target.url.clone(),
+            Some(target.sha256.clone()),
+            Some(target.executable_path.clone()),
+            fmt,
+        )
+    } else {
+        // Module/script/completion: use artifact.url or target
+        let url = resolved
+            .artifact
+            .url
+            .clone()
+            .or_else(|| {
+                resolved
+                    .artifact
+                    .targets
+                    .values()
+                    .next()
+                    .map(|t| t.url.clone())
+            })
+            .with_context(|| format!("No artifact URL for '{}'", id))?;
 
-            let sha = resolved.artifact.sha256.clone().with_context(|| format!(
+        let sha = resolved.artifact.sha256.clone().with_context(|| {
+            format!(
                 "Artifact SHA256 is required for '{}'. Registry entry is missing sha256.",
                 id
-            ))?;
+            )
+        })?;
 
-            let fmt = ArchiveFormat::from_url(&url).with_context(|| format!(
-                "Cannot determine archive format from URL: {url}"
-            ))?;
+        let fmt = ArchiveFormat::from_url(&url)
+            .with_context(|| format!("Cannot determine archive format from URL: {url}"))?;
 
-            (url, Some(sha), None, fmt)
-        };
+        (url, Some(sha), None, fmt)
+    };
 
     // 5. Check if already installed
     let mut lockfile = Lockfile::load(options.root)?;
@@ -230,19 +232,13 @@ pub fn install_package(
         }
         std::fs::rename(&cache_part, &cache_file)?;
     } else if options.verbose {
-        println!(
-            "{} Using cached download",
-            console::style("✓").green()
-        );
+        println!("{} Using cached download", console::style("✓").green());
     }
 
     // 8. Extract to staging dir on same volume as install target
-    let parent_dir = install_dir
-        .parent()
-        .unwrap_or(options.root);
+    let parent_dir = install_dir.parent().unwrap_or(options.root);
     std::fs::create_dir_all(parent_dir)?;
-    let tmp_dir = tempfile::tempdir_in(parent_dir)
-        .context("Failed to create staging directory")?;
+    let tmp_dir = tempfile::tempdir_in(parent_dir).context("Failed to create staging directory")?;
 
     let extract_config = ExtractConfig {
         archive_root: resolved.artifact.archive_root.clone(),
@@ -267,8 +263,7 @@ pub fn install_package(
             let expected_path = tmp_dir.path().join(exe_path);
             if !expected_path.exists() {
                 // Try without extension (cross-platform)
-                let expected_path_no_ext =
-                    tmp_dir.path().join(exe_path.trim_end_matches(".exe"));
+                let expected_path_no_ext = tmp_dir.path().join(exe_path.trim_end_matches(".exe"));
                 if !expected_path_no_ext.exists() {
                     // Check if any file starts with nu_plugin_
                     let has_plugin = extract_result.files.iter().any(|f| {
@@ -326,11 +321,7 @@ pub fn install_package(
     let installed_at = format_timestamp();
     let payload_rel_path = format!(
         "packages/{}/{}/{}/{}/{}",
-        pkg_type_dir,
-        id.owner,
-        id.name,
-        version_dir,
-        ""
+        pkg_type_dir, id.owner, id.name, version_dir, ""
     )
     .trim_end_matches('/')
     .to_string();
@@ -348,7 +339,7 @@ pub fn install_package(
         entry: resolved.artifact.entry.clone(),
         installed_at,
         nu_version_at_install: Some(options.nu_version.version.clone()),
-        activated: false,
+        activation: None,
         registry_url: Some(format!("registry:{}", verified.registry_name)),
         registry_revision: verified.index.registry_revision.clone(),
         index_sha256: Some(verified.index_sha256),
