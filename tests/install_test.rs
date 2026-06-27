@@ -7,7 +7,7 @@ use numan_cli::core::platform::{Arch, Env, Os, Platform};
 use numan_cli::install::transaction::{self, InstallOptions};
 use numan_cli::state::lockfile::Lockfile;
 use rand_core::OsRng;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use tempfile::TempDir;
 
@@ -122,7 +122,8 @@ fn integration_full_install_from_signed_registry() {
                 entry: None,
             },
             source: None,
-            dependencies: HashMap::new(),
+            dependencies: BTreeMap::new(),
+            activation: None,
         }],
     };
 
@@ -328,7 +329,8 @@ fn integration_resolve_exact_rejects_incompatible() {
                 entry: None,
             },
             source: None,
-            dependencies: HashMap::new(),
+            dependencies: BTreeMap::new(),
+            activation: None,
         }],
     };
 
@@ -407,7 +409,8 @@ fn integration_snapshot_before_install() {
                 entry: None,
             },
             source: None,
-            dependencies: HashMap::new(),
+            dependencies: BTreeMap::new(),
+            activation: None,
         }],
     };
 
@@ -474,7 +477,8 @@ fn integration_snapshot_before_install() {
                 entry: None,
             },
             source: None,
-            dependencies: HashMap::new(),
+            dependencies: BTreeMap::new(),
+            activation: None,
         }],
     };
 

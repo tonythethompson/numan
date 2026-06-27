@@ -5,13 +5,14 @@ use std::time::UNIX_EPOCH;
 
 use crate::core::integrity;
 use crate::core::nu_version::NuVersion;
-use crate::core::package::{PackageType, ScopedId};
+use crate::core::package::{ModuleImportMode, PackageType, ScopedId};
 use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
 use crate::install::download;
 use crate::install::extract::{self, ArchiveFormat, ExtractConfig};
 use crate::state::lockfile::{Lockfile, LockfileEntry};
+use std::collections::BTreeMap;
 
 pub struct InstallOptions<'a> {
     pub root: &'a PathBuf,
@@ -326,6 +327,17 @@ pub fn install_package(
     .trim_end_matches('/')
     .to_string();
 
+    // Capture module-specific activation metadata from registry at install time
+    // so that activation can proceed without re-querying the registry.
+    let module_import_mode: Option<ModuleImportMode> =
+        resolved.activation.as_ref().map(|spec| spec.import.clone());
+
+    let locked_dependencies: BTreeMap<String, String> = resolved
+        .dependencies
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
     let entry = LockfileEntry {
         version: version_str.clone(),
         package_type: pkg.package_type.to_string(),
@@ -350,6 +362,9 @@ pub fn install_package(
         cargo_lock_sha256: None,
         built_sha256: None,
         payload_path: payload_rel_path,
+        module_activation: None,
+        module_import_mode,
+        locked_dependencies,
     };
 
     lockfile.packages.insert(lock_key.clone(), entry);

@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::core::integrity;
 use crate::core::platform::Platform;
@@ -23,16 +23,44 @@ pub struct NuPaths {
     pub nu_executable_hash: String,
     /// Platform triple at init time.
     pub platform: String,
-    // Deferred to later phases:
-    pub vendor_autoload_dir: Option<String>,
-    pub config_dir: Option<String>,
+
+    /// Nu data directory (`$nu.data-dir`), e.g. `~/.local/share/nushell` on Linux
+    /// or `%APPDATA%\nushell` on Windows.
+    #[serde(default)]
     pub data_dir: Option<String>,
+
+    /// All vendor-autoload directories reported by Nu (`$nu.vendor-autoload-dirs`).
+    #[serde(default)]
+    pub vendor_autoload_dirs: Vec<String>,
+
+    /// The selected vendor-autoload target for Numan.
+    ///
+    /// Set only when `<$nu.data-dir>/vendor/autoload` is present in
+    /// `$nu.vendor-autoload-dirs`. `None` means no safe target is available.
+    #[serde(default)]
+    pub vendor_autoload_dir: Option<String>,
 }
 
-/// Nu probe program — single invocation, two output lines:
-///   line 1: version string (e.g. "0.113.1")
-///   line 2: absolute plugin-registry path
-const PROBE_SCRIPT: &str = "print (version | get version); print $nu.plugin-path";
+/// Structured output from the Nu probe program.
+#[derive(Debug, Deserialize)]
+struct NuProbeOutput {
+    version: String,
+    plugin_path: String,
+    data_dir: String,
+    vendor_autoload_dirs: Vec<String>,
+}
+
+/// Nu probe program — single invocation, emits one JSON object containing
+/// version, plugin-path, data-dir, and vendor-autoload-dirs.
+///
+/// Using a JSON object avoids brittle line-splitting and handles paths that
+/// contain newlines or other unusual characters correctly.
+const PROBE_SCRIPT: &str = r#"{
+  version: (version | get version),
+  plugin_path: $nu.plugin-path,
+  data_dir: $nu.data-dir,
+  vendor_autoload_dirs: $nu.vendor-autoload-dirs
+} | to json"#;
 
 impl NuPaths {
     pub fn load(root: &Path) -> Result<Self> {
@@ -57,21 +85,26 @@ impl NuPaths {
     /// command calls `load()` then `validate_drift()` — never `detect()`.
     pub fn detect() -> Result<Self> {
         let nu_exe = find_nu_executable()?;
-        let (nu_version, plugin_registry_path) = probe_nu(&nu_exe)?;
+        let probe = probe_nu(&nu_exe)?;
         let nu_bytes = std::fs::read(&nu_exe)
             .with_context(|| format!("Failed to read Nu binary at '{nu_exe}'"))?;
         let nu_hash = integrity::compute_sha256(&nu_bytes);
         let platform = Platform::detect();
 
+        // Select the safe vendor-autoload target: <$nu.data-dir>/vendor/autoload,
+        // but only when it is present in Nu's reported vendor-autoload-dirs list.
+        let vendor_autoload_dir =
+            select_vendor_autoload_dir(&probe.data_dir, &probe.vendor_autoload_dirs)?;
+
         Ok(Self {
             nu_executable: nu_exe,
-            nu_version,
-            plugin_registry_path,
+            nu_version: probe.version,
+            plugin_registry_path: probe.plugin_path,
             nu_executable_hash: nu_hash,
             platform: platform.triple.clone(),
-            vendor_autoload_dir: None,
-            config_dir: None,
-            data_dir: None,
+            data_dir: Some(probe.data_dir),
+            vendor_autoload_dirs: probe.vendor_autoload_dirs,
+            vendor_autoload_dir,
         })
     }
 
@@ -113,6 +146,50 @@ impl NuPaths {
                     "Plugin registry parent directory does not exist: '{}'. \
                      Run 'numan init --refresh'.",
                     parent.display()
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate that the vendor-autoload environment has not drifted since init.
+    ///
+    /// Returns `Err` when:
+    /// - `data_dir` was never cached (old init, needs refresh)
+    /// - `vendor_autoload_dirs` differs from the current probe (needs refresh)
+    /// - the previously selected target is no longer in the reported list
+    pub fn validate_vendor_drift(&self, probe_dirs: &[String]) -> Result<()> {
+        if self.data_dir.is_none() {
+            bail!("Nu data directory not cached. Run 'numan init --refresh' to update.");
+        }
+
+        // Normalize both sides for comparison.
+        let cached: Vec<PathBuf> = self
+            .vendor_autoload_dirs
+            .iter()
+            .map(|s| normalize_path(Path::new(s)))
+            .collect();
+        let current: Vec<PathBuf> = probe_dirs
+            .iter()
+            .map(|s| normalize_path(Path::new(s)))
+            .collect();
+
+        if cached != current {
+            bail!(
+                "Nu vendor-autoload directories have changed since init. \
+                 Run 'numan init --refresh'."
+            );
+        }
+
+        // If a target was selected, verify it is still in the list.
+        if let Some(selected) = &self.vendor_autoload_dir {
+            let selected_norm = normalize_path(Path::new(selected));
+            if !current.contains(&selected_norm) {
+                bail!(
+                    "Previously selected vendor-autoload directory '{}' is no longer \
+                     in $nu.vendor-autoload-dirs. Run 'numan init --refresh'.",
+                    selected
                 );
             }
         }
@@ -165,8 +242,10 @@ fn find_nu_executable() -> Result<String> {
     }
 }
 
-/// Run a single Nu invocation to get version + plugin-registry-path.
-fn probe_nu(nu_exe: &str) -> Result<(String, String)> {
+/// Run a single Nu invocation and parse the resulting JSON probe output.
+///
+/// The probe emits one JSON object, so no ad-hoc line splitting is needed.
+fn probe_nu(nu_exe: &str) -> Result<NuProbeOutput> {
     let output = std::process::Command::new(nu_exe)
         .args(["-c", PROBE_SCRIPT])
         .output()
@@ -178,28 +257,62 @@ fn probe_nu(nu_exe: &str) -> Result<(String, String)> {
     }
 
     let stdout = String::from_utf8(output.stdout).context("Nu probe output is not UTF-8")?;
-    let mut lines = stdout.lines();
+    let probe: NuProbeOutput =
+        serde_json::from_str(stdout.trim()).context("Nu probe JSON parse failed")?;
 
-    let version = lines
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Nu probe: expected version on line 1, got no output"))?
-        .trim()
-        .to_string();
-
-    let plugin_path = lines
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Nu probe: expected plugin-path on line 2"))?
-        .trim()
-        .to_string();
-
-    if plugin_path.is_empty() || plugin_path == "null" {
+    if probe.plugin_path.is_empty() || probe.plugin_path == "null" {
         bail!(
             "Nu probe returned empty plugin-path. \
              Ensure Nu is configured with a plugin registry."
         );
     }
 
-    Ok((version, plugin_path))
+    Ok(probe)
+}
+
+/// Normalize a filesystem path for comparison: canonicalize if it exists,
+/// otherwise use the lexically-normalized form. On Windows, strip the
+/// extended-length prefix (`\\?\`) before comparing.
+fn normalize_path(path: &Path) -> PathBuf {
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+
+    // Strip Windows extended-length path prefix so comparisons are uniform.
+    #[cfg(target_os = "windows")]
+    {
+        let s = canonical.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+
+    canonical
+}
+
+/// Select the Numan-safe vendor-autoload directory.
+///
+/// The safe target is `<data_dir>/vendor/autoload`. It is returned only when
+/// it is present in Nu's reported `vendor_autoload_dirs` list (after path
+/// normalization). If absent, returns `None` — the caller decides whether to
+/// error or warn.
+fn select_vendor_autoload_dir(
+    data_dir: &str,
+    vendor_autoload_dirs: &[String],
+) -> Result<Option<String>> {
+    let expected: PathBuf = Path::new(data_dir).join("vendor").join("autoload");
+    let expected_norm = normalize_path(&expected);
+
+    let found = vendor_autoload_dirs
+        .iter()
+        .find(|d| normalize_path(Path::new(d.as_str())) == expected_norm);
+
+    match found {
+        Some(dir) => Ok(Some(dir.clone())),
+        None => {
+            // Not an error at detection time — `detect()` caches `None`.
+            // Commands that need module activation will report a clear error.
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -213,9 +326,9 @@ mod tests {
             plugin_registry_path: "/path/to/plugins.msgpackz".to_string(),
             nu_executable_hash: nu_hash.to_string(),
             platform: "x86_64-pc-windows-msvc".to_string(),
-            vendor_autoload_dir: None,
-            config_dir: None,
             data_dir: None,
+            vendor_autoload_dirs: vec![],
+            vendor_autoload_dir: None,
         }
     }
 
@@ -229,6 +342,34 @@ mod tests {
         assert_eq!(loaded.nu_version, "0.113.1");
         assert_eq!(loaded.nu_executable_hash, "abc123");
         assert_eq!(loaded.plugin_registry_path, "/path/to/plugins.msgpackz");
+        assert_eq!(loaded.data_dir, None);
+        assert!(loaded.vendor_autoload_dirs.is_empty());
+        assert_eq!(loaded.vendor_autoload_dir, None);
+    }
+
+    #[test]
+    fn paths_roundtrip_with_vendor_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mut paths = fake_nu_paths("/usr/bin/nu", "abc123");
+        paths.data_dir = Some("/home/user/.local/share/nushell".to_string());
+        paths.vendor_autoload_dirs = vec![
+            "/home/user/.local/share/nushell/vendor/autoload".to_string(),
+            "/usr/share/nushell/vendor/autoload".to_string(),
+        ];
+        paths.vendor_autoload_dir =
+            Some("/home/user/.local/share/nushell/vendor/autoload".to_string());
+        paths.save(&root).unwrap();
+        let loaded = NuPaths::load(&root).unwrap();
+        assert_eq!(
+            loaded.data_dir.as_deref(),
+            Some("/home/user/.local/share/nushell")
+        );
+        assert_eq!(loaded.vendor_autoload_dirs.len(), 2);
+        assert_eq!(
+            loaded.vendor_autoload_dir.as_deref(),
+            Some("/home/user/.local/share/nushell/vendor/autoload")
+        );
     }
 
     #[test]
@@ -294,10 +435,98 @@ mod tests {
     }
 
     #[test]
-    fn probe_script_is_static() {
-        // Verify the probe script constant is what we expect
+    fn probe_script_emits_json() {
+        // Verify the probe script constant contains the key JSON fields.
         assert!(PROBE_SCRIPT.contains("version"));
-        assert!(PROBE_SCRIPT.contains("plugin-path"));
-        assert!(PROBE_SCRIPT.contains("print"));
+        assert!(PROBE_SCRIPT.contains("plugin_path"));
+        assert!(PROBE_SCRIPT.contains("data_dir"));
+        assert!(PROBE_SCRIPT.contains("vendor_autoload_dirs"));
+        assert!(PROBE_SCRIPT.contains("to json"));
+    }
+
+    // ── vendor target selection ───────────────────────────────────────────────
+
+    #[test]
+    fn vendor_target_selected_when_present() {
+        let data_dir = "/home/user/.local/share/nushell";
+        let expected = "/home/user/.local/share/nushell/vendor/autoload";
+        let dirs = vec![
+            "/usr/share/nushell/vendor/autoload".to_string(),
+            expected.to_string(),
+        ];
+        let result = select_vendor_autoload_dir(data_dir, &dirs).unwrap();
+        assert_eq!(result.as_deref(), Some(expected));
+    }
+
+    #[test]
+    fn vendor_target_none_when_absent() {
+        let data_dir = "/home/user/.local/share/nushell";
+        let dirs = vec![
+            "/usr/share/nushell/vendor/autoload".to_string(),
+            "/etc/nushell/vendor/autoload".to_string(),
+        ];
+        let result = select_vendor_autoload_dir(data_dir, &dirs).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn vendor_target_none_for_empty_list() {
+        let result = select_vendor_autoload_dir("/home/user/.local/share/nushell", &[]).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn vendor_drift_detected_when_dirs_change() {
+        let mut paths = fake_nu_paths("/usr/bin/nu", "abc123");
+        paths.data_dir = Some("/home/user/.local/share/nushell".to_string());
+        paths.vendor_autoload_dirs =
+            vec!["/home/user/.local/share/nushell/vendor/autoload".to_string()];
+
+        // Same dirs — no drift.
+        paths
+            .validate_vendor_drift(&["/home/user/.local/share/nushell/vendor/autoload".to_string()])
+            .unwrap();
+
+        // Different dirs — drift.
+        let err = paths
+            .validate_vendor_drift(&["/different/path/vendor/autoload".to_string()])
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("changed") || err.to_string().contains("vendor-autoload"),
+            "Expected vendor drift error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn vendor_drift_detected_when_data_dir_not_cached() {
+        let paths = fake_nu_paths("/usr/bin/nu", "abc123");
+        // data_dir is None — requires refresh.
+        let err = paths.validate_vendor_drift(&[]).unwrap_err();
+        assert!(
+            err.to_string().contains("data directory") || err.to_string().contains("refresh"),
+            "Expected missing data_dir error, got: {err}"
+        );
+    }
+
+    // ── backward compatibility: old JSON without vendor fields round-trips ───
+
+    #[test]
+    fn old_lockfile_without_vendor_fields_loads_with_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join("nu_state")).unwrap();
+        // Write a paths.json that does NOT include the new Phase 4 fields.
+        let old_json = r#"{
+            "nu_executable": "/usr/bin/nu",
+            "nu_version": "0.112.0",
+            "plugin_registry_path": "/home/user/.config/nushell/plugin.msgpackz",
+            "nu_executable_hash": "deadbeef",
+            "platform": "x86_64-unknown-linux-gnu"
+        }"#;
+        std::fs::write(root.join("nu_state/paths.json"), old_json).unwrap();
+        let loaded = NuPaths::load(&root).unwrap();
+        assert_eq!(loaded.data_dir, None);
+        assert!(loaded.vendor_autoload_dirs.is_empty());
+        assert_eq!(loaded.vendor_autoload_dir, None);
     }
 }

@@ -13,7 +13,7 @@ cargo run -- search <query>
 cargo run -- info <owner/name>
 cargo run -- list
 
-# Test (all 106 tests)
+# Test (all 234+ tests)
 cargo test
 
 # Test single module
@@ -42,17 +42,22 @@ src/
     info.rs            — Info subcommand
     list.rs            — List subcommand
     registry.rs        — Registry management subcommands
-    activate.rs        — Plugin activation (Phase 3)
+    activate.rs        — Plugin + module activation (Phase 3 & 4); public entry: execute_with_candidate_runner
+    deactivate.rs      — Module deactivation: full (delete managed file) and partial (regenerate) (Phase 4)
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
   state/
-    lockfile.rs        — Lockfile with PluginActivation per-Nu-identity record
-    journal.rs         — Pending-activation journal for crash recovery
+    lockfile.rs        — Lockfile with PluginActivation and ModuleActivation per-Nu-identity records
+    journal.rs         — Plugin pending-activation journal for crash recovery
+    autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
+    autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
   nu/
     paths.rs           — Nu path cache (detect, load, save, validate_drift)
+    autoload.rs        — render_use_statement, generate_autoload_content, FakeCandidateRunner, managed-file ops (Phase 4)
   util/
     atomic.rs          — write_json_atomic helper (tempfile+persist)
+    fs_safety.rs       — OWNERSHIP_MARKER, acquire_mutation_lock (advisory fd_lock mutex), assert_managed_file_owned (Phase 4)
   nupm_compat/         — nupm interoperability adapter (future)
 tests/                 — Integration tests
 ```
@@ -67,7 +72,12 @@ tests/                 — Integration tests
 - **Platform detection**: `#[cfg(target_env)]` from binary's build target, not `std::env::consts`
 - **Trust**: Ed25519 keys, `--key <base64-public-key>` for onboarding
 - **Immutability**: `packages/<type>/<scoped-name>/<version-hash>/` paths, never overwrite
-- **Activate testability**: `execute_with_registrar(args, root, registrar)` is the public entry point; inject a fake registrar in tests — never spawn a real Nu binary in unit tests
+- **Activate testability**: `execute_with_registrar(args, root, registrar)` for plugins; `execute_with_candidate_runner(args, root, registrar, runner)` for modules — inject fakes in tests, never spawn a real Nu binary in unit tests
+- **Module autoload testability**: `FakeCandidateRunner::success()` / `::failure(msg)` from `nu/autoload.rs` — use as test seam for candidate validation without real Nu
+- **Module autoload identity**: Nu executable hash + Nu version + vendor autoload dir + managed file path — all four must match for a module to be considered active
+- **Autoload state is NOT authoritative**: `autoload-state.json` is a fast-check projection; the lockfile `module_activation` records are ground truth
+- **Managed file ownership**: `OWNERSHIP_MARKER` header identifies Numan-managed files; `assert_managed_file_owned` blocks overwrite of foreign files
+- **Mutation serialization**: `acquire_mutation_lock(root)` returns `MutationLock` RAII guard; second acquire on same root fails immediately (non-blocking)
 - **Nu invocation**: paths only via env vars (`NUMAN_PLUGIN_BINARY`, `NUMAN_PLUGIN_CONFIG`); the Nu program string is a compile-time constant with no runtime interpolation
 - **Activation scope**: `PluginActivation` struct stores `(nu_executable_sha256, nu_version, plugin_registry_path)`; a plugin is "active" only when all three match the current `NuPaths` — bare `bool` would go stale after `numan init --refresh`
 - **Journal**: `state/pending-activation.json` written as all-`prepared` before first registration; each entry advances to `registered` atomically before lockfile update; reconciled on next `activate` run if process is interrupted
@@ -84,7 +94,7 @@ tests/                 — Integration tests
 ## Development Workflow
 1. Create feature branch from `main`
 2. Implement with tests
-3. `cargo test` — all 106+ tests must pass
+3. `cargo test` — all 234+ tests must pass
 4. Update AGENTS.md if structure/conventions change
 5. Open PR with description
 
@@ -97,7 +107,7 @@ tests/                 — Integration tests
 - [x] Phase 1: Foundation (types, platform, config, lockfile, registry, trust, CLI skeleton)
 - [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
 - [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
-- [ ] Phase 4: Activate modules/scripts/completions (autoload generation)
+- [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock, 234+ tests)
 - [ ] Phase 5: Source builds, update, remove
 - [ ] Phase 6: nupm interop
 - [ ] Phase 7: Polish, CI, distribution

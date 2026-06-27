@@ -1,4 +1,5 @@
 pub mod activate;
+pub mod deactivate;
 pub mod info;
 pub mod install;
 pub mod list;

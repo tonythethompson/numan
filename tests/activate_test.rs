@@ -69,9 +69,9 @@ impl TestEnv {
             plugin_registry_path: self.registry_path.to_string_lossy().into_owned(),
             nu_executable_hash: self.nu_hash.clone(),
             platform: "x86_64-pc-windows-msvc".to_string(),
-            vendor_autoload_dir: None,
-            config_dir: None,
             data_dir: None,
+            vendor_autoload_dirs: vec![],
+            vendor_autoload_dir: None,
         };
         paths.save(&self.root()).unwrap();
     }
@@ -135,6 +135,9 @@ impl TestEnv {
             cargo_lock_sha256: None,
             built_sha256: None,
             payload_path,
+            module_activation: None,
+            module_import_mode: None,
+            locked_dependencies: std::collections::BTreeMap::new(),
         }
     }
 
@@ -147,6 +150,8 @@ impl TestEnv {
             packages: vec![],
             yes: true,
             verbose: false,
+            list: false,
+            check: false,
         }
     }
 
@@ -155,6 +160,8 @@ impl TestEnv {
             packages: packages.iter().map(|s| s.to_string()).collect(),
             yes: true,
             verbose: false,
+            list: false,
+            check: false,
         }
     }
 }
@@ -301,9 +308,9 @@ fn test_activate_path_with_spaces() {
         plugin_registry_path: registry_path.to_string_lossy().into_owned(),
         nu_executable_hash: nu_hash.clone(),
         platform: "x86_64-pc-windows-msvc".to_string(),
-        vendor_autoload_dir: None,
-        config_dir: None,
         data_dir: None,
+        vendor_autoload_dirs: vec![],
+        vendor_autoload_dir: None,
     };
     let root = dir.path().to_path_buf();
     paths.save(&root).unwrap();
@@ -340,6 +347,9 @@ fn test_activate_path_with_spaces() {
             cargo_lock_sha256: None,
             built_sha256: None,
             payload_path: payload.to_string(),
+            module_activation: None,
+            module_import_mode: None,
+            locked_dependencies: std::collections::BTreeMap::new(),
         },
     );
     lockfile.save(&root).unwrap();
@@ -354,6 +364,8 @@ fn test_activate_path_with_spaces() {
         packages: vec![],
         yes: true,
         verbose: false,
+        list: false,
+        check: false,
     };
     let result = execute_with_registrar(&args, &root, &|_nu, bin, cfg| {
         *bin_capture.lock().unwrap() = bin.to_string();
@@ -635,6 +647,8 @@ fn test_activate_requires_consent_no_tty() {
         packages: vec![],
         yes: false,
         verbose: false,
+        list: false,
+        check: false,
     };
     let result = execute_with_registrar(&args, &env.root(), &ok_registrar);
     assert!(result.is_err());

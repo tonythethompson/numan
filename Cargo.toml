@@ -51,6 +51,9 @@ thiserror = "2"
 # Temp files
 tempfile = "3"
 
+# Advisory filesystem locks (mutation serialization)
+fd-lock = "4"
+
 # Git (for source builds and registry sync)
 git2 = "0.21"
 
