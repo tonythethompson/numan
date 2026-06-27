@@ -1,8 +1,8 @@
 use anyhow::Result;
 use crate::state::lockfile::Lockfile;
-use std::path::PathBuf;
+use std::path::Path;
 
-pub fn execute(root: &PathBuf) -> Result<()> {
+pub fn execute(root: &Path) -> Result<()> {
     let lockfile = Lockfile::load(root)?;
 
     if lockfile.is_empty() {

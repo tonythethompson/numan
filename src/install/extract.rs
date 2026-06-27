@@ -13,6 +13,7 @@ const MAX_FILE_COUNT: usize = 10_000;
 /// Maximum uncompressed size (100 MB).
 const MAX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
 /// Maximum compression ratio (100:1) to guard on zip bombs.
+#[allow(dead_code)]
 const MAX_COMPRESSION_RATIO: u64 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

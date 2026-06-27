@@ -2,9 +2,9 @@ use anyhow::Result;
 use crate::core::registry::RegistryManager;
 use crate::core::platform::Platform;
 use crate::core::nu_version::NuVersion;
-use std::path::PathBuf;
+use std::path::Path;
 
-pub fn execute(id: &str, root: &PathBuf) -> Result<()> {
+pub fn execute(id: &str, root: &Path) -> Result<()> {
     let pkg = RegistryManager::new(root)?
         .find_package(id)?
         .ok_or_else(|| anyhow::anyhow!("Package '{id}' not found."))?;
@@ -47,7 +47,7 @@ pub fn execute(id: &str, root: &PathBuf) -> Result<()> {
             println!("    tested with: {}", ver.verified_with.join(", "));
         }
 
-        for (target, _) in &ver.artifact.targets {
+        for target in ver.artifact.targets.keys() {
             println!("    platform: {target}");
         }
     }

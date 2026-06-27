@@ -21,3 +21,6 @@ desktop.ini
 # Editor
 *.bak
 *.tmp
+
+# OpenCode project config
+.opencode/
