@@ -113,10 +113,7 @@ impl<'a> Resolver<'a> {
             if entry.artifact.kind == "binary"
                 && !entry.artifact.targets.contains_key(&self.platform.triple)
             {
-                reasons.push(format!(
-                    "No binary for target '{}'",
-                    self.platform.triple
-                ));
+                reasons.push(format!("No binary for target '{}'", self.platform.triple));
             }
             bail!(
                 "Version {target_version} of '{}' is not compatible with your system: {}",

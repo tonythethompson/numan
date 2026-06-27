@@ -12,9 +12,6 @@ use zip::ZipArchive;
 const MAX_FILE_COUNT: usize = 10_000;
 /// Maximum uncompressed size (100 MB).
 const MAX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
-/// Maximum compression ratio (100:1) to guard on zip bombs.
-#[allow(dead_code)]
-const MAX_COMPRESSION_RATIO: u64 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveFormat {
@@ -48,21 +45,11 @@ impl ArchiveFormat {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExtractConfig {
     pub archive_root: Option<String>,
     pub include: Option<Vec<String>>,
     pub entry: Option<String>,
-}
-
-impl Default for ExtractConfig {
-    fn default() -> Self {
-        Self {
-            archive_root: None,
-            include: None,
-            entry: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -103,8 +90,8 @@ fn extract_zip(
 ) -> Result<ExtractResult> {
     let file = File::open(archive_path)
         .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
-    let mut archive =
-        ZipArchive::new(file).with_context(|| format!("Failed to read zip: {}", archive_path.display()))?;
+    let mut archive = ZipArchive::new(file)
+        .with_context(|| format!("Failed to read zip: {}", archive_path.display()))?;
 
     let mut extracted_files = Vec::new();
     let mut entry_found = false;
@@ -114,7 +101,9 @@ fn extract_zip(
     let include_checker = build_include_checker(config.include.as_deref())?;
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| anyhow::anyhow!("Zip entry error: {e}"))?;
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| anyhow::anyhow!("Zip entry error: {e}"))?;
 
         // Validate the raw name BEFORE any mangling
         let raw_name = entry.name().to_owned();
@@ -148,10 +137,7 @@ fn extract_zip(
 
         // Validate resolved path (no traversal after stripping root)
         if has_path_traversal(&relative_path) {
-            bail!(
-                "Path traversal detected in archive: {}",
-                raw_name
-            );
+            bail!("Path traversal detected in archive: {}", raw_name);
         }
 
         // Archive bomb limits
@@ -212,7 +198,10 @@ fn extract_tar_inner<R: Read>(
     let archive_root = config.archive_root.as_deref();
     let include_checker = build_include_checker(config.include.as_deref())?;
 
-    for entry in archive.entries().map_err(|e| anyhow::anyhow!("Failed to read tar entries: {e}"))? {
+    for entry in archive
+        .entries()
+        .map_err(|e| anyhow::anyhow!("Failed to read tar entries: {e}"))?
+    {
         let mut entry = entry.map_err(|e| anyhow::anyhow!("Tar entry error: {e}"))?;
         let entry_path = entry
             .path()
@@ -332,13 +321,12 @@ fn build_include_checker(patterns: Option<&[String]>) -> Result<IncludeChecker> 
             pattern.clone()
         };
 
-        let glob = Glob::new(&glob_str)
-            .with_context(|| format!("Invalid glob pattern: '{pattern}'"))?;
+        let glob =
+            Glob::new(&glob_str).with_context(|| format!("Invalid glob pattern: '{pattern}'"))?;
         builder.add(glob);
     }
 
-    let glob_set = builder.build()
-        .context("Failed to compile glob patterns")?;
+    let glob_set = builder.build().context("Failed to compile glob patterns")?;
     Ok(IncludeChecker::Glob(glob_set))
 }
 
@@ -471,10 +459,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let zip_path = create_test_zip(
             tmp.path(),
-            &[
-                ("test.txt", b"hello"),
-                ("subdir/nested.txt", b"nested"),
-            ],
+            &[("test.txt", b"hello"), ("subdir/nested.txt", b"nested")],
         );
 
         let dest = tmp.path().join("extracted");
@@ -512,8 +497,7 @@ mod tests {
             entry: None,
         };
 
-        let result =
-            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
+        let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert_eq!(result.files.len(), 2);
         assert!(dest.join("file.txt").exists());
         assert!(dest.join("inner/other.txt").exists());
@@ -540,8 +524,7 @@ mod tests {
             entry: None,
         };
 
-        let result =
-            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
+        let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert_eq!(result.files.len(), 2);
         assert!(dest.join("main.nu").exists());
         assert!(dest.join("lib.nu").exists());
@@ -569,8 +552,7 @@ mod tests {
             entry: None,
         };
 
-        let result =
-            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
+        let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert_eq!(result.files.len(), 2);
         assert!(dest.join("git/mod.nu").exists());
         assert!(dest.join("git/README.md").exists());
@@ -582,10 +564,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let zip_path = create_test_zip(
             tmp.path(),
-            &[
-                ("git/mod.nu", b"module"),
-                ("git/other.nu", b"other"),
-            ],
+            &[("git/mod.nu", b"module"), ("git/other.nu", b"other")],
         );
 
         let dest = tmp.path().join("extracted");
@@ -597,8 +576,7 @@ mod tests {
             entry: Some("git/mod.nu".to_string()),
         };
 
-        let result =
-            extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
+        let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
         assert!(result.entry_found);
     }
 
@@ -611,11 +589,8 @@ mod tests {
         {
             let file = File::create(&zip_path).unwrap();
             let mut zip = zip::ZipWriter::new(file);
-            zip.start_file(
-                "../../etc/passwd",
-                zip::write::SimpleFileOptions::default(),
-            )
-            .unwrap();
+            zip.start_file("../../etc/passwd", zip::write::SimpleFileOptions::default())
+                .unwrap();
             zip.write_all(b"bad").unwrap();
             zip.finish().unwrap();
         }
@@ -623,8 +598,12 @@ mod tests {
         let dest = tmp.path().join("extracted");
         std::fs::create_dir(&dest).unwrap();
 
-        let result =
-            extract_archive(&zip_path, &dest, &ExtractConfig::default(), ArchiveFormat::Zip);
+        let result = extract_archive(
+            &zip_path,
+            &dest,
+            &ExtractConfig::default(),
+            ArchiveFormat::Zip,
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -649,16 +628,14 @@ mod tests {
 
     #[test]
     fn include_matches_extension() {
-        let checker =
-            build_include_checker(Some(&["*.nu".to_string()])).unwrap();
+        let checker = build_include_checker(Some(&["*.nu".to_string()])).unwrap();
         assert!(checker.matches(&PathBuf::from("script.nu")));
         assert!(!checker.matches(&PathBuf::from("script.rs")));
     }
 
     #[test]
     fn include_matches_path_glob() {
-        let checker =
-            build_include_checker(Some(&["git/**".to_string()])).unwrap();
+        let checker = build_include_checker(Some(&["git/**".to_string()])).unwrap();
         assert!(checker.matches(&PathBuf::from("git/mod.nu")));
         assert!(checker.matches(&PathBuf::from("git/README.md")));
         assert!(!checker.matches(&PathBuf::from("other.nu")));
@@ -724,10 +701,7 @@ mod tests {
             ArchiveFormat::from_url("https://example.com/pkg.tar"),
             Some(ArchiveFormat::Tar)
         );
-        assert_eq!(
-            ArchiveFormat::from_url("https://example.com/pkg.bin"),
-            None
-        );
+        assert_eq!(ArchiveFormat::from_url("https://example.com/pkg.bin"), None);
     }
 
     #[test]

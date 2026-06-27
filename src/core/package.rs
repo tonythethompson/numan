@@ -217,7 +217,10 @@ mod tests {
         let entry: VersionEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.version, Version::new(0, 25, 2));
         assert_eq!(entry.artifact.kind, "binary");
-        assert!(entry.artifact.targets.contains_key("x86_64-pc-windows-msvc"));
+        assert!(entry
+            .artifact
+            .targets
+            .contains_key("x86_64-pc-windows-msvc"));
     }
 
     #[test]

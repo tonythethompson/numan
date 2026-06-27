@@ -58,7 +58,11 @@ mod tests {
     fn verify_file_mismatch() {
         let file = NamedTempFile::new().unwrap();
         std::fs::write(file.path(), b"test content").unwrap();
-        assert!(!verify_file(file.path(), "0000000000000000000000000000000000000000000000000000000000000000").unwrap());
+        assert!(!verify_file(
+            file.path(),
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        )
+        .unwrap());
     }
 
     #[test]

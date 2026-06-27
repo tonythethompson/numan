@@ -98,8 +98,7 @@ impl Platform {
     pub fn default_root(&self) -> PathBuf {
         match self.os {
             Os::Windows => {
-                let local_app_data =
-                    std::env::var("LOCALAPPDATA").expect("LOCALAPPDATA not set");
+                let local_app_data = std::env::var("LOCALAPPDATA").expect("LOCALAPPDATA not set");
                 PathBuf::from(local_app_data).join("numan")
             }
             Os::Macos => dirs::home_dir()
