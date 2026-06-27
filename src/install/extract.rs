@@ -296,7 +296,7 @@ fn extract_tar_inner<R: Read>(
             .unpack(&out_path)
             .with_context(|| format!("Failed to extract: {}", entry_path.display()))?;
 
-        // Check entry point ΓÇö compare against full relative path
+        // Check entry point — compare against full relative path
         if let Some(ref entry_pattern) = config.entry {
             if relative_path_matches(&relative_path, entry_pattern) {
                 entry_found = true;
