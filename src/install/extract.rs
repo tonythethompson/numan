@@ -401,7 +401,7 @@ fn strip_leading_component(path: &Path, root: &str) -> Option<PathBuf> {
 }
 
 /// Check if a path string contains dangerous traversal.
-/// Only rejects leading `..` or absolute paths ΓÇö inner `..` is fine.
+/// Only rejects leading `..` or absolute paths — inner `..` is fine.
 fn has_path_traversal_str(path: &str) -> bool {
     let normalized = path.replace('\\', "/");
     // Reject leading ..
