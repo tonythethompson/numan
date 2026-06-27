@@ -51,7 +51,7 @@ thiserror = "2"
 tempfile = "3"
 
 # Git (for source builds and registry sync)
-git2 = "0.19"
+git2 = "0.21"
 
 [dev-dependencies]
 tempfile = "3"
