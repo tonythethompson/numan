@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
+use crate::core::package::ModuleImportMode;
 use crate::util::atomic::write_json_atomic;
 
 /// Per-Nu-identity activation record stored on a plugin lockfile entry.
@@ -15,6 +16,31 @@ pub struct PluginActivation {
     pub plugin_registry_path: String,
     pub nu_executable_sha256: String,
     pub nu_version: String,
+    pub activated_at: String,
+}
+
+/// Per-Nu-identity activation record stored on a module lockfile entry.
+///
+/// A module is "currently active" only when this record's Nu executable hash,
+/// Nu version, vendor-autoload directory, and managed file path all match the
+/// cached `NuPaths` and the autoload-state projection. This is separate from
+/// the plugin activation record because module activation is tied to a
+/// vendor-autoload file rather than the Nu plugin registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleActivation {
+    /// Absolute path to the entry `.nu` file within the installed payload.
+    pub entry_path: String,
+    /// Whether this module is imported namespaced or glob-imported.
+    pub import_mode: ModuleImportMode,
+    /// Absolute path to the selected vendor-autoload directory.
+    pub vendor_autoload_dir: String,
+    /// Absolute path to the Numan-managed autoload file (`numan.nu`).
+    pub managed_file_path: String,
+    /// SHA-256 of the Nu executable used when this activation was recorded.
+    pub nu_executable_sha256: String,
+    /// Version string of the Nu executable used when this activation was recorded.
+    pub nu_version: String,
+    /// Timestamp when this activation record was written.
     pub activated_at: String,
 }
 
@@ -79,6 +105,26 @@ pub struct LockfileEntry {
     /// E.g., "packages/plugins/fdncred/file/0.25.2-abc12345"
     #[serde(default)]
     pub payload_path: String,
+
+    // Module-specific fields (Phase 4)
+    /// Activation record for this module under a specific Nu identity and
+    /// vendor-autoload target. `None` means not yet activated.
+    /// This field is distinct from the plugin `activation` field — do not
+    /// reinterpret or merge them.
+    #[serde(default)]
+    pub module_activation: Option<ModuleActivation>,
+
+    /// Import mode persisted from the registry at install time.
+    /// `None` for packages that have no `activation` spec (plugins, scripts,
+    /// completions). `Some(ModuleImportMode::Module)` is the implicit default
+    /// for module packages whose registry entry omits `activation.import`.
+    #[serde(default)]
+    pub module_import_mode: Option<ModuleImportMode>,
+
+    /// Registry dependency map captured at install time.
+    /// Activation requires this to be empty in Phase 4.
+    #[serde(default)]
+    pub locked_dependencies: BTreeMap<String, String>,
 }
 
 impl LockfileEntry {
@@ -86,7 +132,7 @@ impl LockfileEntry {
         &self.payload_path
     }
 
-    /// Returns `true` if this entry is active for the given Nu identity.
+    /// Returns `true` if this plugin entry is active for the given Nu identity.
     pub fn is_active_for(
         &self,
         nu_executable_sha256: &str,
@@ -101,6 +147,36 @@ impl LockfileEntry {
             }
             None => false,
         }
+    }
+
+    /// Returns `true` if this module entry is active for the given Nu identity
+    /// and vendor-autoload target. All four identity fields must match.
+    pub fn is_module_active_for(
+        &self,
+        nu_executable_sha256: &str,
+        nu_version: &str,
+        vendor_autoload_dir: &str,
+        managed_file_path: &str,
+    ) -> bool {
+        match &self.module_activation {
+            Some(a) => {
+                a.nu_executable_sha256 == nu_executable_sha256
+                    && a.nu_version == nu_version
+                    && a.vendor_autoload_dir == vendor_autoload_dir
+                    && a.managed_file_path == managed_file_path
+            }
+            None => false,
+        }
+    }
+
+    /// Returns `true` when this module can be activated in Phase 4:
+    /// - `module_import_mode` is known (set at install time),
+    /// - `entry` is set (required for `use` statement generation),
+    /// - `locked_dependencies` is empty (Phase 4 cannot resolve cross-package deps).
+    pub fn is_module_activatable(&self) -> bool {
+        self.module_import_mode.is_some()
+            && self.entry.is_some()
+            && self.locked_dependencies.is_empty()
     }
 }
 
@@ -193,6 +269,9 @@ mod tests {
                 cargo_lock_sha256: None,
                 built_sha256: None,
                 payload_path: "packages/plugins/test/pkg/1.0.0-abc12345".to_string(),
+                module_activation: None,
+                module_import_mode: None,
+                locked_dependencies: BTreeMap::new(),
             },
         );
 
@@ -205,6 +284,9 @@ mod tests {
             "packages/plugins/test/pkg/1.0.0-abc12345"
         );
         assert!(entry.activation.is_none());
+        assert!(entry.module_activation.is_none());
+        assert!(entry.module_import_mode.is_none());
+        assert!(entry.locked_dependencies.is_empty());
     }
 
     #[test]
@@ -232,9 +314,8 @@ mod tests {
         assert!(entry.activation.is_none());
     }
 
-    #[test]
-    fn is_active_for_matches_correctly() {
-        let entry = LockfileEntry {
+    fn make_base_entry() -> LockfileEntry {
+        LockfileEntry {
             version: "1.0.0".to_string(),
             package_type: "plugin".to_string(),
             source: "binary".to_string(),
@@ -247,12 +328,7 @@ mod tests {
             entry: None,
             installed_at: "0".to_string(),
             nu_version_at_install: None,
-            activation: Some(PluginActivation {
-                plugin_registry_path: "/path/to/plugins.msgpackz".to_string(),
-                nu_executable_sha256: "abc123".to_string(),
-                nu_version: "0.113.1".to_string(),
-                activated_at: "0".to_string(),
-            }),
+            activation: None,
             registry_url: None,
             registry_revision: None,
             index_sha256: None,
@@ -263,12 +339,206 @@ mod tests {
             cargo_lock_sha256: None,
             built_sha256: None,
             payload_path: String::new(),
+            module_activation: None,
+            module_import_mode: None,
+            locked_dependencies: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn is_active_for_matches_correctly() {
+        let entry = LockfileEntry {
+            activation: Some(PluginActivation {
+                plugin_registry_path: "/path/to/plugins.msgpackz".to_string(),
+                nu_executable_sha256: "abc123".to_string(),
+                nu_version: "0.113.1".to_string(),
+                activated_at: "0".to_string(),
+            }),
+            ..make_base_entry()
         };
 
         assert!(entry.is_active_for("abc123", "0.113.1", "/path/to/plugins.msgpackz"));
         assert!(!entry.is_active_for("different_hash", "0.113.1", "/path/to/plugins.msgpackz"));
         assert!(!entry.is_active_for("abc123", "0.114.0", "/path/to/plugins.msgpackz"));
         assert!(!entry.is_active_for("abc123", "0.113.1", "/other/path.msgpackz"));
+    }
+
+    #[test]
+    fn is_module_active_for_matches_correctly() {
+        use crate::core::package::ModuleImportMode;
+
+        let entry = LockfileEntry {
+            package_type: "module".to_string(),
+            module_activation: Some(ModuleActivation {
+                entry_path: "/root/packages/modules/owner/foo/1.0.0-abc/mod.nu".to_string(),
+                import_mode: ModuleImportMode::Module,
+                vendor_autoload_dir: "/nu/vendor/autoload".to_string(),
+                managed_file_path: "/nu/vendor/autoload/numan.nu".to_string(),
+                nu_executable_sha256: "exe-hash".to_string(),
+                nu_version: "0.113.1".to_string(),
+                activated_at: "0".to_string(),
+            }),
+            module_import_mode: Some(ModuleImportMode::Module),
+            ..make_base_entry()
+        };
+
+        assert!(entry.is_module_active_for(
+            "exe-hash",
+            "0.113.1",
+            "/nu/vendor/autoload",
+            "/nu/vendor/autoload/numan.nu"
+        ));
+        assert!(!entry.is_module_active_for(
+            "wrong-hash",
+            "0.113.1",
+            "/nu/vendor/autoload",
+            "/nu/vendor/autoload/numan.nu"
+        ));
+        assert!(!entry.is_module_active_for(
+            "exe-hash",
+            "0.114.0",
+            "/nu/vendor/autoload",
+            "/nu/vendor/autoload/numan.nu"
+        ));
+        assert!(!entry.is_module_active_for(
+            "exe-hash",
+            "0.113.1",
+            "/other/vendor/autoload",
+            "/nu/vendor/autoload/numan.nu"
+        ));
+        assert!(!entry.is_module_active_for(
+            "exe-hash",
+            "0.113.1",
+            "/nu/vendor/autoload",
+            "/other/path/numan.nu"
+        ));
+    }
+
+    #[test]
+    fn is_module_activatable_requires_mode_entry_and_no_deps() {
+        use crate::core::package::ModuleImportMode;
+
+        // All three conditions met
+        let ready = LockfileEntry {
+            package_type: "module".to_string(),
+            entry: Some("mod.nu".to_string()),
+            module_import_mode: Some(ModuleImportMode::Module),
+            locked_dependencies: BTreeMap::new(),
+            ..make_base_entry()
+        };
+        assert!(ready.is_module_activatable());
+
+        // Missing entry
+        let no_entry = LockfileEntry {
+            package_type: "module".to_string(),
+            entry: None,
+            module_import_mode: Some(ModuleImportMode::Module),
+            ..make_base_entry()
+        };
+        assert!(!no_entry.is_module_activatable());
+
+        // Missing import mode
+        let no_mode = LockfileEntry {
+            package_type: "module".to_string(),
+            entry: Some("mod.nu".to_string()),
+            module_import_mode: None,
+            ..make_base_entry()
+        };
+        assert!(!no_mode.is_module_activatable());
+
+        // Has dependencies
+        let with_deps = LockfileEntry {
+            package_type: "module".to_string(),
+            entry: Some("mod.nu".to_string()),
+            module_import_mode: Some(ModuleImportMode::All),
+            locked_dependencies: {
+                let mut m = BTreeMap::new();
+                m.insert("owner/dep".to_string(), "^1.0.0".to_string());
+                m
+            },
+            ..make_base_entry()
+        };
+        assert!(!with_deps.is_module_activatable());
+    }
+
+    #[test]
+    fn module_fields_survive_lockfile_roundtrip() {
+        use crate::core::package::ModuleImportMode;
+
+        let mut lock = Lockfile {
+            version: 1,
+            generated_at: "ts".to_string(),
+            nu_version: "0.113.1".to_string(),
+            platform: "x86_64-linux-gnu".to_string(),
+            packages: HashMap::new(),
+        };
+
+        let mut deps = BTreeMap::new();
+        deps.insert("owner/lib".to_string(), "^2.0.0".to_string());
+
+        lock.packages.insert(
+            "owner/mymod".to_string(),
+            LockfileEntry {
+                package_type: "module".to_string(),
+                source: "archive".to_string(),
+                entry: Some("mod.nu".to_string()),
+                module_import_mode: Some(ModuleImportMode::All),
+                locked_dependencies: deps,
+                module_activation: Some(ModuleActivation {
+                    entry_path: "/root/packages/modules/owner/mymod/1.0.0-aaa/mod.nu".to_string(),
+                    import_mode: ModuleImportMode::All,
+                    vendor_autoload_dir: "/nu/vendor/autoload".to_string(),
+                    managed_file_path: "/nu/vendor/autoload/numan.nu".to_string(),
+                    nu_executable_sha256: "abc".to_string(),
+                    nu_version: "0.113.1".to_string(),
+                    activated_at: "ts".to_string(),
+                }),
+                payload_path: "packages/modules/owner/mymod/1.0.0-aaa".to_string(),
+                ..make_base_entry()
+            },
+        );
+
+        let json = serde_json::to_string_pretty(&lock).unwrap();
+        let parsed: Lockfile = serde_json::from_str(&json).unwrap();
+        let entry = parsed.packages.get("owner/mymod").unwrap();
+
+        assert_eq!(entry.module_import_mode, Some(ModuleImportMode::All));
+        assert_eq!(entry.locked_dependencies.len(), 1);
+        assert_eq!(
+            entry.locked_dependencies.get("owner/lib").unwrap(),
+            "^2.0.0"
+        );
+
+        let ma = entry.module_activation.as_ref().unwrap();
+        assert_eq!(ma.import_mode, ModuleImportMode::All);
+        assert_eq!(ma.vendor_autoload_dir, "/nu/vendor/autoload");
+        assert_eq!(ma.managed_file_path, "/nu/vendor/autoload/numan.nu");
+    }
+
+    #[test]
+    fn old_json_without_module_fields_deserializes_with_defaults() {
+        // Existing lockfile entries written before Phase 4 must still parse.
+        // All three new fields have #[serde(default)] and default to None/empty.
+        let json = r#"{
+            "version": 1,
+            "generated_at": "",
+            "nu_version": "0.113.1",
+            "platform": "x86_64-pc-windows-msvc",
+            "packages": {
+                "test/pkg": {
+                    "version": "1.0.0",
+                    "type": "plugin",
+                    "source": "binary",
+                    "installed_at": "0000000000000000",
+                    "payload_path": "packages/plugins/test/pkg/1.0.0-abc"
+                }
+            }
+        }"#;
+        let parsed: Lockfile = serde_json::from_str(json).unwrap();
+        let entry = parsed.packages.get("test/pkg").unwrap();
+        assert!(entry.module_activation.is_none());
+        assert!(entry.module_import_mode.is_none());
+        assert!(entry.locked_dependencies.is_empty());
     }
 
     #[test]

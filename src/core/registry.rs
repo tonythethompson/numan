@@ -144,7 +144,7 @@ impl RegistryManager {
 mod tests {
     use super::*;
     use crate::core::package::*;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     fn test_index() -> RegistryIndex {
         RegistryIndex {
@@ -171,7 +171,8 @@ mod tests {
                         entry: None,
                     },
                     source: None,
-                    dependencies: HashMap::new(),
+                    dependencies: BTreeMap::new(),
+                    activation: None,
                 }],
             }],
         }

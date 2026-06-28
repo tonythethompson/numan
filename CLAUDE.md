@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build                        # build
 cargo run -- search <query>        # run
-cargo test                         # all tests (38+)
+cargo test                         # all tests (234+)
 cargo test core::resolve           # single module (replace with any module path)
 cargo clippy -- -D warnings        # lint (CI enforces -D warnings)
 cargo fmt                          # format
@@ -31,7 +31,7 @@ Numan is a Rust CLI (`numan-cli` crate, `numan` binary) — a cross-platform pac
 
 ## Critical Rules
 
-1. **Install is inert** — `install` writes only to `$NUMAN_ROOT`. It never touches Nu (no plugin registration, no autoload). The `activate` command (not yet implemented) is the only one that may touch Nu.
+1. **Install is inert** — `install` writes only to `$NUMAN_ROOT`. It never touches Nu (no plugin registration, no autoload). The `activate` command is the only one that may touch Nu.
 2. **Platform triple comes from `#[cfg(target_env)]`** at compile time, not `std::env::consts`. See `core/platform.rs` — `LIBC` is a compile-time const.
 3. **Registry signatures are mandatory** — bypass requires `NUMAN_ALLOW_UNSIGNED=1` (dev only). Ed25519 signatures verified over exact `index.json` bytes.
 4. **Artifact SHA256 is mandatory for plugins** — the install transaction bails if `sha256` is missing from a binary artifact.
@@ -46,7 +46,10 @@ Numan is a Rust CLI (`numan-cli` crate, `numan` binary) — a cross-platform pac
 ## Phase Status
 
 - Phase 1 (foundation): complete
-- Phase 2 (install transaction): in progress — `install/transaction.rs` exists and is the main focus
-- Phases 3–7: not yet started (activate, source builds, update/remove, nupm interop, polish)
+- Phase 2 (install transaction): complete
+- Phase 3 (activate plugins): complete — `cmd/activate.rs`, journal recovery, drift detection
+- Phase 4 (activate modules/scripts/completions): complete — `nu/autoload.rs`, `state/autoload_state.rs`, `state/autoload_journal.rs`, `cmd/deactivate.rs`, `util/fs_safety.rs`
+- Phase 5 (source builds, update, remove): not yet started
+- Phases 6–7: not yet started (nupm interop, polish)
 
 See AGENTS.md for full conventions, git workflow, and dependency notes.

@@ -1,4 +1,5 @@
 pub mod atomic;
+pub mod fs_safety;
 
 pub fn format_timestamp() -> String {
     format!(

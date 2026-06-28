@@ -130,7 +130,7 @@ impl<'a> Resolver<'a> {
 mod tests {
     use super::*;
     use crate::core::package::*;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     fn test_plugin() -> Package {
         let mut targets = HashMap::new();
@@ -172,7 +172,8 @@ mod tests {
                         entry: None,
                     },
                     source: None,
-                    dependencies: HashMap::new(),
+                    dependencies: BTreeMap::new(),
+                    activation: None,
                 },
                 VersionEntry {
                     version: semver::Version::new(1, 0, 0),
@@ -188,7 +189,8 @@ mod tests {
                         entry: None,
                     },
                     source: None,
-                    dependencies: HashMap::new(),
+                    dependencies: BTreeMap::new(),
+                    activation: None,
                 },
             ],
         }

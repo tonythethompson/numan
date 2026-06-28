@@ -37,6 +37,8 @@ enum Commands {
     Install(cmd::install::InstallArgs),
     /// Activate installed plugins with Nu
     Activate(cmd::activate::ActivateArgs),
+    /// Deactivate active modules
+    Deactivate(cmd::deactivate::DeactivateArgs),
     /// List all installed packages
     List,
     /// Registry management
@@ -60,6 +62,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Info { id } => cmd::info::execute(&id, &root),
         Commands::Install(args) => cmd::install::execute(&args, &root),
         Commands::Activate(args) => cmd::activate::execute(&args, &root),
+        Commands::Deactivate(args) => cmd::deactivate::execute(&args, &root),
         Commands::List => cmd::list::execute(&root),
         Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
     }

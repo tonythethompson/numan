@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -105,7 +106,11 @@ pub struct VersionEntry {
     #[serde(default)]
     pub source: Option<SourceInfo>,
     #[serde(default)]
-    pub dependencies: std::collections::HashMap<String, String>,
+    pub dependencies: BTreeMap<String, String>,
+    /// Optional activation metadata for module packages.
+    /// `None` for plugins, scripts, and completions.
+    #[serde(default)]
+    pub activation: Option<RegistryActivationSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +144,42 @@ pub struct SourceInfo {
     pub cargo_name: String,
     #[serde(default)]
     pub cargo_lock_sha256: Option<String>,
+}
+
+/// How a module's exported symbols are imported into the Nu namespace.
+///
+/// Corresponds to `activation.import` in the registry entry.
+/// Defaults to `Module` (namespaced) when the field is omitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ModuleImportMode {
+    /// `use <path>` — symbols are namespaced under the module name.
+    #[default]
+    Module,
+    /// `use <path> *` — all exported symbols are imported without a prefix.
+    All,
+}
+
+impl fmt::Display for ModuleImportMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModuleImportMode::Module => write!(f, "module"),
+            ModuleImportMode::All => write!(f, "all"),
+        }
+    }
+}
+
+/// Registry metadata describing how a module package should be activated.
+///
+/// Stored under `activation` in a `VersionEntry`. Only `kind = "nu-module"`
+/// is recognized in Phase 4; all other kinds are rejected at activation time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryActivationSpec {
+    /// Must be `"nu-module"` for Nushell module packages.
+    pub kind: String,
+    /// Import mode for the module. Defaults to `ModuleImportMode::Module`.
+    #[serde(default)]
+    pub import: ModuleImportMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
