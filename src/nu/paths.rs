@@ -164,16 +164,18 @@ impl NuPaths {
             bail!("Nu data directory not cached. Run 'numan init --refresh' to update.");
         }
 
-        // Normalize both sides for comparison.
-        let cached: Vec<PathBuf> = self
+        // Normalize and sort both sides — Nu may return dirs in different order across runs.
+        let mut cached: Vec<PathBuf> = self
             .vendor_autoload_dirs
             .iter()
             .map(|s| normalize_path(Path::new(s)))
             .collect();
-        let current: Vec<PathBuf> = probe_dirs
+        cached.sort();
+        let mut current: Vec<PathBuf> = probe_dirs
             .iter()
             .map(|s| normalize_path(Path::new(s)))
             .collect();
+        current.sort();
 
         if cached != current {
             bail!(

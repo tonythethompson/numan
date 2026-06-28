@@ -468,14 +468,15 @@ pub fn replace_managed_file(managed_file: &Path, candidate: &Path) -> Result<()>
         assert_managed_file_owned(managed_file)?;
     }
 
-    // Atomically move candidate → managed file.
-    std::fs::rename(candidate, managed_file).with_context(|| {
-        format!(
-            "Failed to rename candidate '{}' to managed file '{}'",
-            candidate.display(),
-            managed_file.display()
-        )
-    })?;
+    // Read the validated candidate content.
+    let content = std::fs::read(candidate)
+        .with_context(|| format!("Failed to read candidate '{}'", candidate.display()))?;
+    // Remove the candidate before writing the managed file so no duplicate exists.
+    std::fs::remove_file(candidate)
+        .with_context(|| format!("Failed to remove candidate '{}'", candidate.display()))?;
+    // Write atomically — on Windows NamedTempFile::persist uses MoveFileExW with
+    // MOVEFILE_REPLACE_EXISTING, so this succeeds even when numan.nu already exists.
+    crate::util::atomic::write_bytes_atomic(managed_file, &content)?;
 
     Ok(())
 }

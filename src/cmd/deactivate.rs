@@ -74,8 +74,17 @@ fn execute_with_runner(
     // 4. Determine whether Nu has drifted (stale = binary changed since init).
     //    Full deactivation may proceed under stale Nu identity.
     //    Partial deactivation must not (it needs to re-generate a candidate).
-    let is_full_deactivation =
-        targets_requested.len() == count_active_modules(&lockfile, &nu_paths);
+    //
+    //    is_full_deactivation: ALL modules with any activation record are being
+    //    deactivated. We count any module_activation (regardless of Nu identity)
+    //    because classify_and_validate_packages collects all activated modules,
+    //    not just those matching current identity.
+    let total_with_any_activation = lockfile
+        .packages
+        .values()
+        .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
+        .count();
+    let is_full_deactivation = targets_requested.len() == total_with_any_activation;
     let nu_is_stale = nu_paths.validate_drift().is_err();
 
     if nu_is_stale && !is_full_deactivation {
@@ -124,10 +133,26 @@ fn execute_with_runner(
         lockfile.snapshot(root)?;
     }
 
-    // All targets share the same managed_file_path (there is only one managed file).
-    // Verify they all agree on the managed file path.
+    // All targets must agree on the same managed file path and vendor dir.
+    // If activations point at different targets (e.g. after a stale refresh or
+    // manual lockfile edits) we bail rather than silently mutating the wrong file.
     let managed_file_path = targets_requested[0].managed_file_path.clone();
     let vendor_autoload_dir = targets_requested[0].vendor_autoload_dir.clone();
+    for t in &targets_requested[1..] {
+        if t.managed_file_path != managed_file_path || t.vendor_autoload_dir != vendor_autoload_dir
+        {
+            bail!(
+                "Module activations point to different managed files:\n  \
+                 '{}' ({})\n  vs '{}' ({})\n\
+                 Run 'numan activate --check' to inspect state, or \
+                 'numan init --refresh' to reset the vendor-autoload target.",
+                managed_file_path,
+                targets_requested[0].package_id,
+                t.managed_file_path,
+                t.package_id
+            );
+        }
+    }
 
     // The set of module IDs that will REMAIN active after this deactivation
     let currently_active_ids: Vec<String> = AutoloadState::active_module_ids_from_lockfile(
@@ -291,6 +316,8 @@ fn classify_and_validate_packages(
 }
 
 /// Count the number of modules currently active for the given Nu identity.
+/// Used only in tests.
+#[cfg(test)]
 fn count_active_modules(lockfile: &Lockfile, nu_paths: &NuPaths) -> usize {
     let vendor_dir = nu_paths.vendor_autoload_dir.as_deref().unwrap_or("");
     let managed_path_str = if vendor_dir.is_empty() {
@@ -674,11 +701,33 @@ fn reconcile_autoload_journal(
                                 if pkg.package_type != "module" {
                                     continue;
                                 }
-                                let entry_path = pkg
-                                    .module_activation
-                                    .as_ref()
-                                    .map(|ma| ma.entry_path.clone())
-                                    .unwrap_or_default();
+                                let entry_path = if let Some(ma) = &pkg.module_activation {
+                                    ma.entry_path.clone()
+                                } else {
+                                    let payload = &pkg.payload_path;
+                                    let rel = pkg.entry.as_deref().ok_or_else(|| {
+                                        anyhow::anyhow!(
+                                            "Cannot recover module '{}': entry not set in lockfile",
+                                            pkg_id
+                                        )
+                                    })?;
+                                    if payload.is_empty() {
+                                        bail!(
+                                            "Cannot recover module '{}': payload_path not set",
+                                            pkg_id
+                                        );
+                                    }
+                                    std::path::Path::new(payload)
+                                        .join(rel)
+                                        .to_str()
+                                        .ok_or_else(|| {
+                                            anyhow::anyhow!(
+                                                "Cannot recover module '{}': entry path is not valid UTF-8",
+                                                pkg_id
+                                            )
+                                        })?
+                                        .to_owned()
+                                };
                                 let import_mode = pkg
                                     .module_import_mode
                                     .clone()

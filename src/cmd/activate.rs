@@ -119,22 +119,14 @@ fn execute_with_registrar_and_runner(
         return execute_check(args, &lockfile, &nu_paths, root);
     }
 
-    // 4. Reconcile any interrupted plugin journal
-    {
-        let mut lf = Lockfile::load(root)?;
-        reconcile_plugin_journal(root, &nu_paths, &mut lf)?;
-    }
+    // 4. Preflight: validate any pending journal identity before touching targets.
+    //    This is read-only — bails if a stale-identity journal exists so the user
+    //    is warned before the consent table is printed.
+    check_journals_for_stale_identity(root, &nu_paths)?;
 
-    // 5. Reconcile any interrupted module-autoload journal
-    {
-        let mut lf = Lockfile::load(root)?;
-        reconcile_autoload_journal(root, &nu_paths, &mut lf)?;
-    }
-
-    // Reload lockfile after reconciliation (immutable — only used for target resolution)
+    // 5. Resolve plugin and module targets from the current lockfile snapshot
+    //    (pre-lock read — used only for consent table display).
     let lockfile = Lockfile::load(root)?;
-
-    // 6. Resolve plugin and module targets separately
     let plugin_targets = resolve_plugin_targets(args, &lockfile, &nu_paths, root)?;
     let module_targets = resolve_module_targets(args, &lockfile, &nu_paths)?;
 
@@ -184,7 +176,24 @@ fn execute_with_registrar_and_runner(
     // Reload lockfile under the lock to get the latest state
     let mut lockfile = Lockfile::load(root)?;
 
-    // 10. Snapshot lockfile once before first mutation
+    // 10. Reconcile any interrupted journals under the lock so recovery
+    //     mutations are serialized with all other writes.
+    reconcile_plugin_journal(root, &nu_paths, &mut lockfile)?;
+    reconcile_autoload_journal(root, &nu_paths, &mut lockfile)?;
+    // Reload after reconciliation — recovery may have mutated the lockfile.
+    lockfile = Lockfile::load(root)?;
+
+    // Re-resolve targets from the post-reconciliation lockfile so packages
+    // that were just reconciled (already activated) are correctly skipped.
+    let plugin_targets = resolve_plugin_targets(args, &lockfile, &nu_paths, root)?;
+    let module_targets = resolve_module_targets(args, &lockfile, &nu_paths)?;
+
+    if plugin_targets.is_empty() && module_targets.is_empty() {
+        println!("Nothing to activate.");
+        return Ok(());
+    }
+
+    // 11. Snapshot lockfile once before first mutation
     if !lockfile.is_empty() {
         lockfile.snapshot(root)?;
     }
@@ -996,6 +1005,37 @@ fn resolve_module_targets(
 
 // ── Journal reconciliation ─────────────────────────────────────────────────────
 
+/// Read-only preflight check: bail if any pending journal has a mismatched Nu
+/// identity. Runs before consent table display so the user is warned immediately.
+/// Does NOT mutate any state — reconciliation mutations happen inside the lock.
+fn check_journals_for_stale_identity(root: &Path, nu_paths: &NuPaths) -> Result<()> {
+    if let Some(j) = PendingActivation::load(root)? {
+        if !j.matches_nu_identity(
+            &nu_paths.nu_executable_hash,
+            &nu_paths.nu_version,
+            &nu_paths.plugin_registry_path,
+        ) {
+            bail!(
+                "A pending plugin activation journal exists from a different Nu identity.\n\
+                 Run 'numan init --refresh' to clear stale state, then retry.\n\
+                 Journal: {}",
+                root.join("state/pending-activation.json").display()
+            );
+        }
+    }
+    if let Some(j) = PendingAutoload::load(root)? {
+        if !j.matches_nu_identity(&nu_paths.nu_executable_hash, &nu_paths.nu_version) {
+            bail!(
+                "A pending module-autoload journal exists from a different Nu identity.\n\
+                 Run 'numan init --refresh' to clear stale state, then retry.\n\
+                 Journal: {}",
+                root.join("state/pending-autoload.json").display()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Reconcile any interrupted plugin activation journal.
 fn reconcile_plugin_journal(
     root: &Path,
@@ -1103,13 +1143,36 @@ fn reconcile_autoload_journal(
                             if pkg.package_type != "module" {
                                 continue;
                             }
-                            // Preserve existing entry_path if already set, otherwise
-                            // try to reconstruct from lockfile entry
-                            let entry_path = pkg
-                                .module_activation
-                                .as_ref()
-                                .map(|ma| ma.entry_path.clone())
-                                .unwrap_or_default();
+                            // Prefer existing entry_path from an already-written activation
+                            // record. If the crash happened before any activation was
+                            // written, reconstruct from install-time payload_path + entry.
+                            let entry_path = if let Some(ma) = &pkg.module_activation {
+                                ma.entry_path.clone()
+                            } else {
+                                let payload = &pkg.payload_path;
+                                let rel = pkg.entry.as_deref().ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "Cannot recover module '{}': entry not set in lockfile",
+                                        pkg_id
+                                    )
+                                })?;
+                                if payload.is_empty() {
+                                    bail!(
+                                        "Cannot recover module '{}': payload_path not set in lockfile",
+                                        pkg_id
+                                    );
+                                }
+                                std::path::Path::new(payload)
+                                    .join(rel)
+                                    .to_str()
+                                    .ok_or_else(|| {
+                                        anyhow::anyhow!(
+                                            "Cannot recover module '{}': entry path is not valid UTF-8",
+                                            pkg_id
+                                        )
+                                    })?
+                                    .to_owned()
+                            };
                             let import_mode = pkg
                                 .module_import_mode
                                 .clone()
