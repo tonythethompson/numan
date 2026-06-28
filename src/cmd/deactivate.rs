@@ -717,7 +717,9 @@ fn reconcile_autoload_journal(
                                             pkg_id
                                         );
                                     }
-                                    std::path::Path::new(payload)
+                                    // payload_path is relative to root — join with root
+                                    // to get the absolute path that entry_path must hold.
+                                    root.join(payload)
                                         .join(rel)
                                         .to_str()
                                         .ok_or_else(|| {

@@ -418,7 +418,23 @@ fn run_module_lane(
     // Record previous managed file state for journal
     let previous_file_exists = managed_path.exists();
     let previous_file_sha256 = if previous_file_exists {
-        Some(sha256_file(managed_path)?)
+        let live_sha = sha256_file(managed_path)?;
+        // Compare against autoload-state.json to detect edits that left the
+        // ownership header intact but changed the file body (drift).
+        if let Some(state) = AutoloadState::load(root)? {
+            if state.generated_file_sha256 != live_sha {
+                bail!(
+                    "Numan managed-file drift detected.\n\n\
+                     numan.nu was changed outside of Numan (SHA-256 mismatch with \
+                     autoload-state.json). Numan will not overwrite it automatically.\n\
+                     Expected: {}\n\
+                     Found:    {}",
+                    state.generated_file_sha256,
+                    live_sha
+                );
+            }
+        }
+        Some(live_sha)
     } else {
         None
     };
@@ -1162,7 +1178,9 @@ fn reconcile_autoload_journal(
                                         pkg_id
                                     );
                                 }
-                                std::path::Path::new(payload)
+                                // payload_path is relative to root — join with root
+                                // to get the absolute path that entry_path must hold.
+                                root.join(payload)
                                     .join(rel)
                                     .to_str()
                                     .ok_or_else(|| {

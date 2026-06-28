@@ -329,8 +329,13 @@ pub fn install_package(
 
     // Capture module-specific activation metadata from registry at install time
     // so that activation can proceed without re-querying the registry.
-    let module_import_mode: Option<ModuleImportMode> =
-        resolved.activation.as_ref().map(|spec| spec.import.clone());
+    // Only persist import mode for known "nu-module" kind — unknown/future kinds
+    // must not be silently treated as Nu module autoloads.
+    let module_import_mode: Option<ModuleImportMode> = resolved
+        .activation
+        .as_ref()
+        .filter(|spec| spec.kind == "nu-module")
+        .map(|spec| spec.import.clone());
 
     let locked_dependencies: BTreeMap<String, String> = resolved
         .dependencies
