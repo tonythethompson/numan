@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::state::lifecycle_journal::{LifecycleOp, LifecycleStage, PendingLifecycle};
 use crate::state::lockfile::Lockfile;
+use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Remove an installed package
 #[derive(Parser)]
@@ -17,6 +18,8 @@ pub struct RemoveArgs {
 }
 
 pub fn execute(args: &RemoveArgs, root: &Path) -> Result<()> {
+    let _lock = acquire_mutation_lock(root)?;
+
     let mut lockfile = Lockfile::load(root)?;
 
     let entry = match lockfile.packages.get(&args.package) {
