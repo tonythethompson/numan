@@ -377,7 +377,7 @@ pub fn install_package(
         built_sha256: None,
         payload_path: payload_rel_path,
         revision_id,
-        payload_sha256: artifact_sha256.clone(),
+        payload_sha256: Some(integrity::compute_sha256(&std::fs::read(&cache_file)?)),
         executable_sha256: None,
         selection_reason,
         origin: Some(format!("registry:{}", verified.registry_name)),
