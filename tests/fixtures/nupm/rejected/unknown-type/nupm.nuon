@@ -1,0 +1,5 @@
+{
+    name: mystery
+    type: overlay
+    version: "0.0.1"
+}

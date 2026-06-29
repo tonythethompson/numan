@@ -102,6 +102,10 @@ tests/                 — Integration tests
 4. Update AGENTS.md if structure/conventions change
 5. Open PR with description
 
+## PR review guidance
+
+Automated and human PR reviewers should follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md) for review checklists, severity expectations, and architecture invariants to flag. Keep that file updated when review conventions change; link here rather than duplicating review rules in this doc.
+
 ## Dependencies
 - clap (CLI), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
 - sha2/hex (integrity), ed25519-dalek/base64 (signatures), semver (versioning)

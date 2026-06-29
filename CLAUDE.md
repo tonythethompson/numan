@@ -15,6 +15,10 @@ cargo fmt                          # format
 
 CI runs `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt --check` on Ubuntu, Windows, and macOS.
 
+## PR review guidance
+
+When reviewing pull requests (or preparing changes for review), follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md). It defines CI gates, architecture invariants, mutation-lock expectations, and severity labels for findings.
+
 ## Architecture
 
 Numan is a Rust CLI (`numan-cli` crate, `numan` binary) — a cross-platform package manager for Nushell.

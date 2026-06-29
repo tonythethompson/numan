@@ -1,0 +1,6 @@
+{
+    name: dep-module
+    type: module
+    version: "0.1.0"
+    deps: { other-pkg: "1.0.0" }
+}
