@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crate::core::nu_version::NuVersion;
 use crate::core::platform::Platform;
 use crate::install::transaction;
+use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Install a package
 #[derive(Parser)]
@@ -22,6 +23,8 @@ pub struct InstallArgs {
 }
 
 pub fn execute(args: &InstallArgs, root: &PathBuf) -> Result<()> {
+    let _lock = acquire_mutation_lock(root)?;
+
     let platform = Platform::detect();
     let nu_version = NuVersion::detect().unwrap_or_else(|e| {
         eprintln!("Warning: Could not detect Nu version: {e}");
@@ -39,6 +42,7 @@ pub fn execute(args: &InstallArgs, root: &PathBuf) -> Result<()> {
         nu_version: &nu_version,
         force: args.force,
         verbose: args.verbose,
+        registry_name: None,
     };
 
     let version = if args.package.contains('@') {

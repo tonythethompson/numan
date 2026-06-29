@@ -191,7 +191,7 @@ mod tests {
     use super::*;
     use crate::core::package::ModuleImportMode;
     use crate::state::lockfile::{Lockfile, LockfileEntry, ModuleActivation};
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     fn make_state(ids: Vec<&str>) -> AutoloadState {
         AutoloadState::new(
@@ -206,7 +206,7 @@ mod tests {
     }
 
     fn make_lockfile_with_active_modules(ids: &[&str]) -> Lockfile {
-        let mut packages = HashMap::new();
+        let mut packages = BTreeMap::new();
         for id in ids {
             packages.insert(
                 id.to_string(),
@@ -234,6 +234,11 @@ mod tests {
                     cargo_lock_sha256: None,
                     built_sha256: None,
                     payload_path: format!("packages/modules/{}/1.0.0-abc", id),
+                    revision_id: None,
+                    payload_sha256: None,
+                    executable_sha256: None,
+                    selection_reason: None,
+                    origin: None,
                     module_activation: Some(ModuleActivation {
                         entry_path: format!("/root/packages/modules/{}/1.0.0-abc/mod.nu", id),
                         import_mode: ModuleImportMode::Module,
@@ -249,7 +254,7 @@ mod tests {
             );
         }
         Lockfile {
-            version: 1,
+            version: 2,
             generated_at: "ts".to_string(),
             nu_version: "0.113.1".to_string(),
             platform: "x86_64-linux-gnu".to_string(),

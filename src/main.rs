@@ -35,6 +35,12 @@ enum Commands {
     },
     /// Install a package
     Install(cmd::install::InstallArgs),
+    /// Update installed packages to their latest compatible versions
+    Update(cmd::update::UpdateArgs),
+    /// Remove an installed package
+    Remove(cmd::remove::RemoveArgs),
+    /// Garbage-collect orphaned package directories
+    Gc(cmd::gc::GcArgs),
     /// Activate installed plugins with Nu
     Activate(cmd::activate::ActivateArgs),
     /// Deactivate active modules
@@ -61,6 +67,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Search { query } => cmd::search::execute(&query, &root),
         Commands::Info { id } => cmd::info::execute(&id, &root),
         Commands::Install(args) => cmd::install::execute(&args, &root),
+        Commands::Update(args) => cmd::update::execute(&args, &root),
+        Commands::Remove(args) => cmd::remove::execute(&args, &root),
+        Commands::Gc(args) => cmd::gc::execute(&args, &root),
         Commands::Activate(args) => cmd::activate::execute(&args, &root),
         Commands::Deactivate(args) => cmd::deactivate::execute(&args, &root),
         Commands::List => cmd::list::execute(&root),

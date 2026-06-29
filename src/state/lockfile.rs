@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::core::integrity::compute_sha256;
 use crate::core::package::ModuleImportMode;
 use crate::util::atomic::write_json_atomic;
 
@@ -50,7 +51,7 @@ pub struct Lockfile {
     pub generated_at: String,
     pub nu_version: String,
     pub platform: String,
-    pub packages: HashMap<String, LockfileEntry>,
+    pub packages: BTreeMap<String, LockfileEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +106,38 @@ pub struct LockfileEntry {
     /// E.g., "packages/plugins/fdncred/file/0.25.2-abc12345"
     #[serde(default)]
     pub payload_path: String,
+
+    // Phase 5 schema v2 fields
+    /// Manifest hash of the installed payload directory.
+    ///
+    /// Computed as SHA256 of sorted "path:sha256:kind" lines for every file
+    /// under the payload directory. Use `compute_revision_id()` to derive it.
+    /// `None` for entries written by pre-v2 tooling (v1 lockfiles).
+    #[serde(default)]
+    pub revision_id: Option<String>,
+
+    /// SHA256 of the payload archive (tarball / zip) as downloaded from the
+    /// artifact URL. Distinct from `artifact_sha256` (the registry-declared
+    /// digest used for integrity verification).
+    /// `None` for entries that do not have a downloadable payload archive.
+    #[serde(default)]
+    pub payload_sha256: Option<String>,
+
+    /// SHA256 of the plugin executable extracted from the payload archive.
+    /// Only set for `type = "plugin"` entries; `None` for all other types.
+    #[serde(default)]
+    pub executable_sha256: Option<String>,
+
+    /// Human-readable reason the resolver chose this version over alternatives
+    /// (e.g. `"exact match"`, `"highest compatible semver"`).
+    /// For informational/debugging purposes only.
+    #[serde(default)]
+    pub selection_reason: Option<String>,
+
+    /// Origin of the install request that created this entry.
+    /// E.g. `"registry:official"`, `"direct"`, `"source"`.
+    #[serde(default)]
+    pub origin: Option<String>,
 
     // Module-specific fields (Phase 4)
     /// Activation record for this module under a specific Nu identity and
@@ -208,17 +241,85 @@ impl Lockfile {
 
     pub fn empty() -> Self {
         Self {
-            version: 1,
+            version: 2,
             generated_at: String::new(),
             nu_version: String::new(),
             platform: String::new(),
-            packages: HashMap::new(),
+            packages: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.packages.is_empty()
     }
+}
+
+/// Compute the `revision_id` for an installed payload directory.
+///
+/// Walks every file under `payload_dir` recursively, builds a sorted list of
+/// `"<relative-path>:<sha256>:<kind>"` lines (where `kind` is `"file"` for all
+/// regular files), joins them with `"\n"`, and returns the SHA-256 hex digest of
+/// that UTF-8 manifest string.
+///
+/// Paths are represented with forward-slash separators regardless of the host
+/// OS, and are relative to `payload_dir`.  Only regular files are included;
+/// directories and symlinks are skipped.
+///
+/// Returns `None` when `payload_dir` does not exist or cannot be read, so
+/// callers may gracefully degrade rather than failing an install.
+pub fn compute_revision_id(payload_dir: &Path) -> Option<String> {
+    let mut lines: BTreeMap<String, String> = BTreeMap::new();
+
+    fn walk(base: &Path, dir: &Path, lines: &mut BTreeMap<String, String>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() {
+                walk(base, &path, lines);
+            } else if file_type.is_file() {
+                let rel = match path.strip_prefix(base) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                // Normalise to forward-slash separators for cross-platform
+                // determinism.
+                let rel_str = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let content = match std::fs::read(&path) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let sha = compute_sha256(&content);
+                let line = format!("{sha}:file");
+                lines.insert(rel_str, line);
+            }
+        }
+    }
+
+    if !payload_dir.exists() {
+        return None;
+    }
+
+    walk(payload_dir, payload_dir, &mut lines);
+
+    // Build the manifest: sorted "path:sha256:kind" lines.
+    let manifest = lines
+        .into_iter()
+        .map(|(path, digest_kind)| format!("{path}:{digest_kind}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Some(compute_sha256(manifest.as_bytes()))
 }
 
 #[cfg(test)]
@@ -236,11 +337,11 @@ mod tests {
     #[test]
     fn lockfile_roundtrip_with_entry() {
         let mut lock = Lockfile {
-            version: 1,
+            version: 2,
             generated_at: "2026-06-27T12:00:00Z".to_string(),
             nu_version: "0.113.1".to_string(),
             platform: "x86_64-pc-windows-msvc".to_string(),
-            packages: HashMap::new(),
+            packages: BTreeMap::new(),
         };
 
         lock.packages.insert(
@@ -269,6 +370,11 @@ mod tests {
                 cargo_lock_sha256: None,
                 built_sha256: None,
                 payload_path: "packages/plugins/test/pkg/1.0.0-abc12345".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
                 module_activation: None,
                 module_import_mode: None,
                 locked_dependencies: BTreeMap::new(),
@@ -339,6 +445,11 @@ mod tests {
             cargo_lock_sha256: None,
             built_sha256: None,
             payload_path: String::new(),
+            revision_id: None,
+            payload_sha256: None,
+            executable_sha256: None,
+            selection_reason: None,
+            origin: None,
             module_activation: None,
             module_import_mode: None,
             locked_dependencies: BTreeMap::new(),
@@ -466,11 +577,11 @@ mod tests {
         use crate::core::package::ModuleImportMode;
 
         let mut lock = Lockfile {
-            version: 1,
+            version: 2,
             generated_at: "ts".to_string(),
             nu_version: "0.113.1".to_string(),
             platform: "x86_64-linux-gnu".to_string(),
-            packages: HashMap::new(),
+            packages: BTreeMap::new(),
         };
 
         let mut deps = BTreeMap::new();
@@ -546,14 +657,155 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         let lock = Lockfile {
-            version: 1,
+            version: 2,
             generated_at: "ts".to_string(),
             nu_version: "0.113.1".to_string(),
             platform: "x86_64-pc-windows-msvc".to_string(),
-            packages: HashMap::new(),
+            packages: BTreeMap::new(),
         };
         lock.save(&root).unwrap();
         let loaded = Lockfile::load(&root).unwrap();
         assert_eq!(loaded.nu_version, "0.113.1");
+    }
+
+    /// v1 lockfile JSON (no revision_id, payload_sha256, executable_sha256,
+    /// selection_reason, or origin fields) must deserialize cleanly into a v2
+    /// `LockfileEntry` with all new fields defaulting to `None`.
+    #[test]
+    fn v1_to_v2_migration_new_fields_default_to_none() {
+        let json = r#"{
+            "version": 1,
+            "generated_at": "0000000000000000",
+            "nu_version": "0.113.1",
+            "platform": "x86_64-pc-windows-msvc",
+            "packages": {
+                "fdncred/file": {
+                    "version": "0.25.2",
+                    "type": "plugin",
+                    "source": "binary",
+                    "target": "x86_64-pc-windows-msvc",
+                    "artifact_url": "https://example.com/nu_plugin_file.zip",
+                    "artifact_sha256": "abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+                    "executable_path": "nu_plugin_file.exe",
+                    "installed_at": "0000000000000001",
+                    "payload_path": "packages/plugins/fdncred/file/0.25.2-abc123de"
+                }
+            }
+        }"#;
+
+        let parsed: Lockfile = serde_json::from_str(json).unwrap();
+        // Schema version is preserved as-is from the JSON (v1).
+        assert_eq!(parsed.version, 1);
+
+        let entry = parsed.packages.get("fdncred/file").unwrap();
+
+        // Core fields must parse correctly.
+        assert_eq!(entry.version, "0.25.2");
+        assert_eq!(entry.package_type, "plugin");
+        assert_eq!(
+            entry.artifact_sha256.as_deref(),
+            Some("abc123def456abc123def456abc123def456abc123def456abc123def456abcd")
+        );
+
+        // All v2-only fields must default to None.
+        assert!(
+            entry.revision_id.is_none(),
+            "revision_id should default to None"
+        );
+        assert!(
+            entry.payload_sha256.is_none(),
+            "payload_sha256 should default to None"
+        );
+        assert!(
+            entry.executable_sha256.is_none(),
+            "executable_sha256 should default to None"
+        );
+        assert!(
+            entry.selection_reason.is_none(),
+            "selection_reason should default to None"
+        );
+        assert!(entry.origin.is_none(), "origin should default to None");
+
+        // Existing optional fields that were absent also default to None.
+        assert!(entry.activation.is_none());
+        assert!(entry.module_activation.is_none());
+        assert!(entry.module_import_mode.is_none());
+        assert!(entry.locked_dependencies.is_empty());
+    }
+
+    #[test]
+    fn compute_revision_id_is_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // Write a pair of files.
+        std::fs::write(root.join("a.nu"), b"def foo [] { }").unwrap();
+        std::fs::write(root.join("b.nu"), b"def bar [] { }").unwrap();
+
+        let id1 = compute_revision_id(root).expect("should compute revision_id");
+        let id2 = compute_revision_id(root).expect("should compute revision_id again");
+
+        // Same directory contents → identical digest.
+        assert_eq!(id1, id2);
+        // SHA-256 hex is 64 characters.
+        assert_eq!(id1.len(), 64);
+    }
+
+    #[test]
+    fn compute_revision_id_changes_when_content_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("mod.nu"), b"version 1").unwrap();
+        let id_before = compute_revision_id(root).unwrap();
+
+        std::fs::write(root.join("mod.nu"), b"version 2").unwrap();
+        let id_after = compute_revision_id(root).unwrap();
+
+        assert_ne!(id_before, id_after);
+    }
+
+    #[test]
+    fn compute_revision_id_nonexistent_dir_returns_none() {
+        use std::path::PathBuf;
+        let path = PathBuf::from("/nonexistent/payload/directory");
+        assert!(compute_revision_id(&path).is_none());
+    }
+
+    #[test]
+    fn v2_fields_roundtrip() {
+        let mut lock = Lockfile {
+            version: 2,
+            generated_at: "ts".to_string(),
+            nu_version: "0.113.1".to_string(),
+            platform: "x86_64-pc-windows-msvc".to_string(),
+            packages: BTreeMap::new(),
+        };
+        lock.packages.insert(
+            "owner/pkg".to_string(),
+            LockfileEntry {
+                revision_id: Some("deadbeef".repeat(8)),
+                payload_sha256: Some("payload-hash".to_string()),
+                executable_sha256: Some("exe-hash".to_string()),
+                selection_reason: Some("highest compatible semver".to_string()),
+                origin: Some("registry:official".to_string()),
+                ..make_base_entry()
+            },
+        );
+
+        let json = serde_json::to_string_pretty(&lock).unwrap();
+        let parsed: Lockfile = serde_json::from_str(&json).unwrap();
+        let entry = parsed.packages.get("owner/pkg").unwrap();
+
+        assert_eq!(
+            entry.revision_id.as_deref(),
+            Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+        );
+        assert_eq!(entry.payload_sha256.as_deref(), Some("payload-hash"));
+        assert_eq!(entry.executable_sha256.as_deref(), Some("exe-hash"));
+        assert_eq!(
+            entry.selection_reason.as_deref(),
+            Some("highest compatible semver")
+        );
+        assert_eq!(entry.origin.as_deref(), Some("registry:official"));
     }
 }
