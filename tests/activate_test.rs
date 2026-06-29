@@ -87,22 +87,6 @@ impl TestEnv {
         payload_path
     }
 
-    /// Create a plugin binary with a space in the name.
-    fn create_plugin_binary_with_spaces(
-        &self,
-        owner: &str,
-        name: &str,
-        version: &str,
-    ) -> (String, String) {
-        let payload_path = format!("packages/plugins/{owner}/{name}/{version}-abc12345");
-        // Use a subdirectory with spaces
-        let install_dir = self.root().join(&payload_path);
-        std::fs::create_dir_all(&install_dir).unwrap();
-        let bin_name = format!("nu_plugin_{name}");
-        std::fs::write(install_dir.join(&bin_name), b"fake plugin binary").unwrap();
-        (payload_path, bin_name)
-    }
-
     fn make_plugin_entry(
         &self,
         owner: &str,
@@ -168,10 +152,6 @@ impl TestEnv {
 
 fn ok_registrar(_nu: &str, _binary: &str, _config: &str) -> anyhow::Result<()> {
     Ok(())
-}
-
-fn fail_registrar(_nu: &str, _binary: &str, _config: &str) -> anyhow::Result<()> {
-    bail!("Simulated plugin add failure")
 }
 
 // ─── tests ──────────────────────────────────────────────────────────────────
@@ -412,7 +392,7 @@ fn test_activate_partial_failure_nonzero() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let counter = call_count.clone();
 
-    let result = execute_with_registrar(&env.no_args(), &env.root(), &|_nu, binary, _cfg| {
+    let result = execute_with_registrar(&env.no_args(), &env.root(), &|_nu, _binary, _cfg| {
         let n = counter.fetch_add(1, Ordering::SeqCst);
         // First call succeeds, second fails
         if n == 0 {

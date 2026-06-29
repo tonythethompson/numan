@@ -237,7 +237,7 @@ fn integration_install_rejects_tampered_signature() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
 
-    let signing_key = setup_trusted_key(&root, "official");
+    let _signing_key = setup_trusted_key(&root, "official");
 
     // Create index
     let index = RegistryIndex {
