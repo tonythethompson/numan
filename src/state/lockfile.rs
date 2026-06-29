@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::core::integrity::compute_sha256;
 use crate::core::package::ModuleImportMode;
+use crate::nupm_compat::schema::NUPM_IMPORT_ORIGIN;
 use crate::util::atomic::write_json_atomic;
 
 /// Per-Nu-identity activation record stored on a plugin lockfile entry.
@@ -253,11 +254,11 @@ impl Lockfile {
         self.packages.is_empty()
     }
 
-    /// Count lockfile entries imported from nupm (`origin == "nupm_import"`).
+    /// Count lockfile entries imported from nupm (`origin == NUPM_IMPORT_ORIGIN`).
     pub fn count_nupm_imports(&self) -> usize {
         self.packages
             .values()
-            .filter(|e| e.origin.as_deref() == Some("nupm_import"))
+            .filter(|e| e.origin.as_deref() == Some(NUPM_IMPORT_ORIGIN))
             .count()
     }
 }
@@ -345,7 +346,7 @@ mod tests {
                 source: "nupm".to_string(),
                 installed_at: String::new(),
                 payload_path: "packages/modules/a/b/1".to_string(),
-                origin: Some("nupm_import".to_string()),
+                origin: Some(NUPM_IMPORT_ORIGIN.to_string()),
                 ..minimal_lockfile_entry_defaults()
             },
         );

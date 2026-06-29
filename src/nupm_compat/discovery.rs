@@ -138,10 +138,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 }
 
 fn normalize_key(path: &Path) -> OsString {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .as_os_str()
-        .to_os_string()
+    path.as_os_str().to_os_string()
 }
 
 pub fn inspect_path(path: &Path) -> Result<SourceRootEntry> {

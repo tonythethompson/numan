@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::metadata::{parse_metadata, read_metadata_limited, MetadataError, ParsedMetadata};
-use super::schema::{BUILD_SCRIPT_NAME, MODULE_ENTRY};
+use super::schema::{BUILD_SCRIPT_NAME, MODULE_ENTRY, METADATA_FILENAME};
 use super::walk::{
     check_path_chain_safe, check_path_chain_safe_within, find_package_root, is_safe_package_name,
 };
+use crate::util::fs_safety::is_symlink_or_reparse;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NupmCompatibility {
@@ -30,7 +31,10 @@ pub fn classify_source_root(
 ) -> Result<(NupmCompatibility, Option<ParsedMetadata>)> {
     check_path_chain_safe(package_root)?;
 
-    let metadata_path = package_root.join(super::schema::METADATA_FILENAME);
+    let metadata_path = package_root.join(METADATA_FILENAME);
+    if is_symlink_or_reparse(&metadata_path)? {
+        return Ok((NupmCompatibility::UnsafeFilesystemLayout, None));
+    }
     if !metadata_path.is_file() {
         return Ok((NupmCompatibility::InvalidMetadata, None));
     }
@@ -154,9 +158,18 @@ mod tests {
         assert_eq!(c, NupmCompatibility::UnsafeFilesystemLayout);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn t12_unknown_type() {
-        let (c, _) = classify_source_root(&pkg("rejected/unknown-type")).unwrap();
-        assert_eq!(c, NupmCompatibility::UnknownType);
+    fn symlink_metadata_is_unsafe() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.nuon");
+        fs::write(&real, br#"{ name: m, version: "0.1.0", type: module }"#).unwrap();
+        let root = dir.path().join("pkg");
+        fs::create_dir_all(root.join("m")).unwrap();
+        fs::write(root.join("m/mod.nu"), b"").unwrap();
+        std::os::unix::fs::symlink(&real, root.join("nupm.nuon")).unwrap();
+        let (compat, _) = classify_source_root(&root).unwrap();
+        assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
     }
 }

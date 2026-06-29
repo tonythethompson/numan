@@ -8,21 +8,20 @@ use super::schema::{MAX_PARENT_WALK_HOPS, METADATA_FILENAME};
 
 /// Walk parents from `start` looking for `nupm.nuon` (bounded).
 pub fn find_package_root(start: &Path) -> Result<Option<PathBuf>> {
-    let start = start
-        .canonicalize()
+    let start = absolute_path(start)
         .with_context(|| format!("Failed to resolve path '{}'", start.display()))?;
+    check_path_prefixes_for_symlinks(&start)?;
 
-    let mut current = start.clone();
+    let mut current = start;
     for _ in 0..MAX_PARENT_WALK_HOPS {
-        check_path_chain_safe(&current)?;
         let candidate = current.join(METADATA_FILENAME);
-        if candidate.is_file() {
-            if is_symlink_or_reparse(&candidate)? {
-                anyhow::bail!(
-                    "Unsafe filesystem layout: metadata file '{}' is a symlink or reparse point",
-                    candidate.display()
-                );
-            }
+        if is_symlink_or_reparse(&candidate)? {
+            anyhow::bail!(
+                "Unsafe filesystem layout: metadata file '{}' is a symlink or reparse point",
+                candidate.display()
+            );
+        }
+        if is_regular_file(&candidate)? {
             return Ok(Some(current));
         }
         match current.parent() {
@@ -89,6 +88,55 @@ pub fn check_path_chain_safe_within(base: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
+fn is_regular_file(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => Ok(meta.is_file()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e).with_context(|| format!("Failed to read metadata for '{}'", path.display())),
+    }
+}
+
+/// Reject symlink/reparse components in `path`, skipping the first normal segment after the
+/// volume root so OS-level links such as macOS `/var` → `/private/var` do not false-positive.
+fn check_path_prefixes_for_symlinks(path: &Path) -> Result<()> {
+    let mut prefix = PathBuf::new();
+    let mut normal_depth = 0usize;
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                anyhow::bail!(
+                    "Unsafe filesystem layout: path '{}' contains parent directory components",
+                    path.display()
+                );
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                prefix.push(component);
+            }
+            Component::Normal(name) => {
+                normal_depth += 1;
+                prefix.push(name);
+                if normal_depth > 1 && is_symlink_or_reparse(&prefix)? {
+                    anyhow::bail!(
+                        "Unsafe filesystem layout: path '{}' traverses a symlink or reparse point at '{}'",
+                        path.display(),
+                        prefix.display()
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Returns true when `name` is one safe path component.
 pub fn is_safe_package_name(name: &str) -> bool {
     if name.is_empty() || name == "." || name == ".." {
@@ -127,5 +175,23 @@ mod tests {
         let home = dir.path();
         assert!(check_path_chain_safe_within(home, &modules).is_err());
         assert!(check_path_chain_safe_within(home, &pkg).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_package_root_rejects_symlink_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        let module_dir = real.join("minimal-module");
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            real.join("nupm.nuon"),
+            br#"{ name: minimal-module, version: "0.1.0", type: module }"#,
+        )
+        .unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let start = link.join("minimal-module/mod.nu");
+        assert!(find_package_root(&start).is_err());
     }
 }
