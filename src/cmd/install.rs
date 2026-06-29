@@ -39,6 +39,7 @@ pub fn execute(args: &InstallArgs, root: &PathBuf) -> Result<()> {
         nu_version: &nu_version,
         force: args.force,
         verbose: args.verbose,
+        registry_name: None,
     };
 
     let version = if args.package.contains('@') {

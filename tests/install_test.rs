@@ -152,6 +152,7 @@ fn integration_full_install_from_signed_registry() {
         nu_version: &nu_version,
         force: false,
         verbose: false,
+        registry_name: None,
     };
 
     let result = transaction::install_package("test/plugin", None, &options).unwrap();
@@ -220,6 +221,7 @@ fn integration_install_rejects_unsigned_registry() {
         nu_version: &nu_version,
         force: false,
         verbose: false,
+        registry_name: None,
     };
 
     // Should fail: no signature
@@ -280,6 +282,7 @@ fn integration_install_rejects_tampered_signature() {
         nu_version: &nu_version,
         force: false,
         verbose: false,
+        registry_name: None,
     };
 
     let result = transaction::install_package("test/plugin", None, &options);
@@ -355,6 +358,7 @@ fn integration_resolve_exact_rejects_incompatible() {
         nu_version: &nu_version,
         force: false,
         verbose: false,
+        registry_name: None,
     };
 
     let result = transaction::install_package("test/plugin", Some("1.0.0"), &options);
@@ -434,6 +438,7 @@ fn integration_snapshot_before_install() {
         nu_version: &nu_version,
         force: false,
         verbose: false,
+        registry_name: None,
     };
 
     // First install — no snapshot (lockfile was empty)

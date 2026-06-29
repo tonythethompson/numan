@@ -1,12 +1,21 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
+use crate::core::integrity;
 use crate::core::package::{Package, RegistryIndex};
 use crate::core::trust::TrustStore;
 
 pub struct RegistryManager {
     root: PathBuf,
     trust: TrustStore,
+}
+
+/// Registry index loaded with signature policy applied.
+pub struct VerifiedRegistry {
+    pub index: RegistryIndex,
+    pub registry_name: String,
+    pub index_sha256: String,
+    pub signing_key_fingerprint: Option<String>,
 }
 
 impl RegistryManager {
@@ -137,6 +146,40 @@ impl RegistryManager {
             .keys
             .get(registry_name)
             .map(|k| k.fingerprint.clone())
+    }
+
+    /// Load a registry index, enforcing signature verification when a sig file exists.
+    pub fn load_verified(&self, registry_name: &str) -> Result<VerifiedRegistry> {
+        let sig_path = self.sig_path(registry_name);
+        if sig_path.exists() {
+            let index = self.verify_and_load(registry_name)?;
+            let index_bytes = std::fs::read(self.index_path(registry_name))?;
+            let index_sha256 = integrity::compute_sha256(&index_bytes);
+            let fingerprint = self.signing_key_fingerprint(registry_name);
+            Ok(VerifiedRegistry {
+                index,
+                registry_name: registry_name.to_string(),
+                index_sha256,
+                signing_key_fingerprint: fingerprint,
+            })
+        } else if std::env::var("NUMAN_ALLOW_UNSIGNED").unwrap_or_default() != "1" {
+            bail!(
+                "Registry '{}' has no signature file. \
+                 Signatures are required by default. \
+                 Set NUMAN_ALLOW_UNSIGNED=1 to override (development only).",
+                registry_name
+            );
+        } else {
+            let index = self.load_index(registry_name)?;
+            let index_bytes = std::fs::read(self.index_path(registry_name))?;
+            let index_sha256 = integrity::compute_sha256(&index_bytes);
+            Ok(VerifiedRegistry {
+                index,
+                registry_name: registry_name.to_string(),
+                index_sha256,
+                signing_key_fingerprint: None,
+            })
+        }
     }
 }
 
