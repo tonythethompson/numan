@@ -1478,12 +1478,12 @@ mod tests {
     #[test]
     fn script_type_fails_with_deferred_error() {
         use crate::state::lockfile::{Lockfile, LockfileEntry};
-        use std::collections::{BTreeMap, HashMap};
+        use std::collections::BTreeMap;
 
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        let mut packages = HashMap::new();
+        let mut packages: BTreeMap<String, LockfileEntry> = BTreeMap::new();
         packages.insert(
             "owner/myscript".to_string(),
             LockfileEntry {
@@ -1510,6 +1510,11 @@ mod tests {
                 cargo_lock_sha256: None,
                 built_sha256: None,
                 payload_path: "packages/scripts/owner/myscript/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
                 module_activation: None,
                 module_import_mode: None,
                 locked_dependencies: BTreeMap::new(),
@@ -1553,12 +1558,12 @@ mod tests {
     #[test]
     fn completion_type_fails_with_deferred_error() {
         use crate::state::lockfile::{Lockfile, LockfileEntry};
-        use std::collections::{BTreeMap, HashMap};
+        use std::collections::BTreeMap;
 
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        let mut packages = HashMap::new();
+        let mut packages: BTreeMap<String, LockfileEntry> = BTreeMap::new();
         packages.insert(
             "owner/mycomp".to_string(),
             LockfileEntry {
@@ -1585,6 +1590,11 @@ mod tests {
                 cargo_lock_sha256: None,
                 built_sha256: None,
                 payload_path: "packages/completions/owner/mycomp/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
                 module_activation: None,
                 module_import_mode: None,
                 locked_dependencies: BTreeMap::new(),
@@ -1629,9 +1639,9 @@ mod tests {
     fn already_active_module_is_skipped() {
         use crate::core::package::ModuleImportMode;
         use crate::state::lockfile::{Lockfile, LockfileEntry, ModuleActivation};
-        use std::collections::{BTreeMap, HashMap};
+        use std::collections::BTreeMap;
 
-        let mut packages = HashMap::new();
+        let mut packages: BTreeMap<String, LockfileEntry> = BTreeMap::new();
         packages.insert(
             "owner/mymod".to_string(),
             LockfileEntry {
@@ -1658,6 +1668,11 @@ mod tests {
                 cargo_lock_sha256: None,
                 built_sha256: None,
                 payload_path: "packages/modules/owner/mymod/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
                 module_activation: Some(ModuleActivation {
                     entry_path: "/root/packages/modules/owner/mymod/1.0.0-abc/mod.nu".to_string(),
                     import_mode: ModuleImportMode::Module,
@@ -1712,9 +1727,9 @@ mod tests {
     fn non_activatable_module_fails_when_explicit() {
         use crate::core::package::ModuleImportMode;
         use crate::state::lockfile::{Lockfile, LockfileEntry};
-        use std::collections::{BTreeMap, HashMap};
+        use std::collections::BTreeMap;
 
-        let mut packages = HashMap::new();
+        let mut packages: BTreeMap<String, LockfileEntry> = BTreeMap::new();
         let mut deps = BTreeMap::new();
         deps.insert("owner/dep".to_string(), "^1.0.0".to_string());
         packages.insert(
@@ -1743,6 +1758,11 @@ mod tests {
                 cargo_lock_sha256: None,
                 built_sha256: None,
                 payload_path: "packages/modules/owner/depmod/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
                 module_activation: None,
                 module_import_mode: Some(ModuleImportMode::Module),
                 locked_dependencies: deps, // has dependencies — not activatable

@@ -327,6 +327,9 @@ pub fn install_package(
     .trim_end_matches('/')
     .to_string();
 
+    // Compute payload manifest hash after extraction for drift detection.
+    let revision_id = crate::state::lockfile::compute_revision_id(&install_dir);
+
     // Capture module-specific activation metadata from registry at install time
     // so that activation can proceed without re-querying the registry.
     // Only persist import mode for known "nu-module" kind — unknown/future kinds
@@ -342,6 +345,12 @@ pub fn install_package(
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+
+    let selection_reason = if version.is_some() {
+        Some("exact match".to_string())
+    } else {
+        Some("highest compatible semver".to_string())
+    };
 
     let entry = LockfileEntry {
         version: version_str.clone(),
@@ -367,6 +376,11 @@ pub fn install_package(
         cargo_lock_sha256: None,
         built_sha256: None,
         payload_path: payload_rel_path,
+        revision_id,
+        payload_sha256: artifact_sha256.clone(),
+        executable_sha256: None,
+        selection_reason,
+        origin: Some(format!("registry:{}", verified.registry_name)),
         module_activation: None,
         module_import_mode,
         locked_dependencies,
