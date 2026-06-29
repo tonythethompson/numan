@@ -46,7 +46,7 @@ pub struct PendingLifecycle {
 
 impl PendingLifecycle {
     fn path(root: &Path) -> std::path::PathBuf {
-        root.join("pending-lifecycle.json")
+        root.join("state/pending-lifecycle.json")
     }
 
     pub fn load(root: &Path) -> Result<Option<Self>> {
