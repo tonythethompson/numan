@@ -61,7 +61,9 @@ Users commonly override with `$env.NUPM_HOME = ($env.XDG_DATA_HOME \| path join 
 
 ### Package root discovery
 
-nupm locates a package root by walking parents from a path until `nupm.nuon` is found (`find-root` in `dirs.nu`). Numan inspect will accept either an explicit package directory or a path inside the tree.
+nupm locates a package root by walking parents from a path until `nupm.nuon` is found (`find-root` in `dirs.nu`). Numan `inspect <path>` uses the same walk for **source package roots**.
+
+Under `$NUPM_HOME/modules/<name>/`, nupm stores only the installed module tree (no `nupm.nuon`). Phase 6.1 `inspect --all` must enumerate those directories separately and report missing metadata when no sibling source root is available.
 
 ### Installed module layout (nupm `install-path` for `type: module`)
 
@@ -166,7 +168,9 @@ identity:          user supplies --as owner/name (never derived from nupm name)
 
 ### Supported optional metadata fields (ignored for import logic)
 
-`description`, `license`, `version` — parsed and displayed in `inspect`; only `name` must match directory layout.
+`description`, `license` — parsed and displayed in `inspect`; not required for import eligibility.
+
+`name`, `version`, and `type` remain **required** (nupm `open-package-file`). `version` is validated and shown in `inspect` but does not drive import selection.
 
 ---
 
@@ -179,7 +183,7 @@ identity:          user supplies --as owner/name (never derived from nupm name)
 | `type: script` | `DeferredScript` | Script packages are not imported in Phase 6 |
 | `type: custom` | `UnsupportedCustomBuild` | Custom install / build.nu packages are not supported |
 | Unknown `type` | `UnknownType` | Unknown package type |
-| `deps` / external dependency record | `UnsupportedDependencies` | External dependency metadata is not supported |
+| `deps`, `dependencies`, or `requires` field | `UnsupportedDependencies` | External dependency metadata is not supported |
 | `scripts: [...]` on module | `DeferredScript` | Auxiliary scripts are not imported with modules |
 | `build.nu` present | `UnsupportedCustomBuild` | build.nu must not be present |
 | Missing `<name>/` directory | `UnsafeFilesystemLayout` | Module directory missing |
@@ -218,15 +222,18 @@ Corpus root: `tests/fixtures/nupm/`.
 
 ### Layout sample (`nupm-home-layout/`)
 
-Simulates `$NUPM_HOME` after installing one module and one script:
+Simulates **post-install** `$NUPM_HOME` layout (matches nupm `install-path` for modules: only the inner module tree is copied; `nupm.nuon` stays at the source package root):
 
 ```text
 nupm-home-layout/
-  modules/minimal-module/     ← import candidate
-  scripts/example-script.nu   ← not scanned for import
+  modules/minimal-module/
+    mod.nu                    ← installed module payload only (no nupm.nuon)
+  scripts/example-script.nu   ← sample script install; not imported
 ```
 
-Use as `--nupm-home` target in Phase 6.1 integration tests.
+Phase 6.1 discovery under `--nupm-home` must treat `modules/<name>/` as an installed module candidate even when `nupm.nuon` is absent. Such trees are **not import-eligible** until paired with a source package root that contains metadata (use `supported/*` fixtures for import tests).
+
+Use as `--nupm-home` target in Phase 6.1 status/discovery integration tests.
 
 ---
 
@@ -293,7 +300,7 @@ Phase 6.0 defines expectations; tests land in Phase 6.1–6.4.
 | T10 | Classify | `rejected/external-deps/` | UnsupportedDependencies |
 | T11 | Classify | `rejected/missing-mod-nu/` | UnsafeFilesystemLayout |
 | T12 | Classify | `rejected/unknown-type/` | UnknownType |
-| T13 | Discovery | `nupm-home-layout/` + `--nupm-home` | 1 supported module, 0 imports |
+| T13 | Discovery | `nupm-home-layout/` + `--nupm-home` | Detects installed `modules/minimal-module/` without `nupm.nuon`; not import-eligible |
 | T14 | Discovery | no `--nupm-home`, no env | Clear error message |
 | T15 | Safety | inspect/status on fixtures | No writes under fixture dirs |
 | T16 | Import | supported module (Phase 6.2) | Payload under `$NUMAN_ROOT` only |

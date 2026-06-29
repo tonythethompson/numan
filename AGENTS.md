@@ -104,7 +104,7 @@ tests/                 — Integration tests
 
 ## PR review guidance
 
-Automated and human PR reviewers should follow [`.github/instructions/*.instructions.md`](.github/instructions/*.instructions.md) for review checklists, severity expectations, and architecture invariants to flag. Keep that file updated when review conventions change; link here rather than duplicating review rules in this doc.
+Automated and human PR reviewers should follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md) for review checklists, severity expectations, and architecture invariants to flag. Keep that file updated when review conventions change; link here rather than duplicating review rules in this doc.
 
 ## Dependencies
 - clap (CLI), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
