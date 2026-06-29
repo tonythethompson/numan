@@ -1,1 +1,16 @@
+pub mod classify;
+pub mod discovery;
+pub mod metadata;
+pub mod report;
+pub mod schema;
+pub mod walk;
 
+pub use classify::{classify_source_root, find_source_root, NupmCompatibility};
+pub use discovery::{inspect_path, resolve_nupm_home, scan_nupm_home, NupmHomeResolution};
+pub use metadata::{
+    parse_metadata, read_metadata_limited, BehaviorFlags, MetadataError, ParsedMetadata,
+};
+pub use report::{
+    format_inspection_report, format_status_report, InstalledOnlyEntry, NupmCandidateReport,
+    NupmInspectionReport, NupmStatusReport, SourceRootEntry,
+};

@@ -252,6 +252,14 @@ impl Lockfile {
     pub fn is_empty(&self) -> bool {
         self.packages.is_empty()
     }
+
+    /// Count lockfile entries imported from nupm (`origin == "nupm_import"`).
+    pub fn count_nupm_imports(&self) -> usize {
+        self.packages
+            .values()
+            .filter(|e| e.origin.as_deref() == Some("nupm_import"))
+            .count()
+    }
 }
 
 /// Compute the `revision_id` for an installed payload directory.
@@ -325,6 +333,72 @@ pub fn compute_revision_id(payload_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_nupm_imports_only_nupm_origin() {
+        let mut lock = Lockfile::empty();
+        lock.packages.insert(
+            "a/b".to_string(),
+            LockfileEntry {
+                version: "1".to_string(),
+                package_type: "module".to_string(),
+                source: "nupm".to_string(),
+                installed_at: String::new(),
+                payload_path: "packages/modules/a/b/1".to_string(),
+                origin: Some("nupm_import".to_string()),
+                ..minimal_lockfile_entry_defaults()
+            },
+        );
+        lock.packages.insert(
+            "c/d".to_string(),
+            LockfileEntry {
+                version: "1".to_string(),
+                package_type: "module".to_string(),
+                source: "registry".to_string(),
+                installed_at: String::new(),
+                payload_path: "packages/modules/c/d/1".to_string(),
+                origin: Some("registry:official".to_string()),
+                ..minimal_lockfile_entry_defaults()
+            },
+        );
+        assert_eq!(lock.count_nupm_imports(), 1);
+    }
+
+    fn minimal_lockfile_entry_defaults() -> LockfileEntry {
+        LockfileEntry {
+            version: String::new(),
+            package_type: String::new(),
+            source: String::new(),
+            target: None,
+            artifact_url: None,
+            artifact_sha256: None,
+            executable_path: None,
+            archive_root: None,
+            include: None,
+            entry: None,
+            installed_at: String::new(),
+            nu_version_at_install: None,
+            activation: None,
+            registry_url: None,
+            registry_revision: None,
+            index_sha256: None,
+            signing_key_fingerprint: None,
+            git_url: None,
+            git_rev: None,
+            cargo_name: None,
+            cargo_lock_sha256: None,
+            built_sha256: None,
+            payload_path: String::new(),
+            revision_id: None,
+            payload_sha256: None,
+            executable_sha256: None,
+            selection_reason: None,
+            origin: None,
+            module_activation: None,
+            module_import_mode: None,
+            locked_dependencies: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn empty_lockfile_roundtrip() {

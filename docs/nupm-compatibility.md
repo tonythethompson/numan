@@ -1,10 +1,12 @@
-# nupm compatibility audit (Phase 6.0)
+# nupm compatibility contract
 
-This document is the **Phase 6.0 compatibility audit** for Numan's read-only nupm discovery and one-way module import work. It pins upstream nupm behavior, defines the narrow profile Numan will support, and inventories the checked-in fixture corpus under `tests/fixtures/nupm/`.
+**compat-schema-version:** `1`
 
-**No import or CLI implementation ships in Phase 6.0.** Phase 6.1+ must treat this profile as the contract.
+This document is the **versioned compatibility contract** for Numan's nupm interoperability. Phase 6.1+ implementation must derive metadata grammar, classifier rules, discovery bounds, and test expectations (T01–T15) exclusively from this file and [tests/fixtures/nupm/](tests/fixtures/nupm/).
 
-Related planning: [`Phase6Plan.md`](../Phase6Plan.md) §4–§5, §13.
+**Authority:** This document + fixture corpus. [Phase6Plan.md](../Phase6Plan.md) is planning reference only.
+
+**Phase 6.1 ships:** read-only `numan nupm status` and `numan nupm inspect` only.
 
 ---
 
@@ -128,7 +130,88 @@ Observed in real nupm files:
 - Single-quoted strings in lists (`['spam_bar.nu']`).
 - Bare identifiers in string lists (`[script.nu]`) — matches pinned nupm `spam_module`.
 
-Numan's constrained parser (Phase 6.1) supports the subset listed in `Phase6Plan.md` §7.1a. Anything else (closures, `$foo`, dates, binary literals) is **InvalidMetadata**.
+Numan's metadata parser (Phase 6.1) implements **compat-schema-v1** only. Diagnostics include `compat-schema-v1` in error messages. Reject closures, `$variables`, dates, binary literals, and unbounded nesting anywhere.
+
+### Parser output model
+
+The parser produces `ParsedMetadata` with `BehaviorFlags`:
+
+```rust
+struct ParsedMetadata {
+    name: String,
+    version: String,
+    package_type: String,
+    description: Option<String>,
+    license: Option<String>,
+    behavior: BehaviorFlags,
+}
+struct BehaviorFlags {
+    has_scripts: bool,
+    has_dependencies: bool,
+}
+```
+
+- Parser **recognizes** `scripts`, `deps`, `dependencies`, `requires`; sets flags; does not retain values.
+- **Unknown top-level fields**, **duplicate keys**, and **malformed known-field values** → `InvalidMetadata`.
+- Classifier maps flags to `DeferredScript` / `UnsupportedDependencies` (not the parser).
+
+### Field-specific grammar (compat-schema-v1)
+
+Top-level record only. **Duplicate keys → reject.**
+
+| Field | Accepted shape | Notes |
+|-------|----------------|-------|
+| `name` | quoted string or bare identifier | One safe path component |
+| `version` | quoted string only | No semver validation in 6.1 |
+| `type` | quoted string or bare identifier | `module` / `script` / `custom` |
+| `description` | quoted string only | Optional |
+| `license` | quoted string or bare identifier | Optional |
+| `scripts` | bounded list of scalar strings/identifiers | Sets `has_scripts` |
+| `deps` / `dependencies` / `requires` | bounded record or list | Sets `has_dependencies` |
+| *(other)* | — | `InvalidMetadata` |
+
+### Parser caps
+
+```text
+MAX_METADATA_BYTES = 65536
+MAX_TOKEN_COUNT = 4096
+MAX_NESTING_DEPTH = 2
+MAX_RECORD_FIELDS = 16
+MAX_LIST_LENGTH = 64
+MAX_STRING_LEN = 4096
+```
+
+`read_metadata_limited(path)` reads at most `MAX_METADATA_BYTES + 1` bytes before parsing.
+
+### Classifier pipeline (four steps)
+
+```text
+Step 1 — Pre-parse path-chain safety → UnsafeFilesystemLayout
+Step 2 — Parse metadata → InvalidMetadata
+Step 3 — Metadata-dependent layout (parsed.name) → UnsafeFilesystemLayout
+Step 4 — Precedence: UnsupportedCustomBuild → UnsupportedDependencies →
+         DeferredScript → UnknownType → ImportableModule
+```
+
+`build.nu` is detected in Step 3 but classified as `UnsupportedCustomBuild` in Step 4.
+
+### Status report buckets (Phase 6.1)
+
+Separate counts — do not label installed-only as rejected:
+
+```text
+Source roots classified (import-eligible / rejected)
+Installed-only module directories (metadata unavailable; not import-eligible)
+Script entries
+Unsafe/unreadable entries
+Numan nupm imports (lockfile origin nupm_import)
+```
+
+Drift is omitted until Phase 6.3.
+
+### Phase 6.1 non-goals
+
+Phase 6.1 does **not**: write under `NUPM_HOME`; create lifecycle journals; acquire mutation lock; copy payloads; modify lockfile; run `nu` or `build.nu`; read/modify Nu config; activate packages; import or diff.
 
 ---
 
@@ -314,7 +397,7 @@ Phase 6.0 defines expectations; tests land in Phase 6.1–6.4.
 | T02 | Parser | `supported/module-with-metadata/nupm.nuon` | Optional fields preserved |
 | T03 | Parser | `rejected/malformed-closure/nupm.nuon` | Err InvalidMetadata |
 | T04 | Parser | `rejected/missing-required-keys/nupm.nuon` | Err InvalidMetadata |
-| T05 | Parser | random bytes (fuzz) | No panic; Err |
+| T05 | Parser | bounded property corpus | No panic; bounded runtime/allocation; Ok satisfies invariants; known-invalid mutations Err |
 | T06 | Classify | `supported/minimal-module/` | ImportableModule |
 | T07 | Classify | `rejected/script-type/` | DeferredScript |
 | T08 | Classify | `rejected/custom-with-build/` | UnsupportedCustomBuild |
@@ -323,8 +406,8 @@ Phase 6.0 defines expectations; tests land in Phase 6.1–6.4.
 | T11 | Classify | `rejected/missing-mod-nu/` | UnsafeFilesystemLayout |
 | T12 | Classify | `rejected/unknown-type/` | UnknownType |
 | T13 | Discovery | `nupm-home-layout/` + `--nupm-home` | Detects installed `modules/minimal-module/` without `nupm.nuon`; not import-eligible |
-| T14 | Discovery | no `--nupm-home`, no env | Clear error message |
-| T15 | Safety | inspect/status on fixtures | No writes under fixture dirs |
+| T14 | Discovery | `inspect --all` without home | Actionable error; `status` without home exits 0 with guidance |
+| T15 | Safety | inspect/status on fixtures | Fixture manifest unchanged (SHA-256, not mtime) |
 | T16 | Import | supported module (Phase 6.2) | Payload under `$NUMAN_ROOT` only |
 | T17 | Import | any rejected fixture (Phase 6.2) | Error; nupm bytes unchanged |
 | T18 | Drift | re-import / diff (Phase 6.3) | Per Phase6Plan §10 |
@@ -347,4 +430,5 @@ Phase 6.0 defines expectations; tests land in Phase 6.1–6.4.
 
 | Date | Change |
 |------|--------|
-| 2026-06-28 | Initial Phase 6.0 audit; pin `421eee1c`; fixture corpus + this document |
+| 2026-06-28 | Initial Phase 6.0 audit; pin `421eee1c`; fixture corpus |
+| 2026-06-29 | compat-schema-v1: field-specific grammar, BehaviorFlags, classifier pipeline, status buckets, Phase 6.1 non-goals |

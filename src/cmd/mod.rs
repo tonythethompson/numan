@@ -4,6 +4,7 @@ pub mod gc;
 pub mod info;
 pub mod install;
 pub mod list;
+pub mod nupm;
 pub mod registry;
 pub mod remove;
 pub mod search;
