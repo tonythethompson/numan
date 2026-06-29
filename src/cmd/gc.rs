@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::state::lifecycle_journal::{check_stale_journal, PendingLifecycle};
 use crate::state::lockfile::Lockfile;
+use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Garbage-collect orphaned package directories
 #[derive(Parser)]
@@ -25,6 +26,8 @@ pub fn execute(args: &GcArgs, root: &Path) -> Result<()> {
             journal.package_id
         );
     }
+
+    let _lock = acquire_mutation_lock(root)?;
 
     let lockfile = Lockfile::load(root)?;
 

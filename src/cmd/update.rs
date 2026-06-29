@@ -13,6 +13,7 @@ use crate::state::lifecycle_journal::{
     check_stale_journal, LifecycleOp, LifecycleStage, PendingLifecycle,
 };
 use crate::state::lockfile::{Lockfile, LockfileEntry};
+use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Update installed packages to their latest compatible versions
 #[derive(Parser)]
@@ -61,91 +62,33 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
         }
     });
 
-    let lockfile = Lockfile::load(root)?;
-    if lockfile.is_empty() {
-        println!("No packages installed.");
-        return Ok(());
-    }
-
-    let registry = RegistryManager::new(root)?;
-    let default_reg = registry.default_registry_name();
-    let resolver = Resolver::new(&platform, &nu_version);
-
-    let packages_to_check: Vec<String> = if let Some(ref id) = args.package {
-        if !lockfile.packages.contains_key(id.as_str()) {
-            bail!("Package '{}' is not installed.", id);
-        }
-        vec![id.clone()]
-    } else {
-        lockfile.packages.keys().cloned().collect()
-    };
-
-    // Phase 1: discover available updates
-    let mut updates: Vec<PendingUpdate> = Vec::new();
-    let mut index_cache: HashMap<String, RegistryIndex> = HashMap::new();
-
-    for pkg_id in &packages_to_check {
-        let current = match lockfile.packages.get(pkg_id.as_str()) {
-            Some(e) => e,
-            None => continue,
-        };
-
-        if let Err(e) = ensure_not_active(current, pkg_id) {
-            if args.package.is_some() {
-                return Err(e);
-            }
-            if args.verbose {
-                eprintln!("  {e}");
-            }
-            continue;
-        }
-
-        let registry_name = registry_name_for_entry(current, &default_reg);
-        let index = match index_cache.get(&registry_name) {
-            Some(idx) => idx,
-            None => {
-                let loaded = registry.load_verified(&registry_name)?;
-                index_cache.insert(registry_name.clone(), loaded.index);
-                index_cache.get(&registry_name).expect("just inserted")
-            }
-        };
-
-        let pkg = match index.packages.iter().find(|p| p.id.to_string() == *pkg_id) {
-            Some(p) => p,
-            None => {
-                if args.verbose {
-                    println!(
-                        "  {} not found in registry '{}' (skipping)",
-                        pkg_id, registry_name
-                    );
-                }
-                continue;
-            }
-        };
-
-        let resolved = match resolver.resolve(pkg) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        let latest = resolved.version.to_string();
-        if is_upgrade_available(&current.version, &resolved.version) {
-            updates.push(PendingUpdate {
-                package_id: pkg_id.clone(),
-                from_version: current.version.clone(),
-                to_version: latest,
-                orphan_path: current.payload_path().to_string(),
-                registry_name,
-            });
-        }
-    }
-
-    if updates.is_empty() {
-        println!("All packages are up to date.");
-        return Ok(());
-    }
-
     if args.check {
+        let lockfile = Lockfile::load(root)?;
+        if lockfile.is_empty() {
+            println!("No packages installed.");
+            return Ok(());
+        }
+
+        let registry = RegistryManager::new(root)?;
+        let default_reg = registry.default_registry_name();
+        let resolver = Resolver::new(&platform, &nu_version);
+        let packages_to_check = packages_to_check(args, &lockfile)?;
+        let mut index_cache = HashMap::new();
+        let updates = discover_pending_updates(
+            &lockfile,
+            &packages_to_check,
+            &default_reg,
+            &registry,
+            &resolver,
+            args.verbose,
+            &mut index_cache,
+        )?;
+
+        if updates.is_empty() {
+            println!("All packages are up to date.");
+            return Ok(());
+        }
+
         println!("Updates available ({}):", updates.len());
         for update in &updates {
             println!(
@@ -156,12 +99,52 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
         return Ok(());
     }
 
-    // Phase 2: apply updates
+    let _lock = acquire_mutation_lock(root)?;
+
+    let lockfile = Lockfile::load(root)?;
+    if lockfile.is_empty() {
+        println!("No packages installed.");
+        return Ok(());
+    }
+
+    let registry = RegistryManager::new(root)?;
+    let default_reg = registry.default_registry_name();
+    let resolver = Resolver::new(&platform, &nu_version);
+    let packages_to_check = packages_to_check(args, &lockfile)?;
+    let mut index_cache = HashMap::new();
+    let updates = discover_pending_updates(
+        &lockfile,
+        &packages_to_check,
+        &default_reg,
+        &registry,
+        &resolver,
+        args.verbose,
+        &mut index_cache,
+    )?;
+
+    if updates.is_empty() {
+        println!("All packages are up to date.");
+        return Ok(());
+    }
+
     println!("Updating {} package(s)...", updates.len());
 
     let mut failures: Vec<String> = Vec::new();
 
     for update in &updates {
+        let current = match lockfile.packages.get(update.package_id.as_str()) {
+            Some(entry) => entry,
+            None => continue,
+        };
+
+        if let Err(e) = ensure_not_active(current, &update.package_id) {
+            if args.package.is_some() {
+                return Err(e);
+            }
+            eprintln!("  {e}");
+            continue;
+        }
+
         let journal = PendingLifecycle {
             op: LifecycleOp::Update,
             package_id: update.package_id.clone(),
@@ -214,6 +197,77 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn packages_to_check(args: &UpdateArgs, lockfile: &Lockfile) -> Result<Vec<String>> {
+    if let Some(ref id) = args.package {
+        if !lockfile.packages.contains_key(id.as_str()) {
+            bail!("Package '{}' is not installed.", id);
+        }
+        Ok(vec![id.clone()])
+    } else {
+        Ok(lockfile.packages.keys().cloned().collect())
+    }
+}
+
+fn discover_pending_updates(
+    lockfile: &Lockfile,
+    packages_to_check: &[String],
+    default_reg: &str,
+    registry: &RegistryManager,
+    resolver: &Resolver,
+    verbose: bool,
+    index_cache: &mut HashMap<String, RegistryIndex>,
+) -> Result<Vec<PendingUpdate>> {
+    let mut updates = Vec::new();
+
+    for pkg_id in packages_to_check {
+        let current = match lockfile.packages.get(pkg_id.as_str()) {
+            Some(e) => e,
+            None => continue,
+        };
+
+        let registry_name = registry_name_for_entry(current, default_reg);
+        let index = match index_cache.get(&registry_name) {
+            Some(idx) => idx,
+            None => {
+                let loaded = registry.load_verified(&registry_name)?;
+                index_cache.insert(registry_name.clone(), loaded.index);
+                index_cache.get(&registry_name).expect("just inserted")
+            }
+        };
+
+        let pkg = match index.packages.iter().find(|p| p.id.to_string() == *pkg_id) {
+            Some(p) => p,
+            None => {
+                if verbose {
+                    println!(
+                        "  {} not found in registry '{}' (skipping)",
+                        pkg_id, registry_name
+                    );
+                }
+                continue;
+            }
+        };
+
+        let resolved = match resolver.resolve(pkg) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let latest = resolved.version.to_string();
+        if is_upgrade_available(&current.version, &resolved.version) {
+            updates.push(PendingUpdate {
+                package_id: pkg_id.clone(),
+                from_version: current.version.clone(),
+                to_version: latest,
+                orphan_path: current.payload_path().to_string(),
+                registry_name,
+            });
+        }
+    }
+
+    Ok(updates)
 }
 
 /// Parse `registry:official` from the lockfile entry's recorded origin.
