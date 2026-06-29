@@ -1,8 +1,10 @@
 use anyhow::{bail, Result};
 use clap::Parser;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::core::nu_version::NuVersion;
+use crate::core::package::RegistryIndex;
 use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
@@ -25,6 +27,14 @@ pub struct UpdateArgs {
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
+}
+
+struct PendingUpdate {
+    package_id: String,
+    from_version: String,
+    to_version: String,
+    orphan_path: String,
+    registry_name: String,
 }
 
 pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
@@ -59,19 +69,6 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
 
     let registry = RegistryManager::new(root)?;
     let default_reg = registry.default_registry_name();
-
-    let index = if registry.sig_path(&default_reg).exists() {
-        registry.verify_and_load(&default_reg)?
-    } else {
-        if std::env::var("NUMAN_ALLOW_UNSIGNED").unwrap_or_default() != "1" {
-            bail!(
-                "Registry '{}' has no signature file. Set NUMAN_ALLOW_UNSIGNED=1 to override.",
-                default_reg
-            );
-        }
-        registry.load_index(&default_reg)?
-    };
-
     let resolver = Resolver::new(&platform, &nu_version);
 
     let packages_to_check: Vec<String> = if let Some(ref id) = args.package {
@@ -84,7 +81,8 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
     };
 
     // Phase 1: discover available updates
-    let mut updates: Vec<(String, String, String, String)> = Vec::new(); // (id, from, to, orphan_path)
+    let mut updates: Vec<PendingUpdate> = Vec::new();
+    let mut index_cache: HashMap<String, RegistryIndex> = HashMap::new();
 
     for pkg_id in &packages_to_check {
         let current = match lockfile.packages.get(pkg_id.as_str()) {
@@ -102,11 +100,24 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
             continue;
         }
 
+        let registry_name = registry_name_for_entry(current, &default_reg);
+        let index = match index_cache.get(&registry_name) {
+            Some(idx) => idx,
+            None => {
+                let loaded = registry.load_verified(&registry_name)?;
+                index_cache.insert(registry_name.clone(), loaded.index);
+                index_cache.get(&registry_name).expect("just inserted")
+            }
+        };
+
         let pkg = match index.packages.iter().find(|p| p.id.to_string() == *pkg_id) {
             Some(p) => p,
             None => {
                 if args.verbose {
-                    println!("  {} not found in registry (skipping)", pkg_id);
+                    println!(
+                        "  {} not found in registry '{}' (skipping)",
+                        pkg_id, registry_name
+                    );
                 }
                 continue;
             }
@@ -119,12 +130,13 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
 
         let latest = resolved.version.to_string();
         if is_upgrade_available(&current.version, &resolved.version) {
-            updates.push((
-                pkg_id.clone(),
-                current.version.clone(),
-                latest,
-                current.payload_path().to_string(),
-            ));
+            updates.push(PendingUpdate {
+                package_id: pkg_id.clone(),
+                from_version: current.version.clone(),
+                to_version: latest,
+                orphan_path: current.payload_path().to_string(),
+                registry_name,
+            });
         }
     }
 
@@ -135,8 +147,11 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
 
     if args.check {
         println!("Updates available ({}):", updates.len());
-        for (id, from, to, _) in &updates {
-            println!("  {}  {} → {}", id, from, to);
+        for update in &updates {
+            println!(
+                "  {}  {} → {}",
+                update.package_id, update.from_version, update.to_version
+            );
         }
         return Ok(());
     }
@@ -144,26 +159,33 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
     // Phase 2: apply updates
     println!("Updating {} package(s)...", updates.len());
 
-    let options = transaction::InstallOptions {
-        root,
-        platform: &platform,
-        nu_version: &nu_version,
-        force: false,
-        verbose: args.verbose,
-    };
+    let mut failures: Vec<String> = Vec::new();
 
-    for (pkg_id, from_version, to_version, orphan_path) in &updates {
+    for update in &updates {
         let journal = PendingLifecycle {
             op: LifecycleOp::Update,
-            package_id: pkg_id.clone(),
+            package_id: update.package_id.clone(),
             stage: LifecycleStage::Prepared,
-            orphan_payload_path: Some(orphan_path.clone()),
-            from_version: Some(from_version.clone()),
-            to_version: Some(to_version.clone()),
+            orphan_payload_path: Some(update.orphan_path.clone()),
+            from_version: Some(update.from_version.clone()),
+            to_version: Some(update.to_version.clone()),
         };
         journal.save(root)?;
 
-        match transaction::install_package(pkg_id, Some(to_version), &options) {
+        let options = transaction::InstallOptions {
+            root,
+            platform: &platform,
+            nu_version: &nu_version,
+            force: false,
+            verbose: args.verbose,
+            registry_name: Some(&update.registry_name),
+        };
+
+        match transaction::install_package(
+            &update.package_id,
+            Some(&update.to_version),
+            &options,
+        ) {
             Ok(_) => {
                 PendingLifecycle {
                     stage: LifecycleStage::LockfileUpdated,
@@ -174,19 +196,39 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
                 println!(
                     "{} {}  {} → {}",
                     console::style("✓").green(),
-                    pkg_id,
-                    from_version,
-                    to_version
+                    update.package_id,
+                    update.from_version,
+                    update.to_version
                 );
             }
             Err(e) => {
-                eprintln!("Failed to update {}: {}", pkg_id, e);
+                eprintln!("Failed to update {}: {}", update.package_id, e);
                 eprintln!("Run `numan gc` to clean up orphaned packages.");
+                failures.push(update.package_id.clone());
             }
         }
     }
 
+    if !failures.is_empty() {
+        bail!(
+            "Failed to update {} package(s): {}",
+            failures.len(),
+            failures.join(", ")
+        );
+    }
+
     Ok(())
+}
+
+/// Parse `registry:official` from the lockfile entry's recorded origin.
+fn registry_name_for_entry(entry: &LockfileEntry, default: &str) -> String {
+    entry
+        .origin
+        .as_deref()
+        .or(entry.registry_url.as_deref())
+        .and_then(|value| value.strip_prefix("registry:"))
+        .unwrap_or(default)
+        .to_string()
 }
 
 /// Returns true when `resolved` is strictly newer than the installed version.
@@ -267,6 +309,25 @@ mod tests {
         assert!(!is_upgrade_available("2.0.0", &v2));
         assert!(!is_upgrade_available("3.0.0", &v2));
         assert!(!is_upgrade_available("not-a-version", &v2));
+    }
+
+    #[test]
+    fn registry_name_for_entry_prefers_origin() {
+        let entry = LockfileEntry {
+            origin: Some("registry:community".to_string()),
+            registry_url: Some("registry:official".to_string()),
+            ..base_entry()
+        };
+        assert_eq!(
+            registry_name_for_entry(&entry, "official"),
+            "community"
+        );
+    }
+
+    #[test]
+    fn registry_name_for_entry_falls_back_to_default() {
+        let entry = base_entry();
+        assert_eq!(registry_name_for_entry(&entry, "official"), "official");
     }
 
     #[test]
