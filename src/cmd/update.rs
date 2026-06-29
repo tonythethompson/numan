@@ -155,6 +155,11 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
 
         match transaction::install_package(pkg_id, Some(to_version), &options) {
             Ok(_) => {
+                PendingLifecycle {
+                    stage: LifecycleStage::LockfileUpdated,
+                    ..journal
+                }
+                .save(root)?;
                 PendingLifecycle::clear(root)?;
                 println!(
                     "{} {}  {} → {}",
