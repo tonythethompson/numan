@@ -61,6 +61,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
     let modules_dir = nupm_home.join("modules");
     if modules_dir.is_dir() {
+        check_path_chain_safe(&modules_dir)?;
         for entry in std::fs::read_dir(&modules_dir)
             .with_context(|| format!("Failed to read '{}'", modules_dir.display()))?
         {
@@ -110,6 +111,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
     let scripts_dir = nupm_home.join("scripts");
     if scripts_dir.is_dir() {
+        check_path_chain_safe(&scripts_dir)?;
         for entry in std::fs::read_dir(&scripts_dir)
             .with_context(|| format!("Failed to read '{}'", scripts_dir.display()))?
         {
@@ -170,5 +172,16 @@ mod tests {
             .source_roots
             .iter()
             .all(|e| e.compatibility != NupmCompatibility::ImportableModule));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_modules_dir_rejects_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let real_modules = dir.path().join("real_modules");
+        std::fs::create_dir_all(&real_modules).unwrap();
+        let modules = dir.path().join("modules");
+        std::os::unix::fs::symlink(&real_modules, &modules).unwrap();
+        assert!(scan_nupm_home(dir.path()).is_err());
     }
 }

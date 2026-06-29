@@ -64,7 +64,9 @@ pub fn parse_metadata(input: &[u8]) -> Result<ParsedMetadata, MetadataError> {
         return Err(MetadataError::InputTooLarge);
     }
     let mut parser = Parser::new(input);
-    parser.parse_record()
+    let meta = parser.parse_record()?;
+    parser.ensure_eof()?;
+    Ok(meta)
 }
 
 struct Parser<'a> {
@@ -370,6 +372,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn ensure_eof(&mut self) -> Result<(), MetadataError> {
+        self.skip_ws();
+        if self.pos != self.input.len() {
+            return Err(MetadataError::InvalidSyntax("trailing data after record"));
+        }
+        Ok(())
+    }
+
     fn peek_byte(&self) -> Option<u8> {
         self.input.get(self.pos).copied()
     }
@@ -480,5 +490,16 @@ mod tests {
             read_metadata_limited(&fixture("rejected/module-with-scripts/nupm.nuon")).unwrap();
         let meta = parse_metadata(&bytes).unwrap();
         assert!(meta.behavior.has_scripts);
+    }
+
+    #[test]
+    fn trailing_data_after_record_rejected() {
+        let valid = read_metadata_limited(&fixture("supported/minimal-module/nupm.nuon")).unwrap();
+        let mut with_trailing = valid;
+        with_trailing.extend_from_slice(b" { name: evil }");
+        assert!(matches!(
+            parse_metadata(&with_trailing),
+            Err(MetadataError::InvalidSyntax("trailing data after record"))
+        ));
     }
 }

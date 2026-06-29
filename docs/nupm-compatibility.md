@@ -157,7 +157,7 @@ struct BehaviorFlags {
 
 ### Field-specific grammar (compat-schema-v1)
 
-Top-level record only. **Duplicate keys → reject.**
+Top-level record only; **trailing content after the closing `}` → reject.** **Duplicate keys → reject.**
 
 | Field | Accepted shape | Notes |
 |-------|----------------|-------|
