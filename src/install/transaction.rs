@@ -236,6 +236,18 @@ pub fn install_package(
         println!("{} Using cached download", console::style("✓").green());
     }
 
+    // Observed SHA-256 of the downloaded archive — distinct from the
+    // registry-declared `artifact_sha256` used for integrity verification.
+    let payload_sha256 = {
+        let bytes = std::fs::read(&cache_file).with_context(|| {
+            format!(
+                "Failed to read cached payload at {}",
+                cache_file.display()
+            )
+        })?;
+        Some(integrity::compute_sha256(&bytes))
+    };
+
     // 8. Extract to staging dir on same volume as install target
     let parent_dir = install_dir.parent().unwrap_or(options.root);
     std::fs::create_dir_all(parent_dir)?;
@@ -377,7 +389,7 @@ pub fn install_package(
         built_sha256: None,
         payload_path: payload_rel_path,
         revision_id,
-        payload_sha256: Some(integrity::compute_sha256(&std::fs::read(&cache_file)?)),
+        payload_sha256,
         executable_sha256: None,
         selection_reason,
         origin: Some(format!("registry:{}", verified.registry_name)),
