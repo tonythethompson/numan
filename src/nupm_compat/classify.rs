@@ -4,7 +4,9 @@ use anyhow::Result;
 
 use super::metadata::{parse_metadata, read_metadata_limited, MetadataError, ParsedMetadata};
 use super::schema::{BUILD_SCRIPT_NAME, MODULE_ENTRY};
-use super::walk::{check_path_chain_safe, find_package_root, is_safe_package_name};
+use super::walk::{
+    check_path_chain_safe, check_path_chain_safe_within, find_package_root, is_safe_package_name,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NupmCompatibility {
@@ -74,8 +76,8 @@ pub fn classify_parsed(ctx: &ClassifyContext, parsed: &ParsedMetadata) -> NupmCo
         if !entry.is_file() {
             return NupmCompatibility::UnsafeFilesystemLayout;
         }
-        if super::walk::check_path_chain_safe(&module_dir).is_err()
-            || super::walk::check_path_chain_safe(&entry).is_err()
+        if check_path_chain_safe_within(&ctx.package_root, &module_dir).is_err()
+            || check_path_chain_safe_within(&ctx.package_root, &entry).is_err()
         {
             return NupmCompatibility::UnsafeFilesystemLayout;
         }

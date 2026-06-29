@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use super::classify::classify_source_root;
 use super::report::{InstalledOnlyEntry, SourceRootEntry};
 use super::schema::MAX_DISCOVERY_ENTRIES;
-use super::walk::{check_path_chain_safe, is_safe_package_name};
+use super::walk::{check_path_chain_safe, check_path_chain_safe_within, is_safe_package_name};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NupmHomeResolution {
@@ -61,7 +61,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
     let modules_dir = nupm_home.join("modules");
     if modules_dir.is_dir() {
-        check_path_chain_safe(&modules_dir)?;
+        check_path_chain_safe_within(nupm_home, &modules_dir)?;
         for entry in std::fs::read_dir(&modules_dir)
             .with_context(|| format!("Failed to read '{}'", modules_dir.display()))?
         {
@@ -77,7 +77,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
                 continue;
             }
 
-            if check_path_chain_safe(&path).is_err() {
+            if check_path_chain_safe_within(nupm_home, &path).is_err() {
                 unsafe_entries += 1;
                 continue;
             }
@@ -111,7 +111,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
     let scripts_dir = nupm_home.join("scripts");
     if scripts_dir.is_dir() {
-        check_path_chain_safe(&scripts_dir)?;
+        check_path_chain_safe_within(nupm_home, &scripts_dir)?;
         for entry in std::fs::read_dir(&scripts_dir)
             .with_context(|| format!("Failed to read '{}'", scripts_dir.display()))?
         {
@@ -121,7 +121,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
                 bail!("nupm home exceeds maximum discovery entry count ({MAX_DISCOVERY_ENTRIES})");
             }
             let path = entry.path();
-            if path.is_file() && check_path_chain_safe(&path).is_ok() {
+            if path.is_file() && check_path_chain_safe_within(nupm_home, &path).is_ok() {
                 script_entries += 1;
             } else {
                 unsafe_entries += 1;
@@ -178,10 +178,11 @@ mod tests {
     #[test]
     fn symlink_modules_dir_rejects_scan() {
         let dir = tempfile::tempdir().unwrap();
-        let real_modules = dir.path().join("real_modules");
+        let home = dir.path();
+        let real_modules = home.join("real_modules");
         std::fs::create_dir_all(&real_modules).unwrap();
-        let modules = dir.path().join("modules");
+        let modules = home.join("modules");
         std::os::unix::fs::symlink(&real_modules, &modules).unwrap();
-        assert!(scan_nupm_home(dir.path()).is_err());
+        assert!(scan_nupm_home(home).is_err());
     }
 }
