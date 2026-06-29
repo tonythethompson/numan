@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build                        # build
 cargo run -- search <query>        # run
-cargo test                         # all tests (234+)
+cargo test                         # all tests (245+)
 cargo test core::resolve           # single module (replace with any module path)
 cargo clippy -- -D warnings        # lint (CI enforces -D warnings)
 cargo fmt                          # format
@@ -49,7 +49,7 @@ Numan is a Rust CLI (`numan-cli` crate, `numan` binary) — a cross-platform pac
 - Phase 2 (install transaction): complete
 - Phase 3 (activate plugins): complete — `cmd/activate.rs`, journal recovery, drift detection
 - Phase 4 (activate modules/scripts/completions): complete — `nu/autoload.rs`, `state/autoload_state.rs`, `state/autoload_journal.rs`, `cmd/deactivate.rs`, `util/fs_safety.rs`
-- Phase 5 (source builds, update, remove): not yet started
+- Phase 5 (partial): complete — lockfile v2 (revision_id, payload_sha256, compute_revision_id), `numan update [--check]`, `numan remove [--force]`, `numan gc [--dry-run]`, pending-lifecycle.json journal; deferred: source builds, snapshots/rollback, plugin gate
 - Phases 6–7: not yet started (nupm interop, polish)
 
 See AGENTS.md for full conventions, git workflow, and dependency notes.

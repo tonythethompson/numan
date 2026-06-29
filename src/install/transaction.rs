@@ -20,6 +20,8 @@ pub struct InstallOptions<'a> {
     pub nu_version: &'a NuVersion,
     pub force: bool,
     pub verbose: bool,
+    /// Registry to install from. Defaults to the configured default registry.
+    pub registry_name: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -49,40 +51,16 @@ pub fn install_package(
 
     // 2. Load registry with signature verification
     let registry = RegistryManager::new(options.root)?;
-    let default_reg = registry.default_registry_name();
-
-    // Check if signature file exists — if so, verification is mandatory
-    let sig_path = registry.sig_path(&default_reg);
-    let verified = if sig_path.exists() {
-        let idx = registry.verify_and_load(&default_reg)?;
-        let index_bytes = std::fs::read(registry.index_path(&default_reg))?;
-        let index_sha256 = integrity::compute_sha256(&index_bytes);
-        let fingerprint = registry.signing_key_fingerprint(&default_reg);
-        VerifiedIndex {
-            index: idx,
-            registry_name: default_reg.clone(),
-            index_sha256,
-            signing_key_fingerprint: fingerprint,
-        }
-    } else {
-        // No signature file — only allow in dev mode (env var)
-        if std::env::var("NUMAN_ALLOW_UNSIGNED").unwrap_or_default() != "1" {
-            bail!(
-                "Registry '{}' has no signature file. \
-                 Signatures are required by default. \
-                 Set NUMAN_ALLOW_UNSIGNED=1 to override (development only).",
-                default_reg
-            );
-        }
-        let idx = registry.load_index(&default_reg)?;
-        let index_bytes = std::fs::read(registry.index_path(&default_reg))?;
-        let index_sha256 = integrity::compute_sha256(&index_bytes);
-        VerifiedIndex {
-            index: idx,
-            registry_name: default_reg.clone(),
-            index_sha256,
-            signing_key_fingerprint: None,
-        }
+    let registry_name = options
+        .registry_name
+        .map(str::to_string)
+        .unwrap_or_else(|| registry.default_registry_name());
+    let loaded = registry.load_verified(&registry_name)?;
+    let verified = VerifiedIndex {
+        index: loaded.index,
+        registry_name: loaded.registry_name,
+        index_sha256: loaded.index_sha256,
+        signing_key_fingerprint: loaded.signing_key_fingerprint,
     };
 
     let pkg = verified
@@ -236,6 +214,15 @@ pub fn install_package(
         println!("{} Using cached download", console::style("✓").green());
     }
 
+    // Observed SHA-256 of the downloaded archive — distinct from the
+    // registry-declared `artifact_sha256` used for integrity verification.
+    let payload_sha256 = {
+        let bytes = std::fs::read(&cache_file).with_context(|| {
+            format!("Failed to read cached payload at {}", cache_file.display())
+        })?;
+        Some(integrity::compute_sha256(&bytes))
+    };
+
     // 8. Extract to staging dir on same volume as install target
     let parent_dir = install_dir.parent().unwrap_or(options.root);
     std::fs::create_dir_all(parent_dir)?;
@@ -327,6 +314,9 @@ pub fn install_package(
     .trim_end_matches('/')
     .to_string();
 
+    // Compute payload manifest hash after extraction for drift detection.
+    let revision_id = crate::state::lockfile::compute_revision_id(&install_dir);
+
     // Capture module-specific activation metadata from registry at install time
     // so that activation can proceed without re-querying the registry.
     // Only persist import mode for known "nu-module" kind — unknown/future kinds
@@ -342,6 +332,12 @@ pub fn install_package(
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+
+    let selection_reason = if version.is_some() {
+        Some("exact match".to_string())
+    } else {
+        Some("highest compatible semver".to_string())
+    };
 
     let entry = LockfileEntry {
         version: version_str.clone(),
@@ -367,6 +363,11 @@ pub fn install_package(
         cargo_lock_sha256: None,
         built_sha256: None,
         payload_path: payload_rel_path,
+        revision_id,
+        payload_sha256,
+        executable_sha256: None,
+        selection_reason,
+        origin: Some(format!("registry:{}", verified.registry_name)),
         module_activation: None,
         module_import_mode,
         locked_dependencies,

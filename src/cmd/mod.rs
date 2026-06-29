@@ -1,7 +1,10 @@
 pub mod activate;
 pub mod deactivate;
+pub mod gc;
 pub mod info;
 pub mod install;
 pub mod list;
 pub mod registry;
+pub mod remove;
 pub mod search;
+pub mod update;

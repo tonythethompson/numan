@@ -44,14 +44,18 @@ src/
     registry.rs        — Registry management subcommands
     activate.rs        — Plugin + module activation (Phase 3 & 4); public entry: execute_with_candidate_runner
     deactivate.rs      — Module deactivation: full (delete managed file) and partial (regenerate) (Phase 4)
+    update.rs          — `numan update [--check] [pkg]`: detect and apply registry version upgrades (Phase 5)
+    remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
+    gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
   state/
-    lockfile.rs        — Lockfile with PluginActivation and ModuleActivation per-Nu-identity records
+    lockfile.rs        — Lockfile v2: PluginActivation, ModuleActivation, revision_id, payload_sha256, compute_revision_id()
     journal.rs         — Plugin pending-activation journal for crash recovery
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
+    lifecycle_journal.rs — state/pending-lifecycle.json journal for update/remove crash recovery (Phase 5)
   nu/
     paths.rs           — Nu path cache (detect, load, save, validate_drift)
     autoload.rs        — render_use_statement, generate_autoload_content, FakeCandidateRunner, managed-file ops (Phase 4)
@@ -108,7 +112,8 @@ tests/                 — Integration tests
 - [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
 - [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
 - [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock, 234+ tests)
-- [ ] Phase 5: Source builds, update, remove
+- [x] Phase 5 (partial): Lockfile v2 (revision_id, payload_sha256, executable_sha256, selection_reason, origin, compute_revision_id); `numan update [--check]`; `numan remove [--force]`; `numan gc [--dry-run]`; pending-lifecycle.json crash-recovery journal; 245 tests
+- [ ] Phase 5 (deferred): Source builds (5.2), lockfile snapshots/rollback (5.3), plugin gate (5.5)
 - [ ] Phase 6: nupm interop
 - [ ] Phase 7: Polish, CI, distribution
 
