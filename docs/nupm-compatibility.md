@@ -126,6 +126,7 @@ Observed in real nupm files:
 - Bare identifiers are valid string values (`name: spam_module`).
 - Double-quoted strings for version and human text.
 - Single-quoted strings in lists (`['spam_bar.nu']`).
+- Bare identifiers in string lists (`[script.nu]`) — matches pinned nupm `spam_module`.
 
 Numan's constrained parser (Phase 6.1) supports the subset listed in `Phase6Plan.md` §7.1a. Anything else (closures, `$foo`, dates, binary literals) is **InvalidMetadata**.
 
@@ -241,11 +242,32 @@ Use as `--nupm-home` target in Phase 6.1 status/discovery integration tests.
 
 Numan **must not** guess nupm's default config path.
 
-Resolution order for `numan nupm status|inspect|import`:
+### When `--nupm-home` / `NUPM_HOME` is required
+
+Resolution order applies to commands that scan an nupm installation tree:
+
+```text
+numan nupm status
+numan nupm inspect --all
+numan nupm import --manifest PATH   (manifest paths relative to nupm home)
+```
+
+Order:
 
 1. `--nupm-home PATH`
 2. `NUPM_HOME` environment variable
 3. Error with guidance (no silent fallback)
+
+### When an explicit source path is enough
+
+These forms take a **package source root or path inside it** and do **not** require `--nupm-home` or `NUPM_HOME`:
+
+```text
+numan nupm inspect <PACKAGE-PATH>
+numan nupm import <PACKAGE-PATH> --as OWNER/NAME
+```
+
+Discovery walks parents from `<PACKAGE-PATH>` to locate `nupm.nuon` (same as nupm `find-root`). Use `tests/fixtures/nupm/supported/*` for import-eligible source trees.
 
 ---
 
