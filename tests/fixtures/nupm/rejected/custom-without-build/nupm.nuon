@@ -1,0 +1,5 @@
+{
+    name: orphan_custom
+    type: custom
+    version: "0.1.0"
+}

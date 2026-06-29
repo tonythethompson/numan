@@ -1,0 +1,7 @@
+{
+    name: module-with-metadata
+    type: module
+    version: "1.0.0"
+    description: "Fixture with optional description and license fields"
+    license: "MIT"
+}

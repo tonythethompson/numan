@@ -1,0 +1,6 @@
+{
+    name: "bad-closure"
+    type: module
+    version: "0.1.0"
+    init: {|| print "must not execute"}
+}
