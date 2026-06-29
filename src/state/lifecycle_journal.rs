@@ -25,9 +25,9 @@ pub enum LifecycleStage {
 /// Crash-recovery journal written atomically before any destructive lifecycle
 /// mutation (update, remove).
 ///
-/// Written before mutations begin; cleared on successful completion. A journal
-/// found on the next run indicates an interrupted operation. `numan gc` can
-/// clean up any orphaned payload directories.
+/// Written to `<root>/state/pending-lifecycle.json`. Cleared on successful
+/// completion. A journal found on the next run indicates an interrupted
+/// operation. `numan gc` can clean up any orphaned payload directories.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingLifecycle {
     pub op: LifecycleOp,

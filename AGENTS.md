@@ -55,7 +55,7 @@ src/
     journal.rs         — Plugin pending-activation journal for crash recovery
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
-    lifecycle_journal.rs — pending-lifecycle.json journal for update/remove crash recovery (Phase 5)
+    lifecycle_journal.rs — state/pending-lifecycle.json journal for update/remove crash recovery (Phase 5)
   nu/
     paths.rs           — Nu path cache (detect, load, save, validate_drift)
     autoload.rs        — render_use_statement, generate_autoload_content, FakeCandidateRunner, managed-file ops (Phase 4)
