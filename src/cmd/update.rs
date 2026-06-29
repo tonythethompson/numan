@@ -142,6 +142,7 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
                 return Err(e);
             }
             eprintln!("  {e}");
+            failures.push(update.package_id.clone());
             continue;
         }
 
