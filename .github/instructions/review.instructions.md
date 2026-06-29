@@ -5,7 +5,7 @@ description: PR review checklists, severity labels, and architecture invariants 
 
 # Numan PR review instructions
 
-Use this file when reviewing pull requests (human or automated). [`AGENTS.md`](../AGENTS.md) remains the source for project structure and build commands; this file focuses on **what to flag in review**.
+Use this file when reviewing pull requests (human or automated). [`AGENTS.md`](../../AGENTS.md) remains the source for project structure and build commands; this file focuses on **what to flag in review**.
 
 ## CI gates (must pass)
 
@@ -47,4 +47,4 @@ Use this file when reviewing pull requests (human or automated). [`AGENTS.md`](.
 ## Phase-specific notes
 
 - **Lockfile v2** — preserve `origin`, `revision_id`, `payload_sha256`, and journal recovery semantics on lifecycle changes.
-- **nupm compat (Phase 6+)** — follow [`docs/nupm-compatibility.md`](../docs/nupm-compatibility.md) supported/rejected profiles; fixtures under `tests/fixtures/nupm/` are the contract for parser/classifier tests.
+- **nupm compat (Phase 6+)** — follow [`docs/nupm-compatibility.md`](../../docs/nupm-compatibility.md) supported/rejected profiles; fixtures under `tests/fixtures/nupm/` are the contract for parser/classifier tests.
