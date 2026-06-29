@@ -218,10 +218,7 @@ pub fn install_package(
     // registry-declared `artifact_sha256` used for integrity verification.
     let payload_sha256 = {
         let bytes = std::fs::read(&cache_file).with_context(|| {
-            format!(
-                "Failed to read cached payload at {}",
-                cache_file.display()
-            )
+            format!("Failed to read cached payload at {}", cache_file.display())
         })?;
         Some(integrity::compute_sha256(&bytes))
     };

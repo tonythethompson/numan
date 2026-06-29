@@ -181,11 +181,7 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
             registry_name: Some(&update.registry_name),
         };
 
-        match transaction::install_package(
-            &update.package_id,
-            Some(&update.to_version),
-            &options,
-        ) {
+        match transaction::install_package(&update.package_id, Some(&update.to_version), &options) {
             Ok(_) => {
                 PendingLifecycle {
                     stage: LifecycleStage::LockfileUpdated,
@@ -318,10 +314,7 @@ mod tests {
             registry_url: Some("registry:official".to_string()),
             ..base_entry()
         };
-        assert_eq!(
-            registry_name_for_entry(&entry, "official"),
-            "community"
-        );
+        assert_eq!(registry_name_for_entry(&entry, "official"), "community");
     }
 
     #[test]
