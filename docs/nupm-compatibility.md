@@ -6,7 +6,7 @@ This document is the **versioned compatibility contract** for Numan's nupm inter
 
 **Authority:** This document + fixture corpus. [Phase6Plan.md](../Phase6Plan.md) is planning reference only.
 
-**Phase 6.1 ships:** read-only `numan nupm status` and `numan nupm inspect` only.
+**Phase 6.1 ships:** read-only `numan nupm status` and `numan nupm inspect`. Phase 6.2 adds `numan nupm import`. Phase 6.3 adds drift detection, bulk manifest import, and activation verification.
 
 ---
 
@@ -205,13 +205,42 @@ Installed-only module directories (metadata unavailable; not import-eligible)
 Script entries
 Unsafe/unreadable entries
 Numan nupm imports (lockfile origin nupm_import)
+Source drift (imports): count where live nupm source differs from provenance (Phase 6.3)
+Name overlap warnings (optional): nupm source declared name matches installed module under different scoped id
 ```
 
-Drift is omitted until Phase 6.3.
+### Drift categories (Phase 6.3)
+
+`numan nupm diff owner/name` compares lockfile + provenance against the live nupm source tree (read-only; exit 0 when drift is detected, exit 1 on compare errors):
+
+| Status | Meaning |
+|--------|---------|
+| `Unchanged` | Metadata and source payload hashes match provenance |
+| `SourceMissing` | Recorded `nupm_source_path` absent |
+| `MetadataChanged` | `nupm.nuon` bytes hash differs |
+| `PayloadChanged` | `<name>/` module tree manifest hash differs |
+| `UnsafeSourceTreeChange` | Live tree no longer import-eligible or fails safety checks |
+| `CannotCompare` | Not a nupm import or missing provenance |
+
+### Manifest import (Phase 6.3)
+
+```bash
+numan nupm import --manifest PATH [--nupm-home PATH] [--yes]
+```
+
+TOML schema (paths relative to validated `NUPM_HOME`):
+
+```toml
+[[imports]]
+source = "relative/to/nupm/home"
+as = "owner/name"
+```
+
+Batch import is **all-or-nothing**: pre-flight classifies all entries; on any failure after staging begins, staged dirs are removed and the lockfile is unchanged.
 
 ### Phase 6.1 non-goals
 
-Phase 6.1 does **not**: write under `NUPM_HOME`; create lifecycle journals; acquire mutation lock; copy payloads; modify lockfile; run `nu` or `build.nu`; read/modify Nu config; activate packages; import or diff.
+Phase 6.1 does **not**: write under `NUPM_HOME`; create lifecycle journals; acquire mutation lock; copy payloads; modify lockfile; run `nu` or `build.nu`; read/modify Nu config; activate packages.
 
 ---
 
@@ -332,6 +361,7 @@ Resolution order applies to commands that scan an nupm installation tree:
 ```text
 numan nupm status
 numan nupm inspect --all
+numan nupm inspect <PACKAGE-PATH> [--exit-on-ineligible]
 numan nupm import --manifest PATH   (manifest paths relative to nupm home)
 ```
 
@@ -364,7 +394,15 @@ Discovery walks parents from `<PACKAGE-PATH>` to locate `nupm.nuon` (same as nup
 | Unicode paths | Must round-trip in inspect output | Same | Same |
 | Case sensitivity | Case-insensitive FS common; compare paths canonically | Case-sensitive | Case-sensitive default |
 
-Phase 6.0 fixtures use ASCII paths; Phase 6.4 adds Unicode / space acceptance tests.
+Phase 6.0 fixtures use ASCII paths; Phase 6.4 adds Unicode / space acceptance tests (T24) and real-Nu `#[ignore]` acceptance tests (`tests/nupm_real_nu_test.rs`).
+
+### Inspect exit codes (Phase 6.4)
+
+By default, `inspect` exits 0 even when packages are ineligible (informational output). Pass `--exit-on-ineligible` to exit 1 when any candidate is not `ImportableModule`.
+
+### Metadata parser fuzz (Phase 6.4)
+
+`parse_metadata` is exercised against 10k+ arbitrary byte sequences (`t05_arbitrary_bytes_no_panic`) and must never panic; successful parses must satisfy `validate_invariants()`.
 
 ---
 
@@ -410,9 +448,17 @@ Phase 6.0 defines expectations; tests land in Phase 6.1–6.4.
 | T15 | Safety | inspect/status on fixtures | Fixture manifest unchanged (SHA-256, not mtime) |
 | T16 | Import | supported module (Phase 6.2) | Payload under `$NUMAN_ROOT` only |
 | T17 | Import | any rejected fixture (Phase 6.2) | Error; nupm bytes unchanged |
-| T18 | Drift | re-import / diff (Phase 6.3) | Per Phase6Plan §10 |
-| T19 | Platform | Unicode path (Phase 6.4) | Inspect + import |
-| T20 | Platform | symlink escape attempt (Phase 6.4) | Rejected at copy |
+| T18 | Drift | `numan nupm diff` after source edit (Phase 6.3) | Reports `PayloadChanged`; status drift count increments |
+| T19 | Import | stale nupm import journal (Phase 6.2) | Retry blocked until `numan gc` |
+| T20 | Drift | source edit without re-import (Phase 6.2) | Installed revision unchanged |
+| T21 | Re-import | modify source + `--yes` (Phase 6.3) | New `revision_id`; old payload gc-eligible |
+| T22 | Manifest | `--manifest` batch (Phase 6.3) | All entries committed atomically |
+| T23 | Activation | import + `numan activate` (Phase 6.3) | Managed autoload + lockfile `module_activation` |
+| T24 | Platform | Unicode path (Phase 6.4) | Inspect + import |
+| T25 | Platform | symlink in module tree (Phase 6.4, Unix) | Import rejected; lockfile unchanged |
+| T26 | Inspect | `--exit-on-ineligible` on rejected fixture | Exit 1 |
+| T27 | Parser | 10k arbitrary byte fuzz (Phase 6.4) | No panic |
+| T28 | Real-Nu | imported module autoload (Phase 6.4, `#[ignore]`) | `nu -n` passes on generated autoload |
 
 ---
 
@@ -432,3 +478,5 @@ Phase 6.0 defines expectations; tests land in Phase 6.1–6.4.
 |------|--------|
 | 2026-06-28 | Initial Phase 6.0 audit; pin `421eee1c`; fixture corpus |
 | 2026-06-29 | compat-schema-v1: field-specific grammar, BehaviorFlags, classifier pipeline, status buckets, Phase 6.1 non-goals |
+| 2026-06-28 | Phase 6.3: drift engine, `numan nupm diff`, manifest import, re-import polish, activation tests |
+| 2026-06-28 | Phase 6.4: `--exit-on-ineligible`, parser fuzz, Unicode/symlink tests, real-Nu acceptance |

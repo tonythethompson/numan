@@ -43,6 +43,8 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
         let op = match journal.op {
             LifecycleOp::Update => "update",
             LifecycleOp::Remove => "remove",
+            LifecycleOp::NupmImport => "nupm import",
+            LifecycleOp::NupmImportManifest => "nupm manifest import",
         };
         eprintln!(
             "Warning: A previous '{}' operation on '{}' was interrupted.",
@@ -153,6 +155,12 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
             orphan_payload_path: Some(update.orphan_path.clone()),
             from_version: Some(update.from_version.clone()),
             to_version: Some(update.to_version.clone()),
+            nupm_source_path: None,
+            nupm_metadata_sha256: None,
+            staging_dir: None,
+            promoted_payload_path: None,
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
         };
         journal.save(root)?;
 

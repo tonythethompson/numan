@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::state::lifecycle_journal::{LifecycleOp, LifecycleStage, PendingLifecycle};
 use crate::state::lockfile::Lockfile;
+use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Remove an installed package
@@ -56,6 +57,12 @@ pub fn execute(args: &RemoveArgs, root: &Path) -> Result<()> {
         orphan_payload_path: Some(payload_path.clone()),
         from_version: None,
         to_version: None,
+        nupm_source_path: None,
+        nupm_metadata_sha256: None,
+        staging_dir: None,
+        promoted_payload_path: None,
+        batch_package_ids: Vec::new(),
+        batch_staging_dirs: Vec::new(),
     };
     journal.save(root)?;
 
@@ -67,6 +74,11 @@ pub fn execute(args: &RemoveArgs, root: &Path) -> Result<()> {
     // Remove from lockfile (atomic write).
     lockfile.packages.remove(&args.package);
     lockfile.save(root)?;
+
+    let mut imports = NupmImportsFile::load(root)?;
+    if imports.remove(&args.package) {
+        imports.save(root)?;
+    }
 
     // Advance journal so a crash here is recoverable: lockfile is already
     // updated; the payload dir is the only thing left to clean.

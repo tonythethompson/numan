@@ -504,6 +504,21 @@ mod tests {
     }
 
     #[test]
+    fn t05_arbitrary_bytes_no_panic() {
+        use rand_core::{OsRng, RngCore};
+
+        let mut rng = OsRng;
+        for _ in 0..10_000 {
+            let len = (rng.next_u32() as usize) % (MAX_METADATA_BYTES + 64);
+            let mut buf = vec![0u8; len];
+            rng.fill_bytes(&mut buf);
+            if let Ok(meta) = parse_metadata(&buf) {
+                meta.validate_invariants().unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn t05_property_corpus_no_panic() {
         let valid = read_metadata_limited(&fixture("supported/minimal-module/nupm.nuon")).unwrap();
         for i in 0..500usize {

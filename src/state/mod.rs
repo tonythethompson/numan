@@ -3,3 +3,4 @@ pub mod autoload_state;
 pub mod journal;
 pub mod lifecycle_journal;
 pub mod lockfile;
+pub mod nupm_import;

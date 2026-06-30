@@ -19,3 +19,5 @@ pub const MAX_DISCOVERY_ENTRIES: usize = 1024;
 pub const MAX_MODULE_TREE_ENTRIES: usize = 1024;
 
 pub const NUPM_IMPORT_ORIGIN: &str = "nupm_import";
+pub const NUPM_IMPORT_SELECTION_REASON: &str = "explicit_nupm_import";
+pub const NUPM_TRUST_LEVEL: &str = "local_foreign_import";

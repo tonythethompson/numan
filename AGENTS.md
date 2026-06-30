@@ -49,7 +49,7 @@ src/
     update.rs          — `numan update [--check] [pkg]`: detect and apply registry version upgrades (Phase 5)
     remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
-    nupm.rs            — `numan nupm status|inspect`: read-only nupm discovery (Phase 6.1)
+    nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
@@ -58,14 +58,17 @@ src/
     journal.rs         — Plugin pending-activation journal for crash recovery
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
-    lifecycle_journal.rs — state/pending-lifecycle.json journal for update/remove crash recovery (Phase 5)
+    lifecycle_journal.rs — pending-lifecycle.json for update/remove/nupm_import crash recovery (Phase 5–6)
+    nupm_import.rs     — nupm-import provenance (`state/nupm-imports.json`, Phase 6.2)
   nu/
     paths.rs           — Nu path cache (detect, load, save, validate_drift)
     autoload.rs        — render_use_statement, generate_autoload_content, FakeCandidateRunner, managed-file ops (Phase 4)
   util/
     atomic.rs          — write_json_atomic helper (tempfile+persist)
     fs_safety.rs       — OWNERSHIP_MARKER, acquire_mutation_lock (advisory fd_lock mutex), assert_managed_file_owned (Phase 4)
-  nupm_compat/         — nupm read-only discovery (Phase 6.1); contract: docs/nupm-compatibility.md (compat-schema-v1)
+  nupm_compat/         — nupm discovery, import, drift (Phase 6.1–6.3); contract: docs/nupm-compatibility.md (compat-schema-v1)
+    drift.rs           — compare_import, count_drifted_imports, DriftStatus (Phase 6.3)
+    import.rs          — safe payload copy, lifecycle-journaled import transaction
     schema.rs          — COMPAT_SCHEMA_VERSION, parser caps, pinned nupm revision
     metadata.rs        — compat-schema-v1 metadata parser (ParsedMetadata, BehaviorFlags)
     classify.rs        — four-step classifier (NupmCompatibility)
@@ -76,7 +79,8 @@ docs/
   nupm-compatibility.md — versioned nupm interoperability contract (authority for Phase 6)
 tests/
   fixtures/nupm/       — supported/rejected fixture corpus for parser/classifier tests
-  nupm_compat_test.rs  — Phase 6.1 integration tests (T13–T15, no-mutation manifest)
+  nupm_compat_test.rs  — Phase 6 integration tests (T13–T25, import/drift/manifest/activation/platform)
+  nupm_real_nu_test.rs — Phase 6.4 real-Nu #[ignore] acceptance tests (run with `cargo test -- --ignored`)
 ```
 
 ## Key Conventions
@@ -133,7 +137,10 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [ ] Phase 5 (deferred): Source builds (5.2), lockfile snapshots/rollback (5.3), plugin gate (5.5)
 - [x] Phase 6.0: nupm compatibility audit + fixture corpus (`docs/nupm-compatibility.md`)
 - [x] Phase 6.1: read-only `numan nupm status|inspect` (no import, no nupm mutation, no Nu)
-- [ ] Phase 6.2+: nupm import, drift, activation of imported modules
+- [x] Phase 6.2: one-way `numan nupm import` (staging, provenance, lifecycle journal; no activation)
+- [x] Phase 6.3: drift (`numan nupm diff`), status drift count, manifest import, re-import polish, activation tests
+- [x] Phase 6.4: `--exit-on-ineligible`, parser fuzz, Unicode/symlink tests, real-Nu acceptance
+- [ ] Phase 6 complete: publish compatibility matrix; CI acceptance job for `#[ignore]` real-Nu tests
 - [ ] Phase 7: Polish, CI, distribution
 
 ## Testing
