@@ -290,7 +290,12 @@ impl<'a> Parser<'a> {
                     let b = self.input[self.pos];
                     self.pos += 1;
                     match b {
-                        b'{' => depth_inner += 1,
+                        b'{' => {
+                            if self.peek_ahead_for_closure() {
+                                return Err(MetadataError::InvalidSyntax("closures not supported"));
+                            }
+                            depth_inner += 1;
+                        }
                         b'}' => {
                             depth_inner -= 1;
                             if depth_inner == 0 {
@@ -300,6 +305,9 @@ impl<'a> Parser<'a> {
                         b'"' | b'\'' => {
                             self.pos -= 1;
                             self.parse_quoted_string()?;
+                        }
+                        b'$' => {
+                            return Err(MetadataError::InvalidSyntax("variables not supported"));
                         }
                         _ => {}
                     }
@@ -327,6 +335,13 @@ impl<'a> Parser<'a> {
                             self.pos -= 1;
                             self.parse_quoted_string()?;
                         }
+                        b'{' => {
+                            self.pos -= 1;
+                            self.skip_behavior_container(depth)?;
+                        }
+                        b'$' => {
+                            return Err(MetadataError::InvalidSyntax("variables not supported"));
+                        }
                         _ => {}
                     }
                 }
@@ -338,12 +353,20 @@ impl<'a> Parser<'a> {
 
     fn peek_ahead_for_closure(&self) -> bool {
         let rest = &self.input[self.pos..];
-        rest.iter()
+        if rest
+            .iter()
             .take(8)
             .copied()
             .collect::<Vec<_>>()
             .windows(2)
             .any(|w| w == [b'|', b'|'])
+        {
+            return true;
+        }
+        rest.iter()
+            .copied()
+            .find(|b| !b.is_ascii_whitespace())
+            == Some(b'|')
     }
 
     fn optional_comma(&mut self) -> Result<(), MetadataError> {
@@ -501,5 +524,17 @@ mod tests {
             parse_metadata(&with_trailing),
             Err(MetadataError::InvalidSyntax("trailing data after record"))
         ));
+    }
+
+    #[test]
+    fn deps_with_variable_rejected() {
+        let input = br#"{ name: m, version: "0.1.0", type: module, deps: { x: $bad } }"#;
+        assert!(parse_metadata(input).is_err());
+    }
+
+    #[test]
+    fn deps_with_closure_rejected() {
+        let input = br#"{ name: m, version: "0.1.0", type: module, deps: { x: {|a| 1} } }"#;
+        assert!(parse_metadata(input).is_err());
     }
 }

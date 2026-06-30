@@ -50,7 +50,7 @@ pub fn execute(args: &NupmArgs, numan_root: &Path, out: &mut dyn Write) -> Resul
 }
 
 fn run_status(args: &StatusArgs, numan_root: &Path, out: &mut dyn Write) -> Result<()> {
-    let lockfile = Lockfile::load(numan_root).unwrap_or_else(|_| Lockfile::empty());
+    let lockfile = Lockfile::load(numan_root)?;
     let numan_nupm_imports = lockfile.count_nupm_imports();
 
     match resolve_nupm_home(args.nupm_home.as_deref())? {

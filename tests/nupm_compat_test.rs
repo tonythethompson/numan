@@ -119,6 +119,17 @@ fn t14_inspect_all_without_home_errors_status_ok() {
 }
 
 #[test]
+fn status_fails_on_corrupt_lockfile() {
+    let root = TempDir::new().unwrap();
+    std::fs::write(root.path().join("lockfile"), b"{not json").unwrap();
+    let args = NupmArgs {
+        command: NupmCommands::Status(StatusArgs { nupm_home: None }),
+    };
+    let mut buf = Vec::new();
+    assert!(nupm::execute(&args, root.path(), &mut buf).is_err());
+}
+
+#[test]
 fn t15_no_mutation_under_nupm_home_fixture() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("nupm-home");
