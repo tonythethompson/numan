@@ -369,6 +369,7 @@ mod tests {
         let args = NupmArgs {
             command: NupmCommands::Status(StatusArgs { nupm_home: None }),
         };
+        // Temporarily clear NUPM_HOME for test
         let prev = std::env::var_os("NUPM_HOME");
         std::env::remove_var("NUPM_HOME");
         let root = tempfile::tempdir().unwrap();
