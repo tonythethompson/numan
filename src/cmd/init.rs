@@ -4,12 +4,12 @@ use std::path::Path;
 
 use crate::config::Config;
 use crate::nu::autoload::{validate_candidate, CandidateRunner, NuCandidateRunner};
-use crate::util::fs_safety::assert_managed_file_owned;
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::Lockfile;
 use crate::util::format_timestamp;
 use crate::util::fs_safety::acquire_mutation_lock;
+use crate::util::fs_safety::assert_managed_file_owned;
 
 #[derive(Debug, Args)]
 pub struct InitArgs {
@@ -100,7 +100,13 @@ where
     };
 
     if has_active_modules {
-        validate_refresh_for_active_modules(root, &old_paths, &new_paths, &lockfile, runner_factory)?;
+        validate_refresh_for_active_modules(
+            root,
+            &old_paths,
+            &new_paths,
+            &lockfile,
+            runner_factory,
+        )?;
     }
 
     let mut lockfile = lockfile;
@@ -120,8 +126,9 @@ where
 
 fn ensure_layout_dirs(root: &Path) -> Result<()> {
     for dir in ["nu_state", "state", "packages", "registries"] {
-        std::fs::create_dir_all(root.join(dir))
-            .with_context(|| format!("Failed to create directory '{}'", root.join(dir).display()))?;
+        std::fs::create_dir_all(root.join(dir)).with_context(|| {
+            format!("Failed to create directory '{}'", root.join(dir).display())
+        })?;
     }
     Ok(())
 }
@@ -215,7 +222,11 @@ fn warn_missing_vendor_target(paths: &NuPaths) {
 }
 
 fn print_summary(root: &Path, paths: &NuPaths, refreshed: bool) {
-    let action = if refreshed { "Refreshed" } else { "Initialized" };
+    let action = if refreshed {
+        "Refreshed"
+    } else {
+        "Initialized"
+    };
     println!("{action} Numan at '{}'.", root.display());
     println!("  Nu executable: {}", paths.nu_executable);
     println!("  Nu version:    {}", paths.nu_version);
@@ -254,10 +265,7 @@ mod tests {
         move || Ok(paths.clone())
     }
 
-    fn plugin_entry(
-        payload_path: &str,
-        activation: Option<PluginActivation>,
-    ) -> LockfileEntry {
+    fn plugin_entry(payload_path: &str, activation: Option<PluginActivation>) -> LockfileEntry {
         LockfileEntry {
             version: "1.0.0".to_string(),
             package_type: "plugin".to_string(),
@@ -309,8 +317,7 @@ mod tests {
 
         let paths = fake_paths(root, &nu_exe, Some(&vendor.to_string_lossy()));
         let args = InitArgs { refresh: false };
-        execute_with_runner(&args, root, make_detect(paths), fake_runner_factory)
-        .unwrap();
+        execute_with_runner(&args, root, make_detect(paths), fake_runner_factory).unwrap();
 
         assert!(root.join("nu_state/paths.json").is_file());
         assert!(root.join("config.toml").is_file());
@@ -371,7 +378,10 @@ mod tests {
         let loaded = Lockfile::load(root).unwrap();
         let activation = loaded.packages["owner/plugin"].activation.as_ref().unwrap();
         assert_eq!(activation.nu_version, "0.113.1");
-        assert_ne!(activation.nu_executable_sha256, integrity::compute_sha256(b"v1"));
+        assert_ne!(
+            activation.nu_executable_sha256,
+            integrity::compute_sha256(b"v1")
+        );
         assert_eq!(
             activation.nu_executable_sha256,
             integrity::compute_sha256(b"v2")
