@@ -277,7 +277,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | Update, remove, gc, lockfile v2 | ✅ Complete |
 | nupm status, inspect, import, drift | ✅ Complete |
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
-| Polish, CI hardening, distribution | 🚧 In progress (release workflow + binaries) |
+| Polish, CI, distribution | 🚧 In progress — [Phase7Plan.md](Phase7Plan.md); next: `numan doctor` |
 
 ---
 

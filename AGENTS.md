@@ -46,6 +46,7 @@ src/
     registry.rs        — Registry management subcommands
     activate.rs        — Plugin + module activation (Phase 3 & 4); public entry: execute_with_candidate_runner
     init.rs            — `numan init [--refresh]`: Nu probe, paths cache, activation identity refresh
+    doctor.rs          — `numan doctor [--json]`: read-only health checks (Phase 7.2; spec: docs/numan-doctor.md)
     deactivate.rs      — Module deactivation: full (delete managed file) and partial (regenerate) (Phase 4)
     update.rs          — `numan update [--check] [pkg]`: detect and apply registry version upgrades (Phase 5)
     remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
@@ -142,7 +143,7 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 6.3: drift (`numan nupm diff`), status drift count, manifest import, re-import polish, activation tests
 - [x] Phase 6.4: `--exit-on-ineligible`, parser fuzz, Unicode/symlink tests, real-Nu acceptance
 - [x] Phase 6 complete: compatibility matrix (`docs/nupm-compatibility.md`); CI acceptance job for `#[ignore]` real-Nu tests
-- [ ] Phase 7: Polish, CI, distribution (release workflow, CHANGELOG, crates.io, `numan init`)
+- [ ] Phase 7: Polish, CI, distribution — see [Phase7Plan.md](Phase7Plan.md); next: `numan doctor` ([docs/numan-doctor.md](docs/numan-doctor.md))
 
 ## Testing
 - Unit tests inline with source modules
