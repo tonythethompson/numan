@@ -110,12 +110,6 @@ pub fn compare_import(root: &Path, package_id: &str) -> Result<DriftReport> {
     }
 
     let (compat, parsed) = classify_source_root(&recorded_source)?;
-    let parsed = parsed.with_context(|| {
-        format!(
-            "No supported metadata at recorded source '{}'",
-            recorded_source.display()
-        )
-    })?;
 
     if compat != NupmCompatibility::ImportableModule {
         return Ok(DriftReport {
@@ -129,6 +123,13 @@ pub fn compare_import(root: &Path, package_id: &str) -> Result<DriftReport> {
             live_metadata_sha256: None,
         });
     }
+
+    let parsed = parsed.with_context(|| {
+        format!(
+            "No supported metadata at recorded source '{}'",
+            recorded_source.display()
+        )
+    })?;
 
     let module_src = recorded_source.join(&parsed.name);
     if check_module_tree_safe(&module_src).is_err() {
@@ -356,6 +357,29 @@ mod tests {
             b"export def drift [] { 1 }",
         )
         .unwrap();
+        assert_eq!(count_drifted_imports(root.path()).unwrap(), 1);
+    }
+
+    #[test]
+    fn unsafe_source_tree_when_metadata_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("pkg");
+        copy_dir_all(&fixture("supported/minimal-module"), &source).unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        import_module_with_runner(
+            root.path(),
+            &source,
+            &ScopedId::parse("test/minimal").unwrap(),
+            true,
+            &FakeCandidateRunner::success(),
+        )
+        .unwrap();
+
+        fs::write(source.join("nupm.nuon"), b"not valid nuon {{{").unwrap();
+
+        let report = compare_import(root.path(), "test/minimal").unwrap();
+        assert_eq!(report.status, DriftStatus::UnsafeSourceTreeChange);
         assert_eq!(count_drifted_imports(root.path()).unwrap(), 1);
     }
 }

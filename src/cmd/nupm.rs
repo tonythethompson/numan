@@ -329,11 +329,17 @@ fn ensure_eligible_if_requested(
     if !exit_on_ineligible {
         return Ok(());
     }
-    let ineligible: Vec<&str> = report
+    let ineligible: Vec<String> = report
         .candidates
         .iter()
         .filter(|c| c.entry.compatibility != NupmCompatibility::ImportableModule)
-        .filter_map(|c| c.entry.metadata.as_ref().map(|m| m.name.as_str()))
+        .map(|c| {
+            c.entry
+                .metadata
+                .as_ref()
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| c.entry.source_path.display().to_string())
+        })
         .collect();
     if ineligible.is_empty() {
         return Ok(());
@@ -414,5 +420,25 @@ mod tests {
             }),
         };
         execute(&args, root.path(), &mut buf).unwrap();
+    }
+
+    #[test]
+    fn inspect_exit_on_ineligible_rejects_invalid_metadata_without_name() {
+        let root = tempfile::tempdir().unwrap();
+        let pkg = root.path().join("pkg");
+        std::fs::create_dir_all(pkg.join("m")).unwrap();
+        std::fs::write(pkg.join("nupm.nuon"), b"not valid nuon {{{").unwrap();
+        std::fs::write(pkg.join("m/mod.nu"), b"").unwrap();
+
+        let mut buf = Vec::new();
+        let args = NupmArgs {
+            command: NupmCommands::Inspect(InspectArgs {
+                all: false,
+                path: Some(pkg),
+                nupm_home: None,
+                exit_on_ineligible: true,
+            }),
+        };
+        assert!(execute(&args, root.path(), &mut buf).is_err());
     }
 }

@@ -16,7 +16,9 @@ use crate::nupm_compat::metadata::read_metadata_limited;
 use crate::nupm_compat::schema::{
     MODULE_ENTRY, NUPM_IMPORT_ORIGIN, NUPM_IMPORT_SELECTION_REASON, NUPM_TRUST_LEVEL,
 };
-use crate::nupm_compat::walk::{check_module_tree_safe, find_package_root};
+use crate::nupm_compat::walk::{
+    check_module_tree_safe, check_path_chain_safe, check_path_chain_safe_within, find_package_root,
+};
 use crate::state::lifecycle_journal::{
     check_stale_journal, LifecycleOp, LifecycleStage, PendingLifecycle,
 };
@@ -330,19 +332,27 @@ fn resolve_single_import(
     yes: bool,
 ) -> Result<ResolvedImport> {
     let package_root = resolve_package_root(source_path)?;
-    let (compat, parsed) = classify_source_root(&package_root)?;
-    let parsed = parsed.with_context(|| {
-        format!(
-            "No supported metadata found for '{}'",
-            package_root.display()
-        )
-    })?;
+    let (compat, parsed_opt) = classify_source_root(&package_root)?;
     if compat != NupmCompatibility::ImportableModule {
+        if compat == NupmCompatibility::UnsafeFilesystemLayout {
+            if let Some(ref p) = parsed_opt {
+                let module_src = package_root.join(&p.name);
+                check_module_tree_safe(&module_src)?;
+                check_path_chain_safe_within(&package_root, &module_src)?;
+            }
+            check_path_chain_safe(&package_root)?;
+        }
         bail!(
             "Package at '{}' is not import-eligible ({compat:?}).",
             package_root.display()
         );
     }
+    let parsed = parsed_opt.with_context(|| {
+        format!(
+            "No supported metadata found for '{}'",
+            package_root.display()
+        )
+    })?;
 
     let package_id = target.to_string();
     let lockfile = Lockfile::load(root)?;
@@ -589,12 +599,6 @@ fn lifecycle_op_label(op: &LifecycleOp) -> &'static str {
 }
 
 fn resolve_package_root(source_path: &Path) -> Result<PathBuf> {
-    if source_path
-        .join(crate::nupm_compat::schema::METADATA_FILENAME)
-        .is_file()
-    {
-        return Ok(source_path.to_path_buf());
-    }
     find_package_root(source_path)?
         .with_context(|| format!("No nupm.nuon found for path '{}'", source_path.display()))
 }
@@ -809,6 +813,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("already installed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_rejects_symlink_ancestor_when_package_root_passed_directly() {
+        use std::fs;
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let real_pkg = dir.path().join("real_pkg");
+        fs::create_dir_all(&real_pkg.join("minimal-module")).unwrap();
+        fs::copy(
+            fixture("supported/minimal-module/nupm.nuon"),
+            real_pkg.join("nupm.nuon"),
+        )
+        .unwrap();
+        fs::copy(
+            fixture("supported/minimal-module/minimal-module/mod.nu"),
+            real_pkg.join("minimal-module/mod.nu"),
+        )
+        .unwrap();
+        let link = dir.path().join("link");
+        symlink(&real_pkg, &link).unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        let err = import_module_with_runner(
+            root.path(),
+            &link,
+            &ScopedId::parse("test/minimal").unwrap(),
+            true,
+            &FakeCandidateRunner::success(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Unsafe filesystem layout"));
     }
 
     fn default_entry() -> LockfileEntry {
