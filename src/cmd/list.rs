@@ -1,4 +1,5 @@
 use crate::nu::paths::NuPaths;
+use crate::nupm_compat::schema::NUPM_IMPORT_ORIGIN;
 use crate::state::lockfile::Lockfile;
 use anyhow::Result;
 use std::path::Path;
@@ -27,9 +28,14 @@ pub fn execute(root: &Path) -> Result<()> {
             }
             _ => "installed",
         };
+        let origin_tag = if entry.origin.as_deref() == Some(NUPM_IMPORT_ORIGIN) {
+            " (nupm import)"
+        } else {
+            ""
+        };
         println!(
-            "  {}  v{}  [{}]  {}",
-            id, entry.version, entry.package_type, status
+            "  {}  v{}  [{}]  {}{}",
+            id, entry.version, entry.package_type, status, origin_tag
         );
     }
 
