@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "A cross-platform package manager for Nushell"
 license = "MIT"
-repository = "https://github.com/numan/numan"
+repository = "https://github.com/tonythethompson/numan"
 
 [[bin]]
 name = "numan"
