@@ -309,7 +309,27 @@ impl<'a> Parser<'a> {
                         b'$' => {
                             return Err(MetadataError::InvalidSyntax("variables not supported"));
                         }
-                        _ => {}
+                        b':' => {
+                            self.skip_ws();
+                            match self.peek_byte() {
+                                Some(b'}') | Some(b',') => {
+                                    return Err(MetadataError::InvalidSyntax("empty field value"));
+                                }
+                                None => {
+                                    return Err(MetadataError::InvalidSyntax("empty field value"));
+                                }
+                                _ => {}
+                            }
+                        }
+                        b if b.is_ascii_whitespace()
+                            || is_ident_start(b)
+                            || is_ident_continue(b)
+                            || b == b',' => {}
+                        _ => {
+                            return Err(MetadataError::InvalidSyntax(
+                                "invalid character in container",
+                            ));
+                        }
                     }
                     if depth_inner > MAX_NESTING_DEPTH + 2 {
                         return Err(MetadataError::LimitExceeded("nesting depth"));
@@ -342,7 +362,15 @@ impl<'a> Parser<'a> {
                         b'$' => {
                             return Err(MetadataError::InvalidSyntax("variables not supported"));
                         }
-                        _ => {}
+                        b if b.is_ascii_whitespace()
+                            || is_ident_start(b)
+                            || is_ident_continue(b)
+                            || b == b',' => {}
+                        _ => {
+                            return Err(MetadataError::InvalidSyntax(
+                                "invalid character in container",
+                            ));
+                        }
                     }
                 }
                 Err(MetadataError::InvalidSyntax("unclosed list"))
@@ -521,6 +549,12 @@ mod tests {
             parse_metadata(&with_trailing),
             Err(MetadataError::InvalidSyntax("trailing data after record"))
         ));
+    }
+
+    #[test]
+    fn deps_malformed_empty_value_rejected() {
+        let input = br#"{ name: m, version: "0.1.0", type: module, deps: { other: } }"#;
+        assert!(parse_metadata(input).is_err());
     }
 
     #[test]

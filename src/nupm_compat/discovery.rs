@@ -17,29 +17,28 @@ pub enum NupmHomeResolution {
 
 pub fn resolve_nupm_home(flag: Option<&Path>) -> Result<NupmHomeResolution> {
     if let Some(p) = flag {
-        if !p.exists() {
-            bail!(
-                "nupm home '{}' does not exist.\n\
-                 Pass --nupm-home <path> or set NUPM_HOME.",
-                p.display()
-            );
-        }
-        return Ok(NupmHomeResolution::Found(p.to_path_buf()));
+        return Ok(NupmHomeResolution::Found(require_nupm_home_directory(p)?));
     }
 
     if let Some(env) = std::env::var_os("NUPM_HOME") {
         let p = PathBuf::from(env);
-        if !p.exists() {
-            bail!(
-                "NUPM_HOME '{}' does not exist.\n\
-                 Fix the environment variable or pass --nupm-home <path>.",
-                p.display()
-            );
-        }
-        return Ok(NupmHomeResolution::Found(p));
+        return Ok(NupmHomeResolution::Found(require_nupm_home_directory(&p)?));
     }
 
     Ok(NupmHomeResolution::NotConfigured)
+}
+
+fn require_nupm_home_directory(path: &Path) -> Result<PathBuf> {
+    let meta = std::fs::symlink_metadata(path)
+        .with_context(|| format!("Failed to read nupm home path '{}'", path.display()))?;
+    if !meta.is_dir() {
+        bail!(
+            "nupm home '{}' must be a directory.\n\
+             Pass --nupm-home <dir> or set NUPM_HOME to a directory path.",
+            path.display()
+        );
+    }
+    Ok(path.to_path_buf())
 }
 
 pub struct ScanResult {
@@ -181,5 +180,13 @@ mod tests {
         let modules = home.join("modules");
         std::os::unix::fs::symlink(&real_modules, &modules).unwrap();
         assert!(scan_nupm_home(home).is_err());
+    }
+
+    #[test]
+    fn nupm_home_must_be_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-dir");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(resolve_nupm_home(Some(&file)).is_err());
     }
 }
