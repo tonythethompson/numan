@@ -363,10 +363,7 @@ impl<'a> Parser<'a> {
         {
             return true;
         }
-        rest.iter()
-            .copied()
-            .find(|b| !b.is_ascii_whitespace())
-            == Some(b'|')
+        rest.iter().copied().find(|b| !b.is_ascii_whitespace()) == Some(b'|')
     }
 
     fn optional_comma(&mut self) -> Result<(), MetadataError> {
