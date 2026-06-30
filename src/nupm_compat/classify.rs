@@ -5,7 +5,8 @@ use anyhow::Result;
 use super::metadata::{parse_metadata, read_metadata_limited, MetadataError, ParsedMetadata};
 use super::schema::{BUILD_SCRIPT_NAME, METADATA_FILENAME, MODULE_ENTRY};
 use super::walk::{
-    check_path_chain_safe, check_path_chain_safe_within, find_package_root, is_safe_package_name,
+    check_module_tree_safe, check_path_chain_safe, check_path_chain_safe_within, find_package_root,
+    is_safe_package_name,
 };
 use crate::util::fs_safety::is_symlink_or_reparse;
 
@@ -82,6 +83,7 @@ pub fn classify_parsed(ctx: &ClassifyContext, parsed: &ParsedMetadata) -> NupmCo
         }
         if check_path_chain_safe_within(&ctx.package_root, &module_dir).is_err()
             || check_path_chain_safe_within(&ctx.package_root, &entry).is_err()
+            || check_module_tree_safe(&module_dir).is_err()
         {
             return NupmCompatibility::UnsafeFilesystemLayout;
         }
@@ -175,6 +177,25 @@ mod tests {
         fs::create_dir_all(root.join("m")).unwrap();
         fs::write(root.join("m/mod.nu"), b"").unwrap();
         std::os::unix::fs::symlink(&real, root.join("nupm.nuon")).unwrap();
+        let (compat, _) = classify_source_root(&root).unwrap();
+        assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_in_module_tree_is_unsafe() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("pkg");
+        let module_dir = root.join("m");
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            root.join("nupm.nuon"),
+            br#"{ name: m, version: "0.1.0", type: module }"#,
+        )
+        .unwrap();
+        fs::write(module_dir.join("mod.nu"), b"").unwrap();
+        std::os::unix::fs::symlink(module_dir.join("mod.nu"), module_dir.join("link.nu")).unwrap();
         let (compat, _) = classify_source_root(&root).unwrap();
         assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
     }

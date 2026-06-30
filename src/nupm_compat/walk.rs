@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use crate::util::fs_safety::is_symlink_or_reparse;
 
-use super::schema::{MAX_PARENT_WALK_HOPS, METADATA_FILENAME};
+use super::schema::{MAX_MODULE_TREE_ENTRIES, MAX_PARENT_WALK_HOPS, METADATA_FILENAME};
 
 /// Walk parents from `start` looking for `nupm.nuon` (bounded).
 pub fn find_package_root(start: &Path) -> Result<Option<PathBuf>> {
@@ -136,6 +136,54 @@ fn check_path_prefixes_for_symlinks(path: &Path) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Reject symlink/reparse points anywhere under a module payload directory (bounded walk).
+pub fn check_module_tree_safe(module_dir: &Path) -> Result<()> {
+    check_path_chain_safe(module_dir)?;
+
+    let mut stack = vec![module_dir.to_path_buf()];
+    let mut entries_seen = 0usize;
+
+    while let Some(current) = stack.pop() {
+        let read_dir = std::fs::read_dir(&current).with_context(|| {
+            format!(
+                "Failed to read module tree directory '{}'",
+                current.display()
+            )
+        })?;
+
+        for entry in read_dir {
+            let entry = entry.with_context(|| {
+                format!(
+                    "Failed to read module tree entry under '{}'",
+                    module_dir.display()
+                )
+            })?;
+            entries_seen += 1;
+            if entries_seen > MAX_MODULE_TREE_ENTRIES {
+                anyhow::bail!(
+                    "Unsafe filesystem layout: module tree '{}' exceeds maximum entry count ({MAX_MODULE_TREE_ENTRIES})",
+                    module_dir.display()
+                );
+            }
+
+            let path = entry.path();
+            check_path_chain_safe_within(module_dir, &path)?;
+
+            let file_type = entry.file_type().with_context(|| {
+                format!(
+                    "Failed to read module tree entry type for '{}'",
+                    path.display()
+                )
+            })?;
+            if file_type.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+
     Ok(())
 }
 

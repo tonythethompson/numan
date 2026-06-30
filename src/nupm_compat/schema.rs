@@ -16,5 +16,6 @@ pub const MAX_STRING_LEN: usize = 4096;
 
 pub const MAX_PARENT_WALK_HOPS: usize = 32;
 pub const MAX_DISCOVERY_ENTRIES: usize = 1024;
+pub const MAX_MODULE_TREE_ENTRIES: usize = 1024;
 
 pub const NUPM_IMPORT_ORIGIN: &str = "nupm_import";
