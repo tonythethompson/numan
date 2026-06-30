@@ -134,3 +134,12 @@ jobs:
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
           generate_release_notes: true
           files: dist/*
+
+  publish-crate:
+    name: Publish to crates.io
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish --locked --token ${{ secrets.CRATES_IO_TOKEN }}

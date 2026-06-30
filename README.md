@@ -83,13 +83,35 @@ Expand-Archive numan-<version>-x86_64-pc-windows-msvc.zip -DestinationPath .
 
 Verify downloads with the `SHA256SUMS` file attached to each release.
 
-**Requirements:** a [Nushell](https://www.nushell.sh/) binary on `PATH` for `numan activate` and related commands.
+### crates.io
+
+```bash
+cargo install numan-cli
+```
+
+Requires [Rust](https://rustup.rs/) (stable). The installed binary is named `numan`.
+
+**Requirements:** a [Nushell](https://www.nushell.sh/) binary on `PATH` for `numan init`, `numan activate`, and related commands.
 
 ---
 
 ## Quick start
 
-### 1. Configure a registry
+### 1. Initialize
+
+Probe your local Nu installation and create Numan state under the default root (or `--root`):
+
+```bash
+numan init
+```
+
+After Nu upgrades, refresh cached paths and activation identity:
+
+```bash
+numan init --refresh
+```
+
+### 2. Configure a registry
 
 Add a registry with its Ed25519 public key, then sync the index:
 
@@ -98,7 +120,7 @@ numan registry add official https://example.com/index.json --key <base64-public-
 numan registry sync
 ```
 
-### 2. Search and install
+### 3. Search and install
 
 ```bash
 numan search hooks
@@ -109,7 +131,7 @@ numan list
 
 Install is **inert** — nothing is registered with Nu until you activate.
 
-### 3. Activate with Nu
+### 4. Activate with Nu
 
 ```bash
 numan activate                    # activate all inactive packages
@@ -124,7 +146,7 @@ For modules:
 numan deactivate owner/module-name
 ```
 
-### 4. Maintain installs
+### 5. Maintain installs
 
 ```bash
 numan update --check              # see available upgrades
@@ -166,6 +188,7 @@ Payload paths are immutable: `packages/<type>/<owner>/<name>/<version>-<hash>/`.
 
 | Command | Description |
 |---------|-------------|
+| `numan init [--refresh]` | Probe Nu and cache paths for activation |
 | `numan search <query>` | Search registry by name, description, or tags |
 | `numan info <owner/name>` | Show package metadata and available versions |
 | `numan install <owner/name[@version]>` | Download, verify, extract, and lock |

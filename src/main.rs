@@ -47,6 +47,8 @@ enum Commands {
     Deactivate(cmd::deactivate::DeactivateArgs),
     /// List all installed packages
     List,
+    /// Initialize Numan and probe the local Nu installation
+    Init(cmd::init::InitArgs),
     /// Registry management
     #[command(subcommand)]
     Registry(cmd::registry::RegistryCommands),
@@ -75,6 +77,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Activate(args) => cmd::activate::execute(&args, &root),
         Commands::Deactivate(args) => cmd::deactivate::execute(&args, &root),
         Commands::List => cmd::list::execute(&root),
+        Commands::Init(args) => cmd::init::execute(&args, &root),
         Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
         Commands::Nupm(args) => {
             let mut stdout = std::io::stdout();

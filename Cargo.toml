@@ -5,6 +5,18 @@ edition = "2021"
 description = "A cross-platform package manager for Nushell"
 license = "MIT"
 repository = "https://github.com/tonythethompson/numan"
+homepage = "https://github.com/tonythethompson/numan"
+documentation = "https://github.com/tonythethompson/numan#readme"
+readme = "README.md"
+keywords = ["nushell", "package-manager", "cli"]
+categories = ["command-line-utilities"]
+authors = ["Anthony Thompson"]
+exclude = [
+    ".github/**",
+    "tests/fixtures/**",
+    "Phase*.md",
+    ".tmp*",
+]
 
 [[bin]]
 name = "numan"
