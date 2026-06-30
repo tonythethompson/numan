@@ -93,6 +93,22 @@ Requires [Rust](https://rustup.rs/) (stable). The installed binary is named `num
 
 **Requirements:** a [Nushell](https://www.nushell.sh/) binary on `PATH` for `numan init`, `numan activate`, and related commands.
 
+### Shell completions
+
+```bash
+# Bash
+numan completions bash > ~/.local/share/bash-completion/completions/numan
+
+# Zsh
+numan completions zsh > ~/.zfunc/_numan
+
+# Fish
+numan completions fish > ~/.config/fish/completions/numan.fish
+
+# PowerShell (append to $PROFILE)
+numan completions powershell | Out-File -Encoding utf8 $PROFILE
+```
+
 ---
 
 ## Quick start
@@ -204,6 +220,7 @@ Payload paths are immutable: `packages/<type>/<owner>/<name>/<version>-<hash>/`.
 | `numan nupm import [--as owner/name] [path]` | One-way import into Numan |
 | `numan nupm import --manifest file.toml` | Batch import from manifest |
 | `numan nupm diff <owner/name>` | Compare imported payload vs nupm source |
+| `numan completions <shell>` | Generate bash, fish, zsh, or powershell completions |
 
 Global flag: `--root <path>` — override the Numan root directory.
 
@@ -278,7 +295,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | nupm status, inspect, import, drift | ✅ Complete |
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
 | Distribution (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
-| Doctor, completions, onboarding polish | 🚧 [Phase 7.2+](Phase7Plan.md) — next: shell completions + error UX |
+| Doctor, completions, onboarding polish | 🚧 [Phase 7.2+](Phase7Plan.md) — completions + error UX shipped; doctor next |
 
 ---
 

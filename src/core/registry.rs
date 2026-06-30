@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::core::integrity;
 use crate::core::package::{Package, RegistryIndex};
 use crate::core::trust::TrustStore;
+use crate::util::hints::{self, CMD_REGISTRY_ADD, CMD_REGISTRY_SYNC};
 
 pub struct RegistryManager {
     root: PathBuf,
@@ -40,7 +41,10 @@ impl RegistryManager {
     pub fn load_index(&self, registry_name: &str) -> Result<RegistryIndex> {
         let path = self.index_path(registry_name);
         let content = std::fs::read_to_string(&path).with_context(|| {
-            format!("Registry '{registry_name}' not synced. Run 'numan registry sync'.")
+            format!(
+                "Registry '{registry_name}' not synced. {}",
+                hints::run(CMD_REGISTRY_SYNC)
+            )
         })?;
         let index: RegistryIndex = serde_json::from_str(&content)?;
         Ok(index)
@@ -80,8 +84,8 @@ impl RegistryManager {
 
             if !self.trust.keys.contains_key(registry_name) {
                 anyhow::bail!(
-                    "No trusted key for registry '{registry_name}'. \
-                     Run 'numan registry add' with --key first."
+                    "No trusted key for registry '{registry_name}'. {}",
+                    hints::run(CMD_REGISTRY_ADD)
                 );
             }
 

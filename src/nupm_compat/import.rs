@@ -27,6 +27,7 @@ use crate::state::nupm_import::{NupmImportRecord, NupmImportsFile};
 use crate::util::atomic::write_bytes_atomic;
 use crate::util::format_timestamp;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_not_symlink};
+use crate::util::hints::{self, CMD_INIT, CMD_INIT_REFRESH, CMD_NUPM_INSPECT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportResult {
@@ -93,7 +94,10 @@ pub fn import_module(
     yes: bool,
 ) -> Result<ImportResult> {
     let nu_paths = crate::nu::paths::NuPaths::load(root).with_context(|| {
-        "Nu paths are not configured. Run `numan init` or refresh Nu paths before importing."
+        format!(
+            "Nu paths are not configured. {}",
+            hints::run_then(CMD_INIT, CMD_INIT_REFRESH)
+        )
     })?;
     let runner = crate::nu::autoload::NuCandidateRunner::new(&nu_paths.nu_executable);
     import_module_with_runner(root, source_path, target, yes, &runner)
@@ -308,7 +312,7 @@ fn ensure_no_stale_journal(root: &Path) -> Result<()> {
         let op = lifecycle_op_label(&journal.op);
         bail!(
             "A previous '{op}' operation on '{}' was interrupted.\n\
-             Run `numan gc` to clean up orphaned payloads, then retry.",
+             Complete or clear the lifecycle journal, then retry.",
             journal.package_id
         );
     }
@@ -363,8 +367,9 @@ fn resolve_single_import(
             check_path_chain_safe(&package_root)?;
         }
         bail!(
-            "Package at '{}' is not import-eligible ({compat:?}).",
-            package_root.display()
+            "Package at '{}' is not import-eligible ({compat:?}). {}",
+            package_root.display(),
+            hints::run(CMD_NUPM_INSPECT)
         );
     }
     let parsed = parsed_opt.with_context(|| {
@@ -385,8 +390,9 @@ fn resolve_single_import(
         if existing.origin.as_deref() != Some(NUPM_IMPORT_ORIGIN) {
             bail!(
                 "Cannot import as '{package_id}': package is already installed from {}.\n\
-                 Remove it first with `numan remove {package_id}`.",
-                existing.origin.as_deref().unwrap_or("registry")
+                 {}",
+                existing.origin.as_deref().unwrap_or("registry"),
+                hints::run(&hints::remove_pkg(&package_id))
             );
         }
         reimported = true;

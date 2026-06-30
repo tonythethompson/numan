@@ -1,4 +1,5 @@
 pub mod activate;
+pub mod completions;
 pub mod deactivate;
 pub mod gc;
 pub mod info;

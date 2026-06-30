@@ -39,6 +39,7 @@ src/
     trust.rs           — Ed25519 trust store and signature verification
     integrity.rs       — SHA256 compute and verify
     resolve.rs         — Version resolution with strict plugin constraints
+  cli.rs               — Root `Cli` / `Commands` (clap derive; used by main + completions)
   cmd/
     search.rs          — Search subcommand
     info.rs            — Info subcommand
@@ -52,6 +53,7 @@ src/
     remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
+    completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell scripts (Phase 7.3)
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
@@ -68,6 +70,7 @@ src/
   util/
     atomic.rs          — write_json_atomic helper (tempfile+persist)
     fs_safety.rs       — OWNERSHIP_MARKER, acquire_mutation_lock (advisory fd_lock mutex), assert_managed_file_owned (Phase 4)
+    hints.rs           — Canonical `fix` hint strings aligned with docs/numan-doctor.md (Phase 7.3)
   nupm_compat/         — nupm discovery, import, drift (Phase 6.1–6.3); contract: docs/nupm-compatibility.md (compat-schema-v1)
     drift.rs           — compare_import, count_drifted_imports, DriftStatus (Phase 6.3)
     import.rs          — safe payload copy, lifecycle-journaled import transaction
@@ -82,6 +85,7 @@ docs/
 tests/
   fixtures/nupm/       — supported/rejected fixture corpus for parser/classifier tests
   init_test.rs          — `numan init` / `init --refresh` (vendor drift, managed-file revalidation)
+  completions_test.rs  — shell completion script generation (Phase 7.3)
   nupm_compat_test.rs  — Phase 6 integration tests (T13–T25, import/drift/manifest/activation/platform)
   nupm_real_nu_test.rs — Phase 6.4 real-Nu #[ignore] acceptance tests (run with `cargo test -- --ignored`)
 ```
@@ -90,7 +94,7 @@ tests/
 - **Crate name**: `numan-cli`, **binary name**: `numan`
 - **Product name**: Numan (capital N in prose, lowercase `numan` for CLI)
 - **Edition**: Rust 2021
-- **Error handling**: `anyhow` for application errors, `thiserror` for library errors
+- **Error handling**: `anyhow` for application errors, `thiserror` for library errors; user-facing fix hints via `util::hints` (match `docs/numan-doctor.md`)
 - **Serialization**: `serde` + `serde_json` (JSON) + `toml` (config)
 - **CLI**: `clap` with derive macros
 - **Platform detection**: `#[cfg(target_env)]` from binary's build target, not `std::env::consts`
@@ -127,7 +131,7 @@ tests/
 Automated and human PR reviewers should follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md) for review checklists, severity expectations, and architecture invariants to flag. Keep that file updated when review conventions change; link here rather than duplicating review rules in this doc.
 
 ## Dependencies
-- clap (CLI), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
+- clap (CLI), clap_complete (shell completions), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
 - sha2/hex (integrity), ed25519-dalek/base64 (signatures), semver (versioning)
 - dirs (platform paths), git2 (source builds), tempfile (safe extraction)
 
@@ -145,7 +149,8 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 6.4: `--exit-on-ineligible`, parser fuzz, Unicode/symlink tests, real-Nu acceptance
 - [x] Phase 6 complete: compatibility matrix (`docs/nupm-compatibility.md`); CI acceptance job for `#[ignore]` real-Nu tests
 - [x] Phase 7.1: Distribution baseline — GitHub Releases, crates.io, `numan init`, real-Nu CI ([Phase7Plan.md](Phase7Plan.md))
-- [ ] Phase 7.2+: `numan doctor` ([docs/numan-doctor.md](docs/numan-doctor.md)), shell completions, error UX — see [Phase7Plan.md](Phase7Plan.md)
+- [x] Phase 7.3 (partial): shell completions + error UX hints ([Phase7Plan.md](Phase7Plan.md))
+- [ ] Phase 7.2+: `numan doctor` ([docs/numan-doctor.md](docs/numan-doctor.md)) — see [Phase7Plan.md](Phase7Plan.md)
 
 ## Testing
 - Unit tests inline with source modules

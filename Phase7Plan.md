@@ -12,7 +12,7 @@ Take Numan from feature-complete core (Phases 1–6) to a distributable, polishe
 |-------|--------|--------|
 | 7.1 | Distribution baseline | ✅ Done |
 | 7.2 | `numan doctor` | 📋 Specified — [docs/numan-doctor.md](docs/numan-doctor.md) |
-| 7.3 | Daily-driver polish | 🔜 Planned |
+| 7.3 | Daily-driver polish | 🚧 Partial — completions + error UX shipped; `--help` audit remains |
 | 7.4 | Onboarding path | 🔜 Planned |
 | 7.5 | CI / release hardening | 🔜 Planned |
 | 7.6 | Wider distribution | 🔜 Optional |
@@ -59,12 +59,15 @@ Read-only health command aggregating:
 
 ---
 
-## 7.3 Daily-driver polish 🔜
+## 7.3 Daily-driver polish 🚧
 
-Recommended after doctor (doctor informs what to fix; polish makes fixes clearer).
+Shipped (partial):
 
-1. **Shell completions** — bash, fish, zsh, PowerShell
-2. **Error message UX pass** — `init`, `install`, `activate`, `nupm import` (align hints with doctor `fix` strings)
+1. **Shell completions** — `numan completions bash|fish|zsh|powershell` via `clap_complete`
+2. **Error message UX pass** — `init`, `install`, `activate`, `nupm import` use `util::hints` aligned with doctor `fix` strings
+
+Remaining:
+
 3. **`--help` audit** — README command table vs clap flags
 
 ---

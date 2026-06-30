@@ -12,6 +12,7 @@ use crate::nupm_compat::{
 };
 use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
+use crate::util::hints::{self, CMD_INIT, CMD_INIT_REFRESH};
 
 #[derive(clap::Parser)]
 pub struct NupmArgs {
@@ -40,7 +41,7 @@ pub struct InspectArgs {
     pub all: bool,
 
     /// Package source path (mutually exclusive with --all)
-    #[arg(value_name = "PATH", group = "inspect_target")]
+    #[arg(value_name = "PATH", group = "inspect_target", value_hint = clap::ValueHint::DirPath)]
     pub path: Option<std::path::PathBuf>,
 
     #[arg(long)]
@@ -54,7 +55,7 @@ pub struct InspectArgs {
 #[derive(clap::Parser)]
 pub struct ImportArgs {
     /// Package source root or path inside it (single import)
-    #[arg(value_name = "PATH", group = "import_target")]
+    #[arg(value_name = "PATH", group = "import_target", value_hint = clap::ValueHint::DirPath)]
     pub path: Option<std::path::PathBuf>,
 
     /// TOML manifest of imports (batch)
@@ -96,7 +97,11 @@ fn run_diff(args: &DiffArgs, numan_root: &Path, out: &mut dyn Write) -> Result<(
         crate::nupm_compat::DriftStatus::CannotCompare { .. }
     ) {
         format_drift_report(&report, out)?;
-        bail!("Cannot compare drift for '{}'", args.package_id);
+        bail!(
+            "Cannot compare drift for '{}'. {}",
+            args.package_id,
+            hints::run(&hints::nupm_diff_pkg(&args.package_id))
+        );
     }
     format_drift_report(&report, out)?;
     Ok(())
@@ -133,7 +138,12 @@ fn run_import(args: &ImportArgs, numan_root: &Path, out: &mut dyn Write) -> Resu
     let target_str = args
         .r#as
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("single import requires --as owner/name"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "single import requires --as owner/name. {}",
+                hints::run("numan nupm inspect <path>")
+            )
+        })?;
     let target = ScopedId::parse(target_str)?;
     let runner = default_runner(numan_root)?;
     let result = import_module_with_runner_cli(numan_root, path, &target, args.yes, &runner)?;
@@ -153,7 +163,10 @@ fn import_module_with_runner_cli(
 
 fn default_runner(numan_root: &Path) -> Result<crate::nu::autoload::NuCandidateRunner> {
     let nu_paths = crate::nu::paths::NuPaths::load(numan_root).with_context(|| {
-        "Nu paths are not configured. Run `numan init` or refresh Nu paths before importing."
+        format!(
+            "Nu paths are not configured. {}",
+            hints::run_then(CMD_INIT, CMD_INIT_REFRESH)
+        )
     })?;
     Ok(crate::nu::autoload::NuCandidateRunner::new(
         &nu_paths.nu_executable,

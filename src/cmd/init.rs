@@ -7,6 +7,7 @@ use crate::nu::autoload::{validate_candidate, CandidateRunner, NuCandidateRunner
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::Lockfile;
+use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
 use crate::util::format_timestamp;
 use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::fs_safety::assert_managed_file_owned;
@@ -40,8 +41,9 @@ where
     if paths_exist && !args.refresh {
         bail!(
             "Numan is already initialized at '{}'. \
-             Run 'numan init --refresh' to re-probe Nu after upgrades.",
-            root.display()
+             {}",
+            root.display(),
+            hints::run(CMD_INIT_REFRESH)
         );
     }
 
@@ -145,9 +147,10 @@ fn validate_refresh_for_active_modules(
             "Vendor-autoload target changed since last init. \
              Numan will not migrate the managed autoload file automatically.\n\
              Old: {:?}\nNew: {:?}\n\
-             Deactivate active modules, fix Nu configuration, then run 'numan init --refresh'.",
+             Deactivate active modules, fix Nu configuration, then {}.",
             old_paths.vendor_autoload_dir,
-            new_paths.vendor_autoload_dir
+            new_paths.vendor_autoload_dir,
+            hints::run(CMD_INIT_REFRESH)
         );
     }
 
@@ -160,8 +163,9 @@ fn validate_refresh_for_active_modules(
     if !managed_file.is_file() {
         bail!(
             "Managed autoload file '{}' is missing. \
-             Run 'numan activate' or deactivate modules before refresh.",
-            managed_file.display()
+             {}",
+            managed_file.display(),
+            hints::run_then(CMD_ACTIVATE, CMD_INIT_REFRESH)
         );
     }
 

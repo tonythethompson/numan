@@ -15,7 +15,11 @@ use crate::state::autoload_journal::{
 use crate::state::autoload_state::AutoloadState;
 use crate::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
 use crate::state::lockfile::{Lockfile, ModuleActivation, PluginActivation};
-use crate::util::{format_timestamp, fs_safety::acquire_mutation_lock};
+use crate::util::hints::{
+    self, CMD_ACTIVATE, CMD_INIT_REFRESH,
+};
+use crate::util::format_timestamp;
+use crate::util::fs_safety::acquire_mutation_lock;
 
 #[derive(Args, Debug)]
 pub struct ActivateArgs {
@@ -650,7 +654,8 @@ fn execute_check(
         None => {
             bail!(
                 "No Numan-safe vendor-autoload directory is available.\n\
-                 Run 'numan init --refresh' to configure the autoload target."
+                 {}",
+                hints::run(CMD_INIT_REFRESH)
             );
         }
     };
@@ -785,7 +790,10 @@ fn execute_check(
     }
 
     if any_issues {
-        bail!("One or more checks failed. See output above.");
+        bail!(
+            "One or more checks failed. See output above.\n{}",
+            hints::run(CMD_ACTIVATE)
+        );
     }
 
     println!("\nAll checks passed.");
@@ -800,7 +808,8 @@ fn resolve_managed_file_path(nu_paths: &NuPaths) -> Result<String> {
         anyhow::anyhow!(
             "No Numan-safe vendor-autoload directory is available.\n\
              Module activation requires the vendor-autoload target to be set.\n\
-             Run 'numan init --refresh' to configure the autoload target."
+             {}",
+            hints::run(CMD_INIT_REFRESH)
         )
     })?;
     Ok(format!("{vendor_dir}/numan.nu"))
@@ -846,7 +855,10 @@ fn resolve_plugin_targets(
             let entry = match lockfile.packages.get(pkg_id) {
                 Some(e) => e,
                 None => {
-                    bail!("Package '{pkg_id}' not found in lockfile (not installed)");
+                    bail!(
+                        "Package '{pkg_id}' not found in lockfile (not installed). {}",
+                        hints::run(&hints::install_pkg(pkg_id))
+                    );
                 }
             };
 
@@ -1033,8 +1045,9 @@ fn check_journals_for_stale_identity(root: &Path, nu_paths: &NuPaths) -> Result<
         ) {
             bail!(
                 "A pending plugin activation journal exists from a different Nu identity.\n\
-                 Run 'numan init --refresh' to clear stale state, then retry.\n\
+                 {}\n\
                  Journal: {}",
+                hints::run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
                 root.join("state/pending-activation.json").display()
             );
         }
@@ -1043,8 +1056,9 @@ fn check_journals_for_stale_identity(root: &Path, nu_paths: &NuPaths) -> Result<
         if !j.matches_nu_identity(&nu_paths.nu_executable_hash, &nu_paths.nu_version) {
             bail!(
                 "A pending module-autoload journal exists from a different Nu identity.\n\
-                 Run 'numan init --refresh' to clear stale state, then retry.\n\
+                 {}\n\
                  Journal: {}",
+                hints::run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
                 root.join("state/pending-autoload.json").display()
             );
         }
@@ -1070,8 +1084,9 @@ fn reconcile_plugin_journal(
     ) {
         bail!(
             "A pending plugin activation journal exists from a different Nu identity.\n\
-             Run 'numan init --refresh' to clear stale state, then retry.\n\
+             {}\n\
              Journal: {}",
+            hints::run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
             root.join("state/pending-activation.json").display()
         );
     }
@@ -1111,8 +1126,9 @@ fn reconcile_autoload_journal(
     if !journal.matches_nu_identity(&nu_paths.nu_executable_hash, &nu_paths.nu_version) {
         bail!(
             "A pending module-autoload journal exists from a different Nu identity.\n\
-             Run 'numan init --refresh' to clear stale state, then retry.\n\
+             {}\n\
              Journal: {}",
+            hints::run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
             root.join("state/pending-autoload.json").display()
         );
     }

@@ -1,60 +1,7 @@
-use clap::{Parser, Subcommand};
-use std::path::PathBuf;
-
-use numan_cli::cmd;
+use clap::Parser;
+use numan_cli::cli::{Cli, Commands};
 use numan_cli::config;
 use numan_cli::core;
-
-#[derive(Parser)]
-#[command(
-    name = "numan",
-    about = "A cross-platform package manager for Nushell",
-    version,
-    after_help = "Run 'numan <command> --help' for more information on a command."
-)]
-struct Cli {
-    /// Path to numan root directory
-    #[arg(long, global = true)]
-    root: Option<PathBuf>,
-
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Search registry by name/description/tags
-    Search {
-        /// Search query
-        query: String,
-    },
-    /// Show package details, versions, platforms
-    Info {
-        /// Package ID (owner/name)
-        id: String,
-    },
-    /// Install a package
-    Install(cmd::install::InstallArgs),
-    /// Update installed packages to their latest compatible versions
-    Update(cmd::update::UpdateArgs),
-    /// Remove an installed package
-    Remove(cmd::remove::RemoveArgs),
-    /// Garbage-collect orphaned package directories
-    Gc(cmd::gc::GcArgs),
-    /// Activate installed plugins with Nu
-    Activate(cmd::activate::ActivateArgs),
-    /// Deactivate active modules
-    Deactivate(cmd::deactivate::DeactivateArgs),
-    /// List all installed packages
-    List,
-    /// Initialize Numan and probe the local Nu installation
-    Init(cmd::init::InitArgs),
-    /// Registry management
-    #[command(subcommand)]
-    Registry(cmd::registry::RegistryCommands),
-    /// Read-only nupm discovery and inspection
-    Nupm(cmd::nupm::NupmArgs),
-}
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -64,24 +11,27 @@ fn main() -> anyhow::Result<()> {
         .root
         .unwrap_or_else(|| config::Config::resolve_root(&platform));
 
-    // Ensure root directory exists
-    std::fs::create_dir_all(&root)?;
+    // Ensure root directory exists (completions does not need a writable root)
+    if !matches!(cli.command, Commands::Completions(_)) {
+        std::fs::create_dir_all(&root)?;
+    }
 
     match cli.command {
-        Commands::Search { query } => cmd::search::execute(&query, &root),
-        Commands::Info { id } => cmd::info::execute(&id, &root),
-        Commands::Install(args) => cmd::install::execute(&args, &root),
-        Commands::Update(args) => cmd::update::execute(&args, &root),
-        Commands::Remove(args) => cmd::remove::execute(&args, &root),
-        Commands::Gc(args) => cmd::gc::execute(&args, &root),
-        Commands::Activate(args) => cmd::activate::execute(&args, &root),
-        Commands::Deactivate(args) => cmd::deactivate::execute(&args, &root),
-        Commands::List => cmd::list::execute(&root),
-        Commands::Init(args) => cmd::init::execute(&args, &root),
-        Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
+        Commands::Search { query } => numan_cli::cmd::search::execute(&query, &root),
+        Commands::Info { id } => numan_cli::cmd::info::execute(&id, &root),
+        Commands::Install(args) => numan_cli::cmd::install::execute(&args, &root),
+        Commands::Update(args) => numan_cli::cmd::update::execute(&args, &root),
+        Commands::Remove(args) => numan_cli::cmd::remove::execute(&args, &root),
+        Commands::Gc(args) => numan_cli::cmd::gc::execute(&args, &root),
+        Commands::Activate(args) => numan_cli::cmd::activate::execute(&args, &root),
+        Commands::Deactivate(args) => numan_cli::cmd::deactivate::execute(&args, &root),
+        Commands::List => numan_cli::cmd::list::execute(&root),
+        Commands::Init(args) => numan_cli::cmd::init::execute(&args, &root),
+        Commands::Registry(cmd) => numan_cli::cmd::registry::execute(cmd, &root),
         Commands::Nupm(args) => {
             let mut stdout = std::io::stdout();
-            cmd::nupm::execute(&args, &root, &mut stdout)
+            numan_cli::cmd::nupm::execute(&args, &root, &mut stdout)
         }
+        Commands::Completions(args) => numan_cli::cmd::completions::execute(&args),
     }
 }

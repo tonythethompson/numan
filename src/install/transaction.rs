@@ -12,6 +12,7 @@ use crate::core::resolve::Resolver;
 use crate::install::download;
 use crate::install::extract::{self, ArchiveFormat, ExtractConfig};
 use crate::state::lockfile::{Lockfile, LockfileEntry};
+use crate::util::hints::{self, CMD_REGISTRY_SYNC};
 use std::collections::BTreeMap;
 
 pub struct InstallOptions<'a> {
@@ -68,7 +69,7 @@ pub fn install_package(
         .packages
         .iter()
         .find(|p| p.id.to_string() == id.to_string())
-        .with_context(|| format!("Package '{}' not found in registry", id))?;
+        .with_context(|| format!("Package '{}' not found in registry. {}", id, hints::run(CMD_REGISTRY_SYNC)))?;
 
     // 3. Resolve version with compatibility validation
     let resolver = Resolver::new(options.platform, options.nu_version);
@@ -94,8 +95,10 @@ pub fn install_package(
             .get(&options.platform.triple)
             .with_context(|| {
                 format!(
-                    "No binary available for '{}' on {}",
-                    id, options.platform.triple
+                    "No binary available for '{}' on {}. {}",
+                    id,
+                    options.platform.triple,
+                    hints::run(CMD_REGISTRY_SYNC)
                 )
             })?;
 
