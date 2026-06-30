@@ -50,6 +50,8 @@ enum Commands {
     /// Registry management
     #[command(subcommand)]
     Registry(cmd::registry::RegistryCommands),
+    /// Read-only nupm discovery and inspection
+    Nupm(cmd::nupm::NupmArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -74,5 +76,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Deactivate(args) => cmd::deactivate::execute(&args, &root),
         Commands::List => cmd::list::execute(&root),
         Commands::Registry(cmd) => cmd::registry::execute(cmd, &root),
+        Commands::Nupm(args) => {
+            let mut stdout = std::io::stdout();
+            cmd::nupm::execute(&args, &root, &mut stdout)
+        }
     }
 }
