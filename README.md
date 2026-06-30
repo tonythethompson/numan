@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.0). Core install, activate, update, remove, gc, registry, and nupm interoperability are implemented and covered by 245+ tests plus real-Nu acceptance on CI. Source builds, lockfile rollback snapshots, and distribution packaging are planned for later phases.
+Numan is **early-stage** (v0.1.0). Core install, activate, update, remove, gc, registry, and nupm interoperability are implemented and covered by 309+ tests plus real-Nu acceptance on CI. Source builds and lockfile rollback snapshots remain planned; pre-built release binaries are published via GitHub Releases.
 
 ---
 
@@ -58,7 +58,32 @@ The binary is named `numan`.
 
 ### Pre-built releases
 
-Release binaries are not published yet. Track [Releases](https://github.com/tonythethompson/numan/releases) for updates.
+Download the latest archive for your platform from [GitHub Releases](https://github.com/tonythethompson/numan/releases). Each release ships:
+
+| Platform | Archive | Binary |
+|----------|---------|--------|
+| Linux (x86_64) | `numan-<version>-x86_64-unknown-linux-gnu.tar.gz` | `numan` |
+| Windows (x86_64) | `numan-<version>-x86_64-pc-windows-msvc.zip` | `numan.exe` |
+| macOS (Apple Silicon) | `numan-<version>-aarch64-apple-darwin.tar.gz` | `numan` |
+| macOS (Intel) | `numan-<version>-x86_64-apple-darwin.tar.gz` | `numan` |
+
+**Linux / macOS**
+
+```bash
+tar -xzf numan-<version>-<target>.tar.gz
+install -m 755 numan-<version>-<target>/numan ~/.local/bin/numan
+```
+
+**Windows (PowerShell)**
+
+```powershell
+Expand-Archive numan-<version>-x86_64-pc-windows-msvc.zip -DestinationPath .
+# Add the extracted folder to your PATH, or copy numan.exe into a directory already on PATH
+```
+
+Verify downloads with the `SHA256SUMS` file attached to each release.
+
+**Requirements:** a [Nushell](https://www.nushell.sh/) binary on `PATH` for `numan activate` and related commands.
 
 ---
 
@@ -200,7 +225,7 @@ See [AGENTS.md](AGENTS.md) for architecture details aimed at contributors and ag
 
 ```bash
 cargo build
-cargo test                    # unit + integration (245+ tests)
+cargo test                    # unit + integration (309+ tests)
 cargo clippy -- -D warnings   # lint (CI-enforced)
 cargo fmt                     # format
 
@@ -212,7 +237,7 @@ CI runs tests, clippy, `rustfmt --check`, and real-Nu acceptance on Ubuntu, Wind
 
 ### Contributing
 
-1. Branch from `main` (`feature/...` or `fix/...`).
+1. Branch from `master` (`feature/...` or `fix/...`).
 2. Add or update tests for behavior changes.
 3. Ensure `cargo test` and `cargo clippy -- -D warnings` pass.
 4. Open a pull request with a clear description and test plan.
@@ -229,7 +254,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | Update, remove, gc, lockfile v2 | ✅ Complete |
 | nupm status, inspect, import, drift | ✅ Complete |
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
-| Polish, CI hardening, distribution | 🔜 Planned |
+| Polish, CI hardening, distribution | 🚧 In progress (release workflow + binaries) |
 
 ---
 

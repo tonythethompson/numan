@@ -141,7 +141,7 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 6.3: drift (`numan nupm diff`), status drift count, manifest import, re-import polish, activation tests
 - [x] Phase 6.4: `--exit-on-ineligible`, parser fuzz, Unicode/symlink tests, real-Nu acceptance
 - [x] Phase 6 complete: compatibility matrix (`docs/nupm-compatibility.md`); CI acceptance job for `#[ignore]` real-Nu tests
-- [ ] Phase 7: Polish, CI, distribution
+- [ ] Phase 7: Polish, CI, distribution (release workflow: `.github/workflows/release.yml`)
 
 ## Testing
 - Unit tests inline with source modules
