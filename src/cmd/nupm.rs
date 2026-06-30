@@ -135,15 +135,12 @@ fn run_import(args: &ImportArgs, numan_root: &Path, out: &mut dyn Write) -> Resu
         .path
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("import requires PATH or --manifest"))?;
-    let target_str = args
-        .r#as
-        .as_ref()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "single import requires --as owner/name. {}",
-                hints::run("numan nupm inspect <path>")
-            )
-        })?;
+    let target_str = args.r#as.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "single import requires --as owner/name. {}",
+            hints::run("numan nupm inspect <path>")
+        )
+    })?;
     let target = ScopedId::parse(target_str)?;
     let runner = default_runner(numan_root)?;
     let result = import_module_with_runner_cli(numan_root, path, &target, args.yes, &runner)?;

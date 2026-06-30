@@ -9,9 +9,9 @@ use crate::cmd::activate::{execute as activate_execute, ActivateArgs};
 use crate::cmd::init::{execute as init_execute, InitArgs};
 use crate::cmd::registry::{self, RegistryCommands};
 use crate::config::Config;
-use crate::nupm_compat::NupmCompatibility;
 use crate::core::registry::RegistryManager;
 use crate::nu::paths::NuPaths;
+use crate::nupm_compat::NupmCompatibility;
 use crate::nupm_compat::{
     count_drifted_imports, resolve_nupm_home, scan_nupm_home, NupmHomeResolution,
 };
@@ -122,11 +122,7 @@ pub fn execute(args: &DoctorArgs, root: &Path) -> Result<i32> {
     execute_with_options(args, root, DoctorOptions::default())
 }
 
-pub fn execute_with_options(
-    args: &DoctorArgs,
-    root: &Path,
-    options: DoctorOptions,
-) -> Result<i32> {
+pub fn execute_with_options(args: &DoctorArgs, root: &Path, options: DoctorOptions) -> Result<i32> {
     let mut report = run_checks(args, root)?;
     if args.fix {
         let repairs = apply_repairs(args, root, &report.findings, &options)?;
@@ -501,7 +497,12 @@ fn check_lockfile(
     Some(lockfile)
 }
 
-fn check_activation(root: &Path, paths: &NuPaths, lockfile: &Lockfile, findings: &mut Vec<Finding>) {
+fn check_activation(
+    root: &Path,
+    paths: &NuPaths,
+    lockfile: &Lockfile,
+    findings: &mut Vec<Finding>,
+) {
     let vendor_dir = paths.vendor_autoload_dir.as_deref().unwrap_or("");
     let managed_path = if vendor_dir.is_empty() {
         String::new()
@@ -813,9 +814,7 @@ fn apply_repairs(
     }
 
     if findings.iter().any(|f| {
-        f.id == "registry.index_missing"
-            && f.severity == Severity::Info
-            && !options.skip_network
+        f.id == "registry.index_missing" && f.severity == Severity::Info && !options.skip_network
     }) {
         let id = "registry.index_missing".to_string();
         match registry::execute(RegistryCommands::Sync, root) {
@@ -936,7 +935,13 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
     let sections: &[(&str, &[&str])] = &[
         (
             "Root",
-            &["root.writable", "layout.nu_state", "layout.state", "layout.packages", "layout.registries"],
+            &[
+                "root.writable",
+                "layout.nu_state",
+                "layout.state",
+                "layout.packages",
+                "layout.registries",
+            ],
         ),
         (
             "Initialization",
@@ -973,11 +978,21 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
         ),
         (
             "Registry",
-            &["registry.none", "registry.index_missing", "registry.config", "registry.trust"],
+            &[
+                "registry.none",
+                "registry.index_missing",
+                "registry.config",
+                "registry.trust",
+            ],
         ),
         (
             "nupm coexistence",
-            &["nupm.drift", "nupm.home_unconfigured", "nupm.overlap", "nupm.scan_failed"],
+            &[
+                "nupm.drift",
+                "nupm.home_unconfigured",
+                "nupm.overlap",
+                "nupm.scan_failed",
+            ],
         ),
     ];
 
@@ -1216,6 +1231,9 @@ mod tests {
             nupm_home: None,
         };
         let report = run_checks(&args, root).unwrap();
-        assert!(report.findings.iter().any(|f| f.id == "activation.plugin_stale"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.id == "activation.plugin_stale"));
     }
 }

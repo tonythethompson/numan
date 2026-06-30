@@ -1,6 +1,8 @@
 //! Integration tests for `numan doctor`.
 
-use numan_cli::cmd::doctor::{execute_with_options, run_checks, DoctorArgs, DoctorOptions, Severity};
+use numan_cli::cmd::doctor::{
+    execute_with_options, run_checks, DoctorArgs, DoctorOptions, Severity,
+};
 use numan_cli::cmd::init::{execute_with_runner, InitArgs};
 use numan_cli::core::integrity;
 use numan_cli::nu::autoload::FakeCandidateRunner;
@@ -106,7 +108,10 @@ fn doctor_reports_pending_plugin_journal() {
         nupm_home: None,
     };
     let report = run_checks(&args, root).unwrap();
-    assert!(report.findings.iter().any(|f| f.id == "journal.plugin_pending"));
+    assert!(report
+        .findings
+        .iter()
+        .any(|f| f.id == "journal.plugin_pending"));
 }
 
 #[test]
@@ -134,10 +139,8 @@ fn doctor_detects_nu_path_drift() {
         nupm_home: None,
     };
     let report = run_checks(&args, root).unwrap();
-    assert!(
-        report
-            .findings
-            .iter()
-            .any(|f| f.id == "nu_paths.drift" && f.severity == Severity::Error)
-    );
+    assert!(report
+        .findings
+        .iter()
+        .any(|f| f.id == "nu_paths.drift" && f.severity == Severity::Error));
 }

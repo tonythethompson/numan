@@ -27,12 +27,7 @@ fn bash_completions_include_core_commands() {
 
 #[test]
 fn all_completion_shells_generate_non_empty_output() {
-    for shell in [
-        Shell::Bash,
-        Shell::Fish,
-        Shell::Zsh,
-        Shell::PowerShell,
-    ] {
+    for shell in [Shell::Bash, Shell::Fish, Shell::Zsh, Shell::PowerShell] {
         let mut cmd = Cli::command();
         let mut buf = Vec::new();
         generate(shell, &mut cmd, "numan", &mut buf);

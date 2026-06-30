@@ -15,11 +15,9 @@ use crate::state::autoload_journal::{
 use crate::state::autoload_state::AutoloadState;
 use crate::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
 use crate::state::lockfile::{Lockfile, ModuleActivation, PluginActivation};
-use crate::util::hints::{
-    self, CMD_ACTIVATE, CMD_INIT_REFRESH,
-};
 use crate::util::format_timestamp;
 use crate::util::fs_safety::acquire_mutation_lock;
+use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
 
 #[derive(Args, Debug)]
 pub struct ActivateArgs {

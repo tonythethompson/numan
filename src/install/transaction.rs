@@ -69,7 +69,13 @@ pub fn install_package(
         .packages
         .iter()
         .find(|p| p.id.to_string() == id.to_string())
-        .with_context(|| format!("Package '{}' not found in registry. {}", id, hints::run(CMD_REGISTRY_SYNC)))?;
+        .with_context(|| {
+            format!(
+                "Package '{}' not found in registry. {}",
+                id,
+                hints::run(CMD_REGISTRY_SYNC)
+            )
+        })?;
 
     // 3. Resolve version with compatibility validation
     let resolver = Resolver::new(options.platform, options.nu_version);

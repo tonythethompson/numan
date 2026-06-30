@@ -12,10 +12,7 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| config::Config::resolve_root(&platform));
 
     // Ensure root directory exists (completions/doctor report-only do not need layout)
-    if !matches!(
-        cli.command,
-        Commands::Completions(_) | Commands::Doctor(_)
-    ) {
+    if !matches!(cli.command, Commands::Completions(_) | Commands::Doctor(_)) {
         std::fs::create_dir_all(&root)?;
     }
 
