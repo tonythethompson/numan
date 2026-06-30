@@ -1021,11 +1021,8 @@ fn real_nu_import_mode_module_is_namespaced() {
     std::fs::write(&module_file, b"export def hello [] { \"hello\" }\n").unwrap();
 
     // Use `module` mode — command is available as `greet hello`.
-    let script = format!(
-        r#"use "{}"
-greet hello"#,
-        module_file.display()
-    );
+    let use_stmt = render_use_statement(&module_file, &ModuleImportMode::Module).unwrap();
+    let script = format!("{use_stmt}\ngreet hello");
     let script_file = dir.path().join("test_script.nu");
     std::fs::write(&script_file, script.as_bytes()).unwrap();
 
@@ -1063,11 +1060,8 @@ fn real_nu_import_mode_all_exports_to_global_scope() {
     )
     .unwrap();
 
-    let script = format!(
-        r#"use "{}" *
-add 1 2"#,
-        module_file.display()
-    );
+    let use_stmt = render_use_statement(&module_file, &ModuleImportMode::All).unwrap();
+    let script = format!("{use_stmt}\nadd 1 2");
     let script_file = dir.path().join("test_all.nu");
     std::fs::write(&script_file, script.as_bytes()).unwrap();
 
