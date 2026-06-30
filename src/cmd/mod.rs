@@ -1,6 +1,7 @@
 pub mod activate;
 pub mod completions;
 pub mod deactivate;
+pub mod doctor;
 pub mod gc;
 pub mod info;
 pub mod init;

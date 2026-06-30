@@ -221,6 +221,7 @@ Payload paths are immutable: `packages/<type>/<owner>/<name>/<version>-<hash>/`.
 | `numan nupm import --manifest file.toml` | Batch import from manifest |
 | `numan nupm diff <owner/name>` | Compare imported payload vs nupm source |
 | `numan completions <shell>` | Generate bash, fish, zsh, or powershell completions |
+| `numan doctor [--fix] [--yes] [--json]` | Diagnose root health; optional safe repairs |
 
 Global flag: `--root <path>` — override the Numan root directory.
 
@@ -295,7 +296,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | nupm status, inspect, import, drift | ✅ Complete |
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
 | Distribution (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
-| Doctor, completions, onboarding polish | 🚧 [Phase 7.2+](Phase7Plan.md) — completions + error UX shipped; doctor next |
+| Doctor, completions, onboarding polish | 🚧 [Phase 7.2+](Phase7Plan.md) — doctor + completions shipped |
 
 ---
 

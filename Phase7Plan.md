@@ -11,7 +11,7 @@ Take Numan from feature-complete core (Phases 1–6) to a distributable, polishe
 | Slice | Theme | Status |
 |-------|--------|--------|
 | 7.1 | Distribution baseline | ✅ Done |
-| 7.2 | `numan doctor` | 📋 Specified — [docs/numan-doctor.md](docs/numan-doctor.md) |
+| 7.2 | `numan doctor` | ✅ Done |
 | 7.3 | Daily-driver polish | 🚧 Partial — completions + error UX shipped; `--help` audit remains |
 | 7.4 | Onboarding path | 🔜 Planned |
 | 7.5 | CI / release hardening | 🔜 Planned |
@@ -32,30 +32,15 @@ Shipped in v0.1.0–v0.1.1:
 
 ---
 
-## 7.2 `numan doctor` 📋
+## 7.2 `numan doctor` ✅
 
 **Spec:** [docs/numan-doctor.md](docs/numan-doctor.md)
 
-Read-only health command aggregating:
+Shipped:
 
-- Nu path drift (`NuPaths`)
-- Pending journals (plugin, autoload, lifecycle)
-- Lockfile activation identity + autoload projection
-- Payload directory presence
-- Registry configuration
-- Optional nupm coexistence (`scan_on_doctor` config flag)
-
-**`numan doctor --fix`** applies safe repairs (layout, `init`, `registry sync`, `init --refresh`, `activate` recovery) via existing commands — see repair tiers in spec.
-
-**Why now:** Scattered checks (`activate --check`, journal recovery, `nupm status`) need a single entry point before error-UX and onboarding polish.
-
-**Deliverables:**
-
-- `src/cmd/doctor.rs`, wire in `main.rs`
-- `tests/doctor_test.rs`
-- README + `AGENTS.md` updates
-
-**Non-goals:** install/remove/update/gc, nupm import, lifecycle journal auto-completion, foreign managed-file overwrite.
+- `numan doctor [--fix] [--yes] [--json] [--nupm-home PATH]`
+- Full check catalog; repair tiers delegate to `init`, `activate`, `registry sync`
+- `scan_on_doctor` config gate; `tests/doctor_test.rs`
 
 ---
 

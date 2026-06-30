@@ -1,6 +1,6 @@
 # `numan doctor` specification
 
-**Status:** Planned (Phase 7, slice 2)  
+**Status:** Implemented (Phase 7.2)  
 **Authority:** This document defines behavior for `numan doctor` before implementation.
 
 ## Purpose
@@ -248,12 +248,12 @@ pub fn execute_with_options(args: &DoctorArgs, root: &Path, options: DoctorOptio
 
 ## Definition of done
 
-- [ ] `numan doctor`, `numan doctor --fix`, and `numan doctor --json` implemented per check catalog
-- [ ] `scan_on_doctor` respected
-- [ ] Default mode: no state mutation (test: hashes unchanged)
-- [ ] `--fix` mode: only repair tiers in policy; uses mutation lock; delegates to init/activate/sync
-- [ ] Documented in README command table and `AGENTS.md`
-- [ ] Integration tests: report-only, `--fix` auto tier, `--fix` confirm tier with `--yes`, manual tier untouched
+- [x] `numan doctor`, `numan doctor --fix`, and `numan doctor --json` implemented per check catalog
+- [x] `scan_on_doctor` respected
+- [x] Default mode: no state mutation (test: hashes unchanged)
+- [x] `--fix` mode: only repair tiers in policy; uses mutation lock; delegates to init/activate/sync
+- [x] Documented in README command table and `AGENTS.md`
+- [x] Integration tests: report-only, `--fix` auto tier, `--fix` confirm tier with `--yes`, manual tier untouched
 
 ## Changelog
 

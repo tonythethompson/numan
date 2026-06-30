@@ -54,4 +54,6 @@ pub enum Commands {
     Nupm(cmd::nupm::NupmArgs),
     /// Generate shell completion scripts
     Completions(cmd::completions::CompletionsArgs),
+    /// Diagnose Numan root health and optionally apply safe repairs
+    Doctor(cmd::doctor::DoctorArgs),
 }

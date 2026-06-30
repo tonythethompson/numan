@@ -11,8 +11,11 @@ fn main() -> anyhow::Result<()> {
         .root
         .unwrap_or_else(|| config::Config::resolve_root(&platform));
 
-    // Ensure root directory exists (completions does not need a writable root)
-    if !matches!(cli.command, Commands::Completions(_)) {
+    // Ensure root directory exists (completions/doctor report-only do not need layout)
+    if !matches!(
+        cli.command,
+        Commands::Completions(_) | Commands::Doctor(_)
+    ) {
         std::fs::create_dir_all(&root)?;
     }
 
@@ -33,5 +36,9 @@ fn main() -> anyhow::Result<()> {
             numan_cli::cmd::nupm::execute(&args, &root, &mut stdout)
         }
         Commands::Completions(args) => numan_cli::cmd::completions::execute(&args),
+        Commands::Doctor(args) => {
+            let code = numan_cli::cmd::doctor::execute(&args, &root)?;
+            std::process::exit(code);
+        }
     }
 }
