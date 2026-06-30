@@ -13,7 +13,7 @@ cargo clippy -- -D warnings        # lint (CI enforces -D warnings)
 cargo fmt                          # format
 ```
 
-CI runs `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt --check` on Ubuntu, Windows, and macOS.
+CI runs `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`, and a real-Nu acceptance job (`cargo test -- --ignored` with Nu 0.113 on PATH) on Ubuntu, Windows, and macOS.
 
 ## PR review guidance
 

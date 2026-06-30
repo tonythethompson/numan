@@ -43,3 +43,19 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  real-nu-acceptance:
+    name: Real-Nu acceptance (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: hustcer/setup-nu@v3
+        with:
+          version: "0.113"
+      - run: nu --version
+      - run: cargo test --verbose -- --ignored
