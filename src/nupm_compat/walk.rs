@@ -106,6 +106,24 @@ fn is_regular_file(path: &Path) -> Result<bool> {
     }
 }
 
+/// Validate `--nupm-home` / `NUPM_HOME`: must be a directory with no symlink/reparse
+/// ancestors (except OS-level volume-root links such as macOS `/var`).
+pub fn validate_nupm_home_path(path: &Path) -> Result<PathBuf> {
+    let meta = std::fs::symlink_metadata(path)
+        .with_context(|| format!("Failed to read nupm home path '{}'", path.display()))?;
+    if !meta.is_dir() {
+        anyhow::bail!(
+            "nupm home '{}' must be a directory.\n\
+             Pass --nupm-home <dir> or set NUPM_HOME to a directory path.",
+            path.display()
+        );
+    }
+    let abs = absolute_path(path)?;
+    check_path_prefixes_for_symlinks(&abs)?;
+    check_path_chain_safe(&abs)?;
+    Ok(abs)
+}
+
 /// Reject symlink/reparse components in `path`, skipping the first normal segment after the
 /// volume root so OS-level links such as macOS `/var` → `/private/var` do not false-positive.
 fn check_path_prefixes_for_symlinks(path: &Path) -> Result<()> {

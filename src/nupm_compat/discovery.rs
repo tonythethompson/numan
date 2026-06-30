@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use super::classify::classify_source_root;
 use super::report::{InstalledOnlyEntry, SourceRootEntry};
 use super::schema::MAX_DISCOVERY_ENTRIES;
-use super::walk::{check_path_chain_safe, check_path_chain_safe_within, is_safe_package_name};
+use super::walk::{check_path_chain_safe_within, is_safe_package_name, validate_nupm_home_path};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NupmHomeResolution {
@@ -17,28 +17,15 @@ pub enum NupmHomeResolution {
 
 pub fn resolve_nupm_home(flag: Option<&Path>) -> Result<NupmHomeResolution> {
     if let Some(p) = flag {
-        return Ok(NupmHomeResolution::Found(require_nupm_home_directory(p)?));
+        return Ok(NupmHomeResolution::Found(validate_nupm_home_path(p)?));
     }
 
     if let Some(env) = std::env::var_os("NUPM_HOME") {
         let p = PathBuf::from(env);
-        return Ok(NupmHomeResolution::Found(require_nupm_home_directory(&p)?));
+        return Ok(NupmHomeResolution::Found(validate_nupm_home_path(&p)?));
     }
 
     Ok(NupmHomeResolution::NotConfigured)
-}
-
-fn require_nupm_home_directory(path: &Path) -> Result<PathBuf> {
-    let meta = std::fs::symlink_metadata(path)
-        .with_context(|| format!("Failed to read nupm home path '{}'", path.display()))?;
-    if !meta.is_dir() {
-        bail!(
-            "nupm home '{}' must be a directory.\n\
-             Pass --nupm-home <dir> or set NUPM_HOME to a directory path.",
-            path.display()
-        );
-    }
-    Ok(path.to_path_buf())
 }
 
 pub struct ScanResult {
@@ -49,7 +36,7 @@ pub struct ScanResult {
 }
 
 pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
-    check_path_chain_safe(nupm_home)?;
+    let nupm_home = validate_nupm_home_path(nupm_home)?;
 
     let mut source_roots = Vec::new();
     let mut installed_only = Vec::new();
@@ -60,7 +47,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
     let modules_dir = nupm_home.join("modules");
     if modules_dir.is_dir() {
-        check_path_chain_safe_within(nupm_home, &modules_dir)?;
+        check_path_chain_safe_within(&nupm_home, &modules_dir)?;
         for entry in std::fs::read_dir(&modules_dir)
             .with_context(|| format!("Failed to read '{}'", modules_dir.display()))?
         {
@@ -76,7 +63,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
                 continue;
             }
 
-            if check_path_chain_safe_within(nupm_home, &path).is_err() {
+            if check_path_chain_safe_within(&nupm_home, &path).is_err() {
                 unsafe_entries += 1;
                 continue;
             }
@@ -110,7 +97,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
     let scripts_dir = nupm_home.join("scripts");
     if scripts_dir.is_dir() {
-        check_path_chain_safe_within(nupm_home, &scripts_dir)?;
+        check_path_chain_safe_within(&nupm_home, &scripts_dir)?;
         for entry in std::fs::read_dir(&scripts_dir)
             .with_context(|| format!("Failed to read '{}'", scripts_dir.display()))?
         {
@@ -120,7 +107,7 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
                 bail!("nupm home exceeds maximum discovery entry count ({MAX_DISCOVERY_ENTRIES})");
             }
             let path = entry.path();
-            if path.is_file() && check_path_chain_safe_within(nupm_home, &path).is_ok() {
+            if path.is_file() && check_path_chain_safe_within(&nupm_home, &path).is_ok() {
                 script_entries += 1;
             } else {
                 unsafe_entries += 1;
@@ -188,5 +175,18 @@ mod tests {
         let file = dir.path().join("not-a-dir");
         std::fs::write(&file, b"x").unwrap();
         assert!(resolve_nupm_home(Some(&file)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nupm_home_under_symlink_ancestor_rejected() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        fs::create_dir_all(real.join("modules")).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(resolve_nupm_home(Some(&link)).is_err());
+        assert!(scan_nupm_home(&link).is_err());
     }
 }

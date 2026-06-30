@@ -56,10 +56,22 @@ pub fn classify_source_root(
         Err(_) => return Ok((NupmCompatibility::InvalidMetadata, None)),
     };
 
+    let build_path = package_root.join(BUILD_SCRIPT_NAME);
+    let has_build_script = match std::fs::symlink_metadata(&build_path) {
+        Ok(_) => {
+            if is_symlink_or_reparse(&build_path)? {
+                return Ok((NupmCompatibility::UnsafeFilesystemLayout, None));
+            }
+            true
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => return Ok((NupmCompatibility::UnsafeFilesystemLayout, None)),
+    };
+
     let ctx = ClassifyContext {
         package_root: package_root.to_path_buf(),
         metadata_path,
-        has_build_script: package_root.join(BUILD_SCRIPT_NAME).is_file(),
+        has_build_script,
     };
 
     Ok((classify_parsed(&ctx, &parsed), Some(parsed)))
@@ -235,6 +247,42 @@ mod tests {
             .arg(module_dir.join("pipe"))
             .status()
             .expect("mkfifo");
+        let (compat, _) = classify_source_root(&root).unwrap();
+        assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
+    }
+
+    #[test]
+    fn directory_build_nu_is_unsupported_custom_build() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("pkg");
+        fs::create_dir_all(root.join("m")).unwrap();
+        fs::write(
+            root.join("nupm.nuon"),
+            br#"{ name: m, version: "0.1.0", type: module }"#,
+        )
+        .unwrap();
+        fs::write(root.join("m/mod.nu"), b"").unwrap();
+        fs::create_dir(root.join("build.nu")).unwrap();
+        let (compat, _) = classify_source_root(&root).unwrap();
+        assert_eq!(compat, NupmCompatibility::UnsupportedCustomBuild);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_build_nu_is_unsafe() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("pkg");
+        fs::create_dir_all(root.join("m")).unwrap();
+        fs::write(
+            root.join("nupm.nuon"),
+            br#"{ name: m, version: "0.1.0", type: module }"#,
+        )
+        .unwrap();
+        fs::write(root.join("m/mod.nu"), b"").unwrap();
+        fs::write(root.join("dummy"), b"").unwrap();
+        std::os::unix::fs::symlink(root.join("dummy"), root.join("build.nu")).unwrap();
         let (compat, _) = classify_source_root(&root).unwrap();
         assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
     }
