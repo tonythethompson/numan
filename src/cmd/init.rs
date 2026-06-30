@@ -7,10 +7,12 @@ use crate::nu::autoload::{validate_candidate, CandidateRunner, NuCandidateRunner
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::Lockfile;
-use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
 use crate::util::format_timestamp;
 use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::fs_safety::assert_managed_file_owned;
+use crate::util::hints::{
+    self, CMD_ACTIVATE, CMD_INIT_REFRESH, CMD_REGISTRY_ADD, CMD_REGISTRY_SYNC,
+};
 
 #[derive(Debug, Args)]
 pub struct InitArgs {
@@ -63,15 +65,38 @@ where
     paths.save(root)?;
 
     let config_path = root.join("config.toml");
-    if !config_path.exists() {
+    let config_created = !config_path.exists();
+    if config_created {
         Config::default().save(root)?;
         println!("Created default config at '{}'.", config_path.display());
-        println!("Next: numan registry add <name> <url> --key <base64-public-key>");
     }
 
     print_summary(root, &paths, false);
     warn_missing_vendor_target(&paths);
+
+    if config_created || Config::load(root)?.registries.is_empty() {
+        print_onboarding_next_steps();
+    }
+
     Ok(())
+}
+
+fn print_onboarding_next_steps() {
+    println!();
+    println!("Next steps:");
+    println!("  1. Add a registry:");
+    println!("     {CMD_REGISTRY_ADD}");
+    println!("  2. Sync the index:");
+    println!("     {CMD_REGISTRY_SYNC}");
+    println!("  3. Search and install:");
+    println!("     numan search <query>");
+    println!("     numan install owner/name");
+    println!("  4. Activate with Nu:");
+    println!("     {CMD_ACTIVATE}");
+    println!();
+    println!(
+        "Run 'numan doctor' to verify setup (use 'numan doctor --fix --yes' for safe repairs)."
+    );
 }
 
 fn execute_refresh<F>(

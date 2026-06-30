@@ -13,7 +13,7 @@ Take Numan from feature-complete core (Phases 1–6) to a distributable, polishe
 | 7.1 | Distribution baseline | ✅ Done |
 | 7.2 | `numan doctor` | ✅ Done |
 | 7.3 | Daily-driver polish | 🚧 Partial — completions + error UX shipped; `--help` audit remains |
-| 7.4 | Onboarding path | 🔜 Planned |
+| 7.4 | Onboarding path | ✅ Done |
 | 7.5 | CI / release hardening | 🔜 Planned |
 | 7.6 | Wider distribution | 🔜 Optional |
 
@@ -57,11 +57,13 @@ Remaining:
 
 ---
 
-## 7.4 Onboarding path 🔜
+## 7.4 Onboarding path ✅
 
-1. **`numan init` polish** — optional guided registry add after first init
-2. **README** — single copy-paste path: install → init → registry → search → install
-3. **Compatibility matrix** — link/promote `docs/nupm-compatibility.md` from README
+Shipped:
+
+1. **`numan init` onboarding checklist** — numbered next steps (registry, sync, search, install, activate, doctor) after first init
+2. **README** — copy-paste quick start block plus step-by-step sections
+3. **Compatibility matrix** — promoted in README nupm section ([docs/nupm-compatibility.md](docs/nupm-compatibility.md))
 
 ---
 

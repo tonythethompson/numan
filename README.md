@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.1). Core install, activate, update, remove, gc, registry, and nupm interoperability are implemented and covered by 309+ tests plus real-Nu acceptance on CI. Source builds and lockfile rollback snapshots remain planned; pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.2). Core install, activate, update, remove, gc, registry, doctor, nupm interoperability, and shell completions are implemented and covered by 325+ tests plus real-Nu acceptance on CI. Source builds and lockfile rollback snapshots remain planned; pre-built release binaries are published via GitHub Releases.
 
 ---
 
@@ -38,7 +38,8 @@ Numan is **early-stage** (v0.1.1). Core install, activate, update, remove, gc, r
 - **Module autoloads** — managed vendor autoload files with ownership markers and candidate validation
 - **Lifecycle management** — `update`, `remove`, and `gc` with pending-lifecycle journal recovery
 - **nupm interoperability** — `numan nupm status|inspect|import|diff` for migration from [nupm](https://github.com/nushell/nupm)
-- **Cross-platform** — tested on Ubuntu, Windows, and macOS in CI
+- **Health checks** — `numan doctor [--fix]` diagnoses root state and applies safe repairs
+- **Shell completions** — bash, fish, zsh, PowerShell via `numan completions`
 
 ---
 
@@ -113,13 +114,23 @@ numan completions powershell | Out-File -Encoding utf8 $PROFILE
 
 ## Quick start
 
-### 1. Initialize
-
-Probe your local Nu installation and create Numan state under the default root (or `--root`):
+Copy-paste path from install through first activation (replace registry URL and key with your source):
 
 ```bash
+# Install (pick one)
+cargo install numan-cli
+# or: download a release archive from GitHub Releases and add numan to PATH
+
 numan init
+numan registry add official https://example.com/index.json --key <base64-public-key>
+numan registry sync
+numan search hooks
+numan install owner/package-name
+numan activate
+numan doctor
 ```
+
+Install is **inert** — nothing is registered with Nu until you run `numan activate`.
 
 After Nu upgrades, refresh cached paths and activation identity:
 
@@ -127,16 +138,28 @@ After Nu upgrades, refresh cached paths and activation identity:
 numan init --refresh
 ```
 
-### 2. Configure a registry
+Optional: install shell completions (`numan completions bash`, etc.) — see [Installation](#installation).
 
-Add a registry with its Ed25519 public key, then sync the index:
+### Step-by-step
+
+#### 1. Initialize
+
+Probe your local Nu installation and create Numan state under the default root (or `--root`):
+
+```bash
+numan init
+```
+
+`numan init` prints a numbered checklist when no registry is configured yet.
+
+#### 2. Configure a registry
 
 ```bash
 numan registry add official https://example.com/index.json --key <base64-public-key>
 numan registry sync
 ```
 
-### 3. Search and install
+#### 3. Search and install
 
 ```bash
 numan search hooks
@@ -145,9 +168,7 @@ numan install owner/package-name
 numan list
 ```
 
-Install is **inert** — nothing is registered with Nu until you activate.
-
-### 4. Activate with Nu
+#### 4. Activate with Nu
 
 ```bash
 numan activate                    # activate all inactive packages
@@ -162,7 +183,7 @@ For modules:
 numan deactivate owner/module-name
 ```
 
-### 5. Maintain installs
+#### 5. Maintain installs
 
 ```bash
 numan update --check              # see available upgrades
@@ -170,6 +191,13 @@ numan update                      # apply upgrades
 numan remove owner/package-name
 numan gc --dry-run                # preview orphaned payload dirs
 numan gc                          # delete unreferenced payloads
+```
+
+#### 6. Verify health
+
+```bash
+numan doctor                      # report-only diagnosis
+numan doctor --fix --yes          # apply safe automated repairs
 ```
 
 ---
@@ -189,7 +217,7 @@ Important paths under the root:
 ```text
 numan/
 ├── config.toml          # registries, defaults
-├── lockfile.json        # pinned installs (authoritative)
+├── lockfile             # pinned installs (authoritative)
 ├── packages/            # immutable versioned payloads
 ├── registries/          # synced index caches
 ├── state/               # journals, nupm import provenance
@@ -266,7 +294,7 @@ See [AGENTS.md](AGENTS.md) for architecture details aimed at contributors and ag
 
 ```bash
 cargo build
-cargo test                    # unit + integration (309+ tests)
+cargo test                    # unit + integration (325+ tests)
 cargo clippy -- -D warnings   # lint (CI-enforced)
 cargo fmt                     # format
 
@@ -296,7 +324,8 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | nupm status, inspect, import, drift | ✅ Complete |
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
 | Distribution (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
-| Doctor, completions, onboarding polish | 🚧 [Phase 7.2+](Phase7Plan.md) — doctor + completions shipped |
+| Doctor, completions, onboarding | ✅ [Phase 7.2–7.4](Phase7Plan.md) |
+| CI hardening, wider distribution | 🔜 [Phase 7.5+](Phase7Plan.md) |
 
 ---
 

@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-06-30
+## [0.1.2] - 2026-06-30
+
+### Added
+
+- `numan doctor [--fix] [--yes] [--json]` — health checks and safe repairs ([docs/numan-doctor.md](docs/numan-doctor.md))
+- `numan completions bash|fish|zsh|powershell` — shell completion scripts
+- `util::hints` — canonical fix strings aligned with doctor output across init, install, activate, and nupm import
+- First-init onboarding checklist after `numan init` (registry → sync → search → install → activate → doctor)
+
+### Changed
+
+- README quick start: single copy-paste onboarding path; doctor and completions documented
+- Error messages in init, install, activate, and nupm import now include consistent `Run 'numan …'` fix hints
+
+[Unreleased]: https://github.com/tonythethompson/numan/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/tonythethompson/numan/compare/v0.1.1...v0.1.2
 
 ### Added
 

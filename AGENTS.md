@@ -152,7 +152,8 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 7.1: Distribution baseline — GitHub Releases, crates.io, `numan init`, real-Nu CI ([Phase7Plan.md](Phase7Plan.md))
 - [x] Phase 7.2: `numan doctor` ([docs/numan-doctor.md](docs/numan-doctor.md))
 - [x] Phase 7.3 (partial): shell completions + error UX hints ([Phase7Plan.md](Phase7Plan.md))
-- [ ] Phase 7.4+: onboarding, CI hardening — see [Phase7Plan.md](Phase7Plan.md)
+- [x] Phase 7.4: Onboarding path — init checklist, README quick start ([Phase7Plan.md](Phase7Plan.md))
+- [ ] Phase 7.5+: CI hardening, wider distribution — see [Phase7Plan.md](Phase7Plan.md)
 
 ## Testing
 - Unit tests inline with source modules
