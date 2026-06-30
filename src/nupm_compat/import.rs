@@ -113,11 +113,31 @@ pub fn import_module_with_runner(
     if resolved.reimported && yes {
         if let Some(ref old_hash) = resolved.old_source_payload_sha256 {
             if old_hash == &resolved.source_payload_sha256 {
+                let payload_path = resolved
+                    .old_payload_path
+                    .clone()
+                    .filter(|p| !p.is_empty())
+                    .with_context(|| {
+                        format!(
+                            "Cannot skip unchanged re-import of '{}': lockfile entry is missing payload_path",
+                            resolved.package_id
+                        )
+                    })?;
+                let revision_id = resolved
+                    .old_revision_id
+                    .clone()
+                    .filter(|r| !r.is_empty())
+                    .with_context(|| {
+                        format!(
+                            "Cannot skip unchanged re-import of '{}': lockfile entry is missing revision_id",
+                            resolved.package_id
+                        )
+                    })?;
                 return Ok(ImportResult {
                     package_id: resolved.package_id.clone(),
                     version: resolved.parsed_version.clone(),
-                    payload_path: resolved.old_payload_path.clone().unwrap_or_default(),
-                    revision_id: resolved.old_revision_id.clone().unwrap_or_default(),
+                    payload_path,
+                    revision_id,
                     reimported: true,
                     skipped_unchanged: true,
                     old_revision_id: resolved.old_revision_id.clone(),
