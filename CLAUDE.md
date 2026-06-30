@@ -17,7 +17,7 @@ CI runs `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt --check` on 
 
 ## PR review guidance
 
-When reviewing pull requests (or preparing changes for review), follow [`.github/instructions/*.instructions.md`](.github/instructions/*.instructions.md). It defines CI gates, architecture invariants, mutation-lock expectations, and severity labels for findings.
+When reviewing pull requests (or preparing changes for review), follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md). It defines CI gates, architecture invariants, mutation-lock expectations, and severity labels for findings.
 
 ## Architecture
 

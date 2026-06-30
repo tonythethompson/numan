@@ -1,0 +1,5 @@
+{
+    name: minimal-module
+    type: module
+    version: "0.1.0"
+}

@@ -9,6 +9,8 @@ use crate::util::atomic::write_json_atomic;
 pub enum LifecycleOp {
     Update,
     Remove,
+    NupmImport,
+    NupmImportManifest,
 }
 
 /// Stage of the in-flight lifecycle operation at the time the process last
@@ -20,10 +22,16 @@ pub enum LifecycleStage {
     Prepared,
     /// Lockfile has been updated; payload directory deletion may be pending.
     LockfileUpdated,
+    /// nupm import: staging directory populated but not yet promoted.
+    PayloadsStaged,
+    /// nupm import: payload promoted to immutable storage; lockfile not yet committed.
+    PayloadsPromoted,
+    /// nupm import: lockfile and provenance written.
+    SelectionCommitted,
 }
 
 /// Crash-recovery journal written atomically before any destructive lifecycle
-/// mutation (update, remove).
+/// mutation (update, remove, nupm import).
 ///
 /// Written to `<root>/state/pending-lifecycle.json`. Cleared on successful
 /// completion. A journal found on the next run indicates an interrupted
@@ -42,6 +50,20 @@ pub struct PendingLifecycle {
     /// For `update`: the version we upgraded to.
     #[serde(default)]
     pub to_version: Option<String>,
+    #[serde(default)]
+    pub nupm_source_path: Option<String>,
+    #[serde(default)]
+    pub nupm_metadata_sha256: Option<String>,
+    #[serde(default)]
+    pub staging_dir: Option<String>,
+    #[serde(default)]
+    pub promoted_payload_path: Option<String>,
+    /// For manifest import: all package IDs in the batch.
+    #[serde(default)]
+    pub batch_package_ids: Vec<String>,
+    /// For manifest import: staging dirs (relative) for crash recovery.
+    #[serde(default)]
+    pub batch_staging_dirs: Vec<String>,
 }
 
 impl PendingLifecycle {
@@ -84,18 +106,31 @@ pub fn check_stale_journal(root: &Path) -> Result<Option<PendingLifecycle>> {
 mod tests {
     use super::*;
 
+    fn base_journal(op: LifecycleOp) -> PendingLifecycle {
+        PendingLifecycle {
+            op,
+            package_id: "owner/pkg".to_string(),
+            stage: LifecycleStage::Prepared,
+            orphan_payload_path: None,
+            from_version: None,
+            to_version: None,
+            nupm_source_path: None,
+            nupm_metadata_sha256: None,
+            staging_dir: None,
+            promoted_payload_path: None,
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
+        }
+    }
+
     #[test]
     fn roundtrip_remove_journal() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
         let j = PendingLifecycle {
-            op: LifecycleOp::Remove,
-            package_id: "owner/pkg".to_string(),
-            stage: LifecycleStage::Prepared,
             orphan_payload_path: Some("packages/modules/owner/pkg/1.0.0-abc".to_string()),
-            from_version: None,
-            to_version: None,
+            ..base_journal(LifecycleOp::Remove)
         };
         j.save(root).unwrap();
 
@@ -113,18 +148,41 @@ mod tests {
         let root = dir.path();
 
         let j = PendingLifecycle {
-            op: LifecycleOp::Update,
-            package_id: "owner/pkg".to_string(),
-            stage: LifecycleStage::Prepared,
             orphan_payload_path: Some("packages/modules/owner/pkg/1.0.0-abc".to_string()),
             from_version: Some("1.0.0".to_string()),
             to_version: Some("2.0.0".to_string()),
+            ..base_journal(LifecycleOp::Update)
         };
         j.save(root).unwrap();
 
         let loaded = PendingLifecycle::load(root).unwrap().unwrap();
         assert_eq!(loaded.from_version.as_deref(), Some("1.0.0"));
         assert_eq!(loaded.to_version.as_deref(), Some("2.0.0"));
+    }
+
+    #[test]
+    fn roundtrip_nupm_import_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let j = PendingLifecycle {
+            stage: LifecycleStage::PayloadsStaged,
+            nupm_source_path: Some("/tmp/pkg".to_string()),
+            nupm_metadata_sha256: Some("abc".to_string()),
+            staging_dir: Some("packages/modules/o/n/.staging".to_string()),
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
+            ..base_journal(LifecycleOp::NupmImport)
+        };
+        j.save(root).unwrap();
+
+        let loaded = PendingLifecycle::load(root).unwrap().unwrap();
+        assert!(matches!(loaded.op, LifecycleOp::NupmImport));
+        assert!(matches!(loaded.stage, LifecycleStage::PayloadsStaged));
+        assert_eq!(
+            loaded.staging_dir.as_deref(),
+            Some("packages/modules/o/n/.staging")
+        );
     }
 
     #[test]

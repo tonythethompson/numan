@@ -22,6 +22,10 @@ pub fn execute(args: &GcArgs, root: &Path) -> Result<()> {
             match journal.op {
                 crate::state::lifecycle_journal::LifecycleOp::Update => "update",
                 crate::state::lifecycle_journal::LifecycleOp::Remove => "remove",
+                crate::state::lifecycle_journal::LifecycleOp::NupmImport => "nupm import",
+                crate::state::lifecycle_journal::LifecycleOp::NupmImportManifest => {
+                    "nupm manifest import"
+                }
             },
             journal.package_id
         );
