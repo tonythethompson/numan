@@ -227,7 +227,7 @@ numan nupm import /path/to/package --as myorg/my-module --yes
 numan nupm diff myorg/my-module
 ```
 
-Supported and rejected package shapes are documented in [docs/nupm-compatibility.md](docs/nupm-compatibility.md).
+**Compatibility matrix:** which nupm package shapes Numan can import is defined in [docs/nupm-compatibility.md](docs/nupm-compatibility.md) (compat-schema-v1). Run `numan nupm inspect` to classify packages before import.
 
 ---
 
@@ -277,7 +277,8 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | Update, remove, gc, lockfile v2 | ✅ Complete |
 | nupm status, inspect, import, drift | ✅ Complete |
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
-| Polish, CI, distribution | 🚧 In progress — [Phase7Plan.md](Phase7Plan.md); next: `numan doctor` |
+| Distribution (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
+| Doctor, completions, onboarding polish | 🚧 [Phase 7.2+](Phase7Plan.md) — next: shell completions + error UX |
 
 ---
 

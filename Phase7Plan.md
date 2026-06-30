@@ -39,13 +39,15 @@ Shipped in v0.1.0–v0.1.1:
 Read-only health command aggregating:
 
 - Nu path drift (`NuPaths`)
-- Pending journals (plugin, autoload, lifecycle) — **report only**
+- Pending journals (plugin, autoload, lifecycle)
 - Lockfile activation identity + autoload projection
 - Payload directory presence
 - Registry configuration
 - Optional nupm coexistence (`scan_on_doctor` config flag)
 
-**Why now:** Scattered checks (`activate --check`, journal comments, `nupm status`) need a single entry point before error-UX and onboarding polish.
+**`numan doctor --fix`** applies safe repairs (layout, `init`, `registry sync`, `init --refresh`, `activate` recovery) via existing commands — see repair tiers in spec.
+
+**Why now:** Scattered checks (`activate --check`, journal recovery, `nupm status`) need a single entry point before error-UX and onboarding polish.
 
 **Deliverables:**
 
@@ -53,7 +55,7 @@ Read-only health command aggregating:
 - `tests/doctor_test.rs`
 - README + `AGENTS.md` updates
 
-**Non-goals:** mutation, journal reconciliation, registry sync.
+**Non-goals:** install/remove/update/gc, nupm import, lifecycle journal auto-completion, foreign managed-file overwrite.
 
 ---
 

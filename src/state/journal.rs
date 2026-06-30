@@ -37,7 +37,7 @@ pub struct PendingActivationEntry {
 ///
 /// Existence of this file after a command exits indicates an interrupted run.
 /// `numan activate` reconciles it on next invocation (see `reconcile`).
-/// `numan doctor` reports it without acting (see `docs/numan-doctor.md`).
+/// `numan doctor` reports pending journals; with `--fix`, `numan activate` reconciles them.
 ///
 /// A journal whose Nu identity (hash + version + registry path) does not match
 /// the current `NuPaths` is stale and requires `numan init --refresh`.

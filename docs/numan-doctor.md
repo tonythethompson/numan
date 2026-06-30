@@ -5,30 +5,37 @@
 
 ## Purpose
 
-`numan doctor` is a **read-only** health command that aggregates checks currently spread across `init`, `activate --check`, journal recovery, and `nupm status`. It answers: *“Is this Numan root consistent, safe to mutate, and aligned with the current Nu environment?”*
+`numan doctor` diagnoses the health of a Numan root and, with `--fix`, applies **safe automated repairs** — the same pattern as `brew doctor`, `npm doctor`, and similar tooling.
 
-It **reports** problems and prints **fix hints**. It does **not** reconcile journals, activate packages, modify nupm, or write state.
+Default mode is **report-only** (safe for CI and scripting). Repair mode delegates to existing commands (`init`, `activate`, `registry sync`) rather than inventing new mutation paths.
+
+It answers: *“Is this Numan root consistent, safe to mutate, and aligned with the current Nu environment?”* and optionally *“Fix what you can.”*
 
 ## Non-goals
 
-- No mutation of lockfile, journals, managed files, or nupm trees
-- No substitute for `numan activate` (registration / autoload writes)
-- No registry sync or package install
-- No automatic `init --refresh` (only recommends it)
-- No execution of `build.nu` or nupm import
+- No `install`, `remove`, `update`, or `gc`
+- No nupm import, nupm mutation, or `build.nu` execution
+- No overwriting foreign managed files (`autoload.managed_foreign` stays manual)
+- No blind completion of in-flight lifecycle journals (too risky — report + guide re-run)
+- No re-download of missing payloads (report `payload.missing`; user runs `install` again)
 
 ## Invocation
 
 ```text
-numan doctor [--json] [--nupm-home PATH]
+numan doctor [--fix] [--yes] [--json] [--nupm-home PATH]
 ```
 
 | Flag | Behavior |
 |------|----------|
-| `--json` | Emit a single JSON object (schema versioned); no ANSI styling |
+| `--fix` | After reporting, apply automated repairs (see [Repair policy](#repair-policy)) |
+| `--yes` | Skip confirmation prompts for **confirm**-tier repairs (non-TTY implies `--yes` for confirm tier only) |
+| `--json` | Emit a single JSON object (schema versioned); no ANSI styling. With `--fix`, include `repairs` attempted/applied |
 | `--nupm-home PATH` | Override nupm home for the optional coexistence section (same resolution order as `numan nupm status`) |
 
 Global `--root` applies as for all commands.
+
+**Default (no flags):** diagnose and print findings + manual fix hints.  
+**`--fix`:** diagnose, then repair what is allowed without user-supplied data.
 
 ## Exit codes
 
@@ -45,7 +52,8 @@ Each finding has:
 - `id` — stable machine identifier (e.g. `nu_paths.missing`)
 - `severity` — `ok` \| `info` \| `warn` \| `error`
 - `message` — human-readable summary
-- `fix` — optional suggested command (e.g. `numan init --refresh`)
+- `fix` — optional suggested command for manual issues (e.g. `numan registry add …`)
+- `repair` — `none` \| `auto` \| `confirm` \| `manual` (whether `--fix` can act; see below)
 
 **Rules:**
 
@@ -53,6 +61,28 @@ Each finding has:
 - `warn` — operational risk or incomplete setup (no registries, nupm drift, pending journal from interrupted run)
 - `info` — contextual only (nupm home not configured, no packages installed)
 - `ok` — check passed (included in `--json`; omitted in default human output unless `--verbose` is added later)
+
+## Repair policy
+
+When `--fix` is set, doctor acquires `acquire_mutation_lock(root)` once for the repair pass, then applies fixes in this **order** (each step re-validates only what it changed):
+
+| Tier | Prompt? | Finding IDs | Action |
+|------|---------|-------------|--------|
+| **auto** | Never | `layout.*` (missing dirs), `nu_paths.missing` | `create_dir_all` for layout; `numan init` |
+| **auto** | Never | `registry.index_missing` | `numan registry sync` |
+| **confirm** | Unless `--yes` / non-TTY | `nu_paths.drift`, `nu_paths.vendor_drift` | `numan init --refresh` |
+| **confirm** | Unless `--yes` / non-TTY | `journal.plugin_pending`, `journal.autoload_pending`, `journal.plugin_stale`, `journal.autoload_stale`, `activation.plugin_stale`, `activation.module_stale`, `autoload.projection`, `autoload.managed_missing` | `numan activate` (empty package list — reconciles journals and re-activates stale entries; same entry point as normal activate recovery) |
+| **manual** | Never auto | `autoload.managed_foreign`, `payload.missing`, `journal.lifecycle_pending`, `journal.lifecycle_stale`, `registry.none`, `nu_paths.vendor_missing`, `nupm.*` | Print fix hint only |
+
+**Invariants during repair:**
+
+1. Reuse `cmd::init::execute`, `cmd::activate::execute`, `cmd::registry::sync` — no duplicated mutation logic.
+2. Install remains inert; doctor never invokes install transaction.
+3. Never write under `NUPM_HOME`.
+4. If any **manual**-tier error remains after repair, exit `1` even if some auto/confirm fixes succeeded.
+5. Report a repair summary: `Fixed N issues; M require manual action.`
+
+**Journal note:** Default mode still *reports* journals without acting. `--fix` may reconcile plugin/autoload journals **only** via the existing `activate` recovery path — not by editing journal files directly.
 
 ## Check catalog
 
@@ -75,18 +105,16 @@ Checks run in order below. Implementation should call existing validators (`NuPa
 | `nu_paths.vendor_drift` | `error` | `validate_vendor_drift()` fails when `data_dir` cached → fix: `numan init --refresh` |
 | `nu_paths.vendor_missing` | `warn` | Active module in lockfile but `vendor_autoload_dir` is `None` → fix: fix Nu install/config, then `numan init --refresh` |
 
-### 3. Pending journals (report only — do not reconcile)
+### 3. Pending journals
 
-Per `state/journal.rs`: *“`numan doctor` reports it without acting.”*
-
-| ID | Severity | Condition |
-|----|----------|-----------|
-| `journal.plugin_pending` | `warn` | `state/pending-activation.json` exists; include stage counts |
-| `journal.plugin_stale` | `error` | Journal Nu identity ≠ current `NuPaths` → fix: `numan init --refresh` then `numan activate` |
-| `journal.autoload_pending` | `warn` | `state/pending-autoload.json` exists; include `stage` |
-| `journal.autoload_stale` | `error` | Journal identity mismatch → fix: `numan init --refresh` |
-| `journal.lifecycle_pending` | `warn` | `state/pending-lifecycle.json` exists; include `op` + `stage` |
-| `journal.lifecycle_stale` | `error` | Stale lifecycle journal (reuse `check_stale_journal` semantics) → fix: per op docs / manual recovery |
+| ID | Severity | Condition | Repair |
+|----|----------|-----------|--------|
+| `journal.plugin_pending` | `warn` | `state/pending-activation.json` exists | **confirm:** `activate` reconciles |
+| `journal.plugin_stale` | `error` | Journal Nu identity ≠ current `NuPaths` | **confirm:** `init --refresh` then `activate` |
+| `journal.autoload_pending` | `warn` | `state/pending-autoload.json` exists | **confirm:** `activate` reconciles |
+| `journal.autoload_stale` | `error` | Journal identity mismatch | **confirm:** `init --refresh` then `activate` |
+| `journal.lifecycle_pending` | `warn` | `state/pending-lifecycle.json` exists | **manual:** re-run or clear per op |
+| `journal.lifecycle_stale` | `error` | Stale lifecycle journal | **manual** |
 
 ### 4. Lockfile and activation identity
 
@@ -152,6 +180,17 @@ nupm coexistence
   · nupm home not configured (pass --nupm-home or set NUPM_HOME)
 
 Summary: 1 error, 1 warning
+
+Repairs (--fix only):
+  ✓ Created missing state/ directory
+  ✓ Ran registry sync
+  → numan init --refresh required (skipped; re-run with --yes)
+```
+
+With `--fix` and repairs applied:
+
+```text
+Repairs: 2 applied, 1 skipped (use --yes to apply confirm-tier fixes)
 ```
 
 Use `console` styling consistent with `activate --check`.
@@ -168,11 +207,18 @@ Use `console` styling consistent with `activate --check`.
       "id": "autoload.projection",
       "severity": "error",
       "message": "…",
-      "fix": "numan activate …"
+      "fix": "numan activate",
+      "repair": "confirm"
     }
+  ],
+  "repairs": [
+    { "id": "registry.index_missing", "status": "applied" },
+    { "id": "nu_paths.drift", "status": "skipped", "reason": "not_confirmed" }
   ]
 }
 ```
+
+`repairs` is present only when `--fix` was passed.
 
 ## Architecture
 
@@ -193,22 +239,25 @@ pub fn execute_with_options(args: &DoctorArgs, root: &Path, options: DoctorOptio
 
 | Command | Role |
 |---------|------|
-| `numan init` / `init --refresh` | **Fix** Nu path drift (doctor only suggests) |
-| `numan activate` | **Fix** activation; reconciles plugin/autoload journals |
-| `numan activate --check` | Deep **module** check; doctor subsumes into broader report |
+| `numan init` / `init --refresh` | **Repair** Nu path drift (`--fix` delegates here) |
+| `numan activate` | **Repair** activation + journal reconciliation (`--fix` delegates here) |
+| `numan registry sync` | **Repair** missing index cache (`--fix` auto tier) |
+| `numan activate --check` | Deep **module** check only; no repair |
 | `numan nupm status` | nupm-only summary; doctor embeds optional subset |
-| `numan update` / `remove` / `gc` | Block on stale lifecycle journal; doctor **reports** it |
+| `numan update` / `remove` / `gc` | Block on stale lifecycle journal; doctor reports, does not fix lifecycle |
 
 ## Definition of done
 
-- [ ] `numan doctor` and `numan doctor --json` implemented per check catalog
+- [ ] `numan doctor`, `numan doctor --fix`, and `numan doctor --json` implemented per check catalog
 - [ ] `scan_on_doctor` respected
-- [ ] No state mutation; verified by test that root mtime / file hashes unchanged
+- [ ] Default mode: no state mutation (test: hashes unchanged)
+- [ ] `--fix` mode: only repair tiers in policy; uses mutation lock; delegates to init/activate/sync
 - [ ] Documented in README command table and `AGENTS.md`
-- [ ] Integration tests for: uninitialized root, drifted paths, pending journals, projection mismatch
+- [ ] Integration tests: report-only, `--fix` auto tier, `--fix` confirm tier with `--yes`, manual tier untouched
 
 ## Changelog
 
 | Date | Change |
 |------|--------|
 | 2026-06-30 | Initial spec (Phase 7.2) |
+| 2026-06-30 | Add `--fix` / `--yes` repair policy (auto / confirm / manual tiers) |
