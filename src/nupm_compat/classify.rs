@@ -199,4 +199,43 @@ mod tests {
         let (compat, _) = classify_source_root(&root).unwrap();
         assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
     }
+
+    #[test]
+    fn empty_version_is_invalid_metadata() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("pkg");
+        fs::create_dir_all(root.join("m")).unwrap();
+        fs::write(
+            root.join("nupm.nuon"),
+            br#"{ name: m, version: "", type: module }"#,
+        )
+        .unwrap();
+        fs::write(root.join("m/mod.nu"), b"").unwrap();
+        let (compat, _) = classify_source_root(&root).unwrap();
+        assert_eq!(compat, NupmCompatibility::InvalidMetadata);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn special_file_in_module_tree_is_unsafe() {
+        use std::fs;
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("pkg");
+        let module_dir = root.join("m");
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            root.join("nupm.nuon"),
+            br#"{ name: m, version: "0.1.0", type: module }"#,
+        )
+        .unwrap();
+        fs::write(module_dir.join("mod.nu"), b"").unwrap();
+        Command::new("mkfifo")
+            .arg(module_dir.join("pipe"))
+            .status()
+            .expect("mkfifo");
+        let (compat, _) = classify_source_root(&root).unwrap();
+        assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
+    }
 }

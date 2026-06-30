@@ -66,6 +66,7 @@ pub fn parse_metadata(input: &[u8]) -> Result<ParsedMetadata, MetadataError> {
     let mut parser = Parser::new(input);
     let meta = parser.parse_record()?;
     parser.ensure_eof()?;
+    meta.validate_invariants()?;
     Ok(meta)
 }
 
@@ -555,6 +556,15 @@ mod tests {
     fn deps_malformed_empty_value_rejected() {
         let input = br#"{ name: m, version: "0.1.0", type: module, deps: { other: } }"#;
         assert!(parse_metadata(input).is_err());
+    }
+
+    #[test]
+    fn empty_version_rejected() {
+        let input = br#"{ name: m, version: "", type: module }"#;
+        assert!(matches!(
+            parse_metadata(input),
+            Err(MetadataError::InvalidSyntax("empty required field"))
+        ));
     }
 
     #[test]

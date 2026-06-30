@@ -180,6 +180,12 @@ pub fn check_module_tree_safe(module_dir: &Path) -> Result<()> {
             })?;
             if file_type.is_dir() {
                 stack.push(path);
+            } else if !file_type.is_file() {
+                anyhow::bail!(
+                    "Unsafe filesystem layout: module tree '{}' contains non-regular file '{}'",
+                    module_dir.display(),
+                    path.display()
+                );
             }
         }
     }
@@ -243,5 +249,20 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let start = link.join("minimal-module/mod.nu");
         assert!(find_package_root(&start).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn module_tree_special_file_rejected() {
+        use std::fs;
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().unwrap();
+        let module_dir = dir.path().join("m");
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(module_dir.join("mod.nu"), b"export def hi [] { 1 }").unwrap();
+        let fifo = module_dir.join("pipe");
+        Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+        assert!(check_module_tree_safe(&module_dir).is_err());
     }
 }
