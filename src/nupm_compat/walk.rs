@@ -100,7 +100,9 @@ fn is_regular_file(path: &Path) -> Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(meta) => Ok(meta.is_file()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e).with_context(|| format!("Failed to read metadata for '{}'", path.display())),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to read metadata for '{}'", path.display()))
+        }
     }
 }
 

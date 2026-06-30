@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::metadata::{parse_metadata, read_metadata_limited, MetadataError, ParsedMetadata};
-use super::schema::{BUILD_SCRIPT_NAME, MODULE_ENTRY, METADATA_FILENAME};
+use super::schema::{BUILD_SCRIPT_NAME, METADATA_FILENAME, MODULE_ENTRY};
 use super::walk::{
     check_path_chain_safe, check_path_chain_safe_within, find_package_root, is_safe_package_name,
 };
@@ -156,6 +156,12 @@ mod tests {
     fn t11_missing_mod_nu() {
         let (c, _) = classify_source_root(&pkg("rejected/missing-mod-nu")).unwrap();
         assert_eq!(c, NupmCompatibility::UnsafeFilesystemLayout);
+    }
+
+    #[test]
+    fn t12_unknown_type() {
+        let (c, _) = classify_source_root(&pkg("rejected/unknown-type")).unwrap();
+        assert_eq!(c, NupmCompatibility::UnknownType);
     }
 
     #[cfg(unix)]
