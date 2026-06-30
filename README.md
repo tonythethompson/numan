@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.0). Core install, activate, update, remove, gc, registry, and nupm interoperability are implemented and covered by 309+ tests plus real-Nu acceptance on CI. Source builds and lockfile rollback snapshots remain planned; pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.1). Core install, activate, update, remove, gc, registry, and nupm interoperability are implemented and covered by 309+ tests plus real-Nu acceptance on CI. Source builds and lockfile rollback snapshots remain planned; pre-built release binaries are published via GitHub Releases.
 
 ---
 
