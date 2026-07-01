@@ -29,6 +29,28 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for CI checks to be registered
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha="${{ github.sha }}"
+          repo="${{ github.repository }}"
+          pattern='^(Test \(.*\)|Clippy|Format|MSRV \(1\.88\)|Package|Deny|Real-Nu acceptance \(.*\))$'
+          echo "Waiting for CI checks to be registered for $sha..."
+          for i in $(seq 1 40); do
+            names=$(gh api "repos/${repo}/commits/${sha}/check-runs" --jq '.check_runs[].name')
+            if echo "$names" | grep -Eq "$pattern"; then
+              echo "Found matching checks:"
+              echo "$names" | grep -E "$pattern"
+              exit 0
+            fi
+            echo "No matching checks yet (attempt $i/40); sleeping 15s..."
+            sleep 15
+          done
+          echo "::error::Timed out waiting for CI checks to be registered on ${sha}"
+          exit 1
+
       - name: Wait for CI checks on tagged commit
         uses: lewagon/wait-on-check-action@v1.3.4
         with:
@@ -174,7 +196,7 @@ jobs:
 
   publish-crate:
     name: Publish to crates.io
-    needs: preflight
+    needs: [preflight, release]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
