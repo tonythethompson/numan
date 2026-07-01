@@ -184,10 +184,13 @@ pub struct RegistryActivationSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryIndex {
-    pub version: u32,
+    #[serde(rename = "schema_version")]
+    pub schema_version: u32,
     pub updated_at: String,
     #[serde(default)]
     pub registry_revision: Option<String>,
+    #[serde(default)]
+    pub trust: Option<crate::core::official_registry::RegistryTrustExtension>,
     pub packages: Vec<Package>,
 }
 
@@ -267,13 +270,13 @@ mod tests {
     #[test]
     fn parse_registry_index() {
         let json = r#"{
-            "version": 1,
+            "schema_version": 1,
             "updated_at": "2026-06-27T00:00:00Z",
             "registry_revision": "abc123",
             "packages": []
         }"#;
         let index: RegistryIndex = serde_json::from_str(json).unwrap();
-        assert_eq!(index.version, 1);
+        assert_eq!(index.schema_version, 1);
         assert!(index.packages.is_empty());
     }
 }

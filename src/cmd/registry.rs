@@ -1,6 +1,7 @@
-use crate::core::registry::RegistryManager;
+use crate::core::official_registry::RegistrySignature;
+use crate::core::registry::{RegistryManager, VerifiedRegistry};
 use crate::core::trust::TrustStore;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use clap::Subcommand;
 use std::path::Path;
 
@@ -58,7 +59,7 @@ fn list_registries(root: &Path) -> Result<()> {
 
 fn sync_registries(root: &Path) -> Result<()> {
     let config = crate::config::Config::load(root)?;
-    let _mgr = RegistryManager::new(root)?;
+    let mgr = RegistryManager::new(root)?;
 
     for (name, reg) in &config.registries {
         if !reg.enabled {
@@ -67,36 +68,50 @@ fn sync_registries(root: &Path) -> Result<()> {
 
         println!("Syncing '{name}' from {}...", reg.url);
 
-        // For now, just download the index.json from the URL
-        let response = reqwest::blocking::get(&reg.url)
-            .map_err(|e| anyhow::anyhow!("Failed to fetch registry '{name}': {e}"))?;
+        let fetch_result: Result<VerifiedRegistry> = (|| {
+            let index_response = reqwest::blocking::get(&reg.url)
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| anyhow::anyhow!("Failed to fetch registry '{name}': {e}"))?;
+            let sig_response = reqwest::blocking::get(format!("{}.sig", reg.url))
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| anyhow::anyhow!("Failed to fetch signature for '{name}': {e}"))?;
 
-        if !response.status().is_success() {
-            bail!(
-                "Failed to fetch registry '{name}': HTTP {}",
-                response.status()
-            );
-        }
+            let index_content = index_response.text()?;
+            let sig_content = sig_response.text()?;
+            let signature: RegistrySignature = serde_json::from_str(&sig_content)
+                .with_context(|| format!("Registry '{name}' signature file is malformed"))?;
+            mgr.replace_index(name, &index_content, &signature)
+        })();
 
-        let index_content = response.text()?;
-
-        // Save the index
-        let index_path = root.join(format!("registry/{name}/index.json"));
-        if let Some(parent) = index_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&index_path, &index_content)?;
-
-        // Try to fetch signature
-        let sig_url = format!("{}.sig", reg.url);
-        if let Ok(sig_response) = reqwest::blocking::get(&sig_url) {
-            if sig_response.status().is_success() {
-                let sig_path = root.join(format!("registry/{name}/index.json.sig"));
-                std::fs::write(sig_path, sig_response.text()?)?;
+        let verified = match fetch_result {
+            Ok(v) => v,
+            Err(e) => {
+                // Network fetch or signature validation failed. If a cached
+                // verified index exists, use it and warn; otherwise error.
+                let cached = mgr.load_verified(name);
+                if let Ok(cached) = cached {
+                    eprintln!(
+                        "Warning: Could not refresh registry '{name}' ({e}); using cached index from {}.",
+                        cached.index.updated_at
+                    );
+                    cached
+                } else if let Ok(lkg) = mgr.load_last_known_good(name) {
+                    eprintln!(
+                        "Warning: Could not refresh registry '{name}' ({e}); using last-known-good index from {}.",
+                        lkg.index.updated_at
+                    );
+                    lkg
+                } else {
+                    bail!("Failed to sync registry '{name}' and no cached or last-known-good index is available: {e}");
+                }
             }
-        }
+        };
 
-        println!("  Synced '{name}' successfully.");
+        println!(
+            "  Synced '{name}' successfully (key_id: {}, index_sha256: {}).",
+            verified.key_id,
+            &verified.index_sha256[..8.min(verified.index_sha256.len())]
+        );
     }
 
     Ok(())
