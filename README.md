@@ -290,8 +290,8 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | Command | Flags |
 |---------|-------|
 | `install` | `--force` reinstall; `-v` / `--verbose` |
-| `activate` | `--yes` skip prompt; `-v` / `--verbose`; `--list` status only; `--check` integrity only |
-| `deactivate` | `--yes` skip prompt; `-v` / `--verbose` |
+| `activate` | `--yes` skip prompt; `--verbose`; `--list` status only; `--check` integrity only |
+| `deactivate` | `--yes` skip prompt; `--verbose` |
 | `update` | `--check` report only; `-v` / `--verbose` |
 | `remove` | `--force` remove despite active activation |
 | `gc` | `--dry-run` preview only |
