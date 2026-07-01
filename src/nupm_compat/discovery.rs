@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use super::classify::classify_source_root;
+use super::assessment::{assess_source_root, installed_only_assessment};
 use super::report::{InstalledOnlyEntry, SourceRootEntry};
 use super::schema::MAX_DISCOVERY_ENTRIES;
 use super::walk::{check_path_chain_safe_within, is_safe_package_name, validate_nupm_home_path};
@@ -70,12 +70,12 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
 
             let metadata = path.join(super::schema::METADATA_FILENAME);
             if metadata.is_file() {
-                match classify_source_root(&path) {
-                    Ok((compat, meta)) => {
+                match assess_source_root(&path) {
+                    Ok((assessment, meta)) => {
                         source_roots.push(SourceRootEntry {
                             source_path: path.clone(),
-                            compatibility: compat,
                             metadata: meta,
+                            assessment,
                         });
                     }
                     Err(_) => unsafe_entries += 1,
@@ -87,7 +87,11 @@ pub fn scan_nupm_home(nupm_home: &Path) -> Result<ScanResult> {
                     .unwrap_or("")
                     .to_string();
                 if is_safe_package_name(&name) {
-                    installed_only.push(InstalledOnlyEntry { name, path });
+                    installed_only.push(InstalledOnlyEntry {
+                        name: name.clone(),
+                        path,
+                        assessment: installed_only_assessment(&name),
+                    });
                 } else {
                     unsafe_entries += 1;
                 }
@@ -130,18 +134,18 @@ fn normalize_key(path: &Path) -> OsString {
 pub fn inspect_path(path: &Path) -> Result<SourceRootEntry> {
     let root = super::walk::find_package_root(path)?
         .with_context(|| format!("No nupm.nuon found for path '{}'", path.display()))?;
-    let (compat, meta) = classify_source_root(&root)?;
+    let (assessment, meta) = assess_source_root(&root)?;
     Ok(SourceRootEntry {
         source_path: root,
-        compatibility: compat,
         metadata: meta,
+        assessment,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nupm_compat::NupmCompatibility;
+    use crate::nupm_compat::NupmOutcome;
 
     fn layout_home() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/nupm/nupm-home-layout")
@@ -154,7 +158,7 @@ mod tests {
         assert!(scan
             .source_roots
             .iter()
-            .all(|e| e.compatibility != NupmCompatibility::ImportableModule));
+            .all(|e| e.assessment.outcome != NupmOutcome::ImportableNow));
     }
 
     #[cfg(unix)]

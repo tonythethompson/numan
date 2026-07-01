@@ -99,7 +99,7 @@ fn t13_nupm_home_layout_installed_only() {
     assert!(scan
         .source_roots
         .iter()
-        .all(|r| r.compatibility != numan_cli::nupm_compat::NupmCompatibility::ImportableModule));
+        .all(|r| r.assessment.outcome != numan_cli::nupm_compat::NupmOutcome::ImportableNow));
 }
 
 #[test]
@@ -110,7 +110,10 @@ fn t14_inspect_all_without_home_errors_status_ok() {
     let root = TempDir::new().unwrap();
     let mut buf = Vec::new();
     let status_args = NupmArgs {
-        command: NupmCommands::Status(StatusArgs { nupm_home: None }),
+        command: NupmCommands::Status(StatusArgs {
+            nupm_home: None,
+            json: false,
+        }),
     };
     nupm::execute(&status_args, root.path(), &mut buf).unwrap();
     assert!(String::from_utf8(buf).unwrap().contains("not configured"));
@@ -121,6 +124,7 @@ fn t14_inspect_all_without_home_errors_status_ok() {
             path: None,
             nupm_home: None,
             exit_on_ineligible: false,
+            json: false,
         }),
     };
     let mut buf2 = Vec::new();
@@ -136,7 +140,10 @@ fn status_fails_on_corrupt_lockfile() {
     let root = TempDir::new().unwrap();
     std::fs::write(root.path().join("lockfile"), b"{not json").unwrap();
     let args = NupmArgs {
-        command: NupmCommands::Status(StatusArgs { nupm_home: None }),
+        command: NupmCommands::Status(StatusArgs {
+            nupm_home: None,
+            json: false,
+        }),
     };
     let mut buf = Vec::new();
     assert!(nupm::execute(&args, root.path(), &mut buf).is_err());
@@ -155,6 +162,7 @@ fn t15_no_mutation_under_nupm_home_fixture() {
     let args = NupmArgs {
         command: NupmCommands::Status(StatusArgs {
             nupm_home: Some(home.clone()),
+            json: false,
         }),
     };
     nupm::execute(&args, root.path(), &mut buf).unwrap();
@@ -166,6 +174,7 @@ fn t15_no_mutation_under_nupm_home_fixture() {
             path: None,
             nupm_home: Some(home.clone()),
             exit_on_ineligible: false,
+            json: false,
         }),
     };
     nupm::execute(&inspect_args, root.path(), &mut buf2).unwrap();
@@ -178,6 +187,7 @@ fn t15_no_mutation_under_nupm_home_fixture() {
             path: Some(path),
             nupm_home: None,
             exit_on_ineligible: false,
+            json: false,
         }),
     };
     nupm::execute(&single, root.path(), &mut buf3).unwrap();
@@ -197,12 +207,13 @@ fn inspect_supported_minimal_module() {
             path: Some(path),
             nupm_home: None,
             exit_on_ineligible: false,
+            json: false,
         }),
     };
     nupm::execute(&args, root.path(), &mut buf).unwrap();
     let out = String::from_utf8(buf).unwrap();
-    assert!(out.contains("ImportableModule"));
-    assert!(out.contains("Eligible:     yes"));
+    assert!(out.contains("importable_now"));
+    assert!(out.contains("Outcome:      importable_now"));
     assert!(out.contains("Import:       numan nupm import"));
 }
 
@@ -501,7 +512,10 @@ fn t23_diff_and_status_drift_count() {
 
     let mut buf = Vec::new();
     let args = NupmArgs {
-        command: NupmCommands::Status(StatusArgs { nupm_home: None }),
+        command: NupmCommands::Status(StatusArgs {
+            nupm_home: None,
+            json: false,
+        }),
     };
     nupm::execute(&args, root.path(), &mut buf).unwrap();
     assert!(String::from_utf8(buf)
@@ -576,12 +590,13 @@ fn t24_unicode_path_inspect_and_import() {
             path: Some(source.clone()),
             nupm_home: None,
             exit_on_ineligible: false,
+            json: false,
         }),
     };
     nupm::execute(&args, root.path(), &mut buf).unwrap();
     let out = String::from_utf8(buf).unwrap();
     assert!(out.contains("café-pkg"));
-    assert!(out.contains("ImportableModule"));
+    assert!(out.contains("importable_now"));
 
     let result = import_module_with_runner(
         root.path(),
@@ -618,11 +633,110 @@ fn t25_symlink_in_module_tree_rejected_at_import() {
         &FakeCandidateRunner::success(),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("Unsafe filesystem layout"));
+    assert!(err.to_string().contains("unsafe_filesystem_layout"));
     assert!(!Lockfile::load(root.path())
         .unwrap()
         .packages
         .contains_key("test/minimal"));
+}
+
+#[test]
+fn status_json_schema_fields_present() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("nupm-home");
+    copy_dir_all(&fixtures_root().join("nupm-home-layout"), &home).unwrap();
+
+    let root = TempDir::new().unwrap();
+    let mut buf = Vec::new();
+    let args = NupmArgs {
+        command: NupmCommands::Status(StatusArgs {
+            nupm_home: Some(home),
+            json: true,
+        }),
+    };
+    nupm::execute(&args, root.path(), &mut buf).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["compat_schema_version"], 1);
+    assert_eq!(json["command"], "status");
+    assert!(json["counts"]["importable_now"].is_number());
+    assert!(json["source_roots"].is_array());
+    assert!(json["installed_only"].is_array());
+}
+
+#[test]
+fn inspect_json_schema_fields_present() {
+    let root = TempDir::new().unwrap();
+    let path = fixtures_root().join("supported/minimal-module");
+    let mut buf = Vec::new();
+    let args = NupmArgs {
+        command: NupmCommands::Inspect(nupm::InspectArgs {
+            all: false,
+            path: Some(path),
+            nupm_home: None,
+            exit_on_ineligible: false,
+            json: true,
+        }),
+    };
+    nupm::execute(&args, root.path(), &mut buf).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["compat_schema_version"], 1);
+    assert_eq!(json["command"], "inspect");
+    assert!(json["candidates"].is_array());
+    let candidate = &json["candidates"][0];
+    assert_eq!(candidate["outcome"], "importable_now");
+    assert_eq!(candidate["recommended_action"], "import");
+}
+
+#[test]
+fn import_script_package_refused_and_no_state_written() {
+    let root = TempDir::new().unwrap();
+    let source = fixtures_root().join("rejected/script-type");
+    let err = import_module_with_runner(
+        root.path(),
+        &source,
+        &ScopedId::parse("test/script").unwrap(),
+        true,
+        &FakeCandidateRunner::success(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("not import-eligible"));
+    assert!(err.to_string().contains("script_package"));
+
+    let lockfile = Lockfile::load(root.path()).unwrap();
+    assert!(!lockfile.packages.contains_key("test/script"));
+    let imports = NupmImportsFile::load(root.path()).unwrap();
+    assert!(!imports.imports.contains_key("test/script"));
+    assert!(!root.path().join("packages").exists());
+}
+
+#[test]
+fn import_provenance_records_original_nupm_identity() {
+    let root = TempDir::new().unwrap();
+    let source = fixtures_root().join("supported/minimal-module");
+    let result = import_module_with_runner(
+        root.path(),
+        &source,
+        &ScopedId::parse("test/minimal").unwrap(),
+        true,
+        &FakeCandidateRunner::success(),
+    )
+    .unwrap();
+    assert_eq!(result.package_id, "test/minimal");
+
+    let imports = NupmImportsFile::load(root.path()).unwrap();
+    let record = imports.imports.get("test/minimal").unwrap();
+    assert_eq!(record.original_nupm_name, "minimal-module");
+    assert_eq!(record.original_nupm_version, "0.1.0");
+    assert!(matches!(
+        record.selection_reason,
+        numan_cli::state::nupm_import::NupmSelectionReason::ModuleEntry
+    ));
+    assert!(matches!(
+        record.transformation_performed,
+        numan_cli::state::nupm_import::NupmTransformation::CopiedModuleTree
+    ));
 }
 
 // silence unused import warning for METADATA_FILENAME if not used

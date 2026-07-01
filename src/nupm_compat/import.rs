@@ -10,20 +10,20 @@ use crate::core::package::{ModuleImportMode, ScopedId};
 use crate::nu::autoload::{
     generate_autoload_content, resolve_entry, validate_candidate, CandidateRunner,
 };
-use crate::nupm_compat::classify::{classify_source_root, NupmCompatibility};
+use crate::nupm_compat::assessment::assess_source_root;
 use crate::nupm_compat::discovery::{resolve_nupm_home, NupmHomeResolution};
 use crate::nupm_compat::metadata::read_metadata_limited;
 use crate::nupm_compat::schema::{
     MODULE_ENTRY, NUPM_IMPORT_ORIGIN, NUPM_IMPORT_SELECTION_REASON, NUPM_TRUST_LEVEL,
 };
-use crate::nupm_compat::walk::{
-    check_module_tree_safe, check_path_chain_safe, check_path_chain_safe_within, find_package_root,
-};
+use crate::nupm_compat::walk::{check_module_tree_safe, find_package_root};
 use crate::state::lifecycle_journal::{
     check_stale_journal, LifecycleOp, LifecycleStage, PendingLifecycle,
 };
 use crate::state::lockfile::{compute_revision_id, Lockfile, LockfileEntry};
-use crate::state::nupm_import::{NupmImportRecord, NupmImportsFile};
+use crate::state::nupm_import::{
+    NupmImportRecord, NupmImportsFile, NupmSelectionReason, NupmTransformation,
+};
 use crate::util::atomic::write_bytes_atomic;
 use crate::util::format_timestamp;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_not_symlink};
@@ -356,18 +356,17 @@ fn resolve_single_import(
     yes: bool,
 ) -> Result<ResolvedImport> {
     let package_root = resolve_package_root(source_path)?;
-    let (compat, parsed_opt) = classify_source_root(&package_root)?;
-    if compat != NupmCompatibility::ImportableModule {
-        if compat == NupmCompatibility::UnsafeFilesystemLayout {
-            if let Some(ref p) = parsed_opt {
-                let module_src = package_root.join(&p.name);
-                check_module_tree_safe(&module_src)?;
-                check_path_chain_safe_within(&package_root, &module_src)?;
-            }
-            check_path_chain_safe(&package_root)?;
-        }
+    let (assessment, parsed_opt) = assess_source_root(&package_root)?;
+    if !assessment.is_importable() {
+        let outcome = assessment.outcome;
+        let reasons = assessment
+            .reason_codes
+            .iter()
+            .map(|r| r.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         bail!(
-            "Package at '{}' is not import-eligible ({compat:?}). {}",
+            "Package at '{}' is not import-eligible (outcome: {outcome:?}, reasons: {reasons}). {}",
             package_root.display(),
             hints::run(CMD_NUPM_INSPECT)
         );
@@ -576,6 +575,10 @@ fn commit_imports(
                 observed_git_remote: None,
                 observed_git_commit: None,
                 imported_at: installed_at.clone(),
+                original_nupm_name: resolved.parsed_name.clone(),
+                original_nupm_version: resolved.parsed_version.clone(),
+                selection_reason: NupmSelectionReason::ModuleEntry,
+                transformation_performed: NupmTransformation::CopiedModuleTree,
             },
         );
     }
@@ -808,7 +811,14 @@ mod tests {
         let entry = lockfile.packages.get("test/minimal").unwrap();
         assert_eq!(entry.origin.as_deref(), Some(NUPM_IMPORT_ORIGIN));
         let imports = NupmImportsFile::load(root.path()).unwrap();
-        assert!(imports.imports.contains_key("test/minimal"));
+        let record = imports.imports.get("test/minimal").unwrap();
+        assert_eq!(record.original_nupm_name, "minimal-module");
+        assert_eq!(record.original_nupm_version, "0.1.0");
+        assert_eq!(record.selection_reason, NupmSelectionReason::ModuleEntry);
+        assert_eq!(
+            record.transformation_performed,
+            NupmTransformation::CopiedModuleTree
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::cmd::registry::{self, RegistryCommands};
 use crate::config::Config;
 use crate::core::registry::RegistryManager;
 use crate::nu::paths::NuPaths;
-use crate::nupm_compat::NupmCompatibility;
+use crate::nupm_compat::NupmOutcome;
 use crate::nupm_compat::{
     count_drifted_imports, resolve_nupm_home, scan_nupm_home, NupmHomeResolution,
 };
@@ -721,7 +721,7 @@ fn count_nupm_name_overlap(
     let imports = NupmImportsFile::load(root)?;
     let mut count = 0usize;
     for entry in source_roots {
-        if entry.compatibility != NupmCompatibility::ImportableModule {
+        if entry.assessment.outcome != NupmOutcome::ImportableNow {
             continue;
         }
         let Some(meta) = &entry.metadata else {

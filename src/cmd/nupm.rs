@@ -5,10 +5,10 @@ use anyhow::{bail, Context, Result};
 
 use crate::core::package::ScopedId;
 use crate::nupm_compat::{
-    compare_import, count_drifted_imports, format_drift_report, format_inspection_report,
-    format_status_report, import_manifest_with_runner, inspect_path, resolve_nupm_home,
-    scan_nupm_home, NupmCandidateReport, NupmCompatibility, NupmHomeResolution,
-    NupmInspectionReport, NupmStatusReport,
+    compare_import, count_drifted_imports, format_drift_report, format_inspection_json,
+    format_inspection_report, format_status_json, format_status_report,
+    import_manifest_with_runner, inspect_path, resolve_nupm_home, scan_nupm_home,
+    NupmCandidateReport, NupmHomeResolution, NupmInspectionReport, NupmOutcome, NupmStatusReport,
 };
 use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
@@ -32,6 +32,10 @@ pub enum NupmCommands {
 pub struct StatusArgs {
     #[arg(long)]
     pub nupm_home: Option<std::path::PathBuf>,
+
+    /// Emit JSON instead of human-readable text
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Parser)]
@@ -50,6 +54,10 @@ pub struct InspectArgs {
     /// Exit with code 1 if any inspected package is not import-eligible
     #[arg(long)]
     pub exit_on_ineligible: bool,
+
+    /// Emit JSON instead of human-readable text
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Parser)]
@@ -210,47 +218,56 @@ fn run_status(args: &StatusArgs, numan_root: &Path, out: &mut dyn Write) -> Resu
     let numan_nupm_imports = lockfile.count_nupm_imports();
     let source_drift_count = count_drifted_imports(numan_root)?;
 
-    match resolve_nupm_home(args.nupm_home.as_deref())? {
-        NupmHomeResolution::NotConfigured => {
-            let report = NupmStatusReport {
-                nupm_home: None,
-                home_not_configured: true,
-                modules_dir_present: false,
-                scripts_dir_present: false,
-                import_eligible: 0,
-                rejected_source: 0,
-                installed_only: 0,
-                script_entries: 0,
-                unsafe_entries: 0,
-                numan_nupm_imports,
-                source_drift_count,
-                name_overlap_count: 0,
-            };
-            format_status_report(&report, out)?;
-            Ok(())
-        }
+    let report = match resolve_nupm_home(args.nupm_home.as_deref())? {
+        NupmHomeResolution::NotConfigured => NupmStatusReport {
+            nupm_home: None,
+            home_not_configured: true,
+            modules_dir_present: false,
+            scripts_dir_present: false,
+            import_eligible: 0,
+            inspect_only: 0,
+            manual_migration_required: 0,
+            unsupported: 0,
+            installed_only: 0,
+            script_entries: 0,
+            unsafe_entries: 0,
+            numan_nupm_imports,
+            source_drift_count,
+            name_overlap_count: 0,
+            source_roots: Vec::new(),
+            installed_only_entries: Vec::new(),
+        },
         NupmHomeResolution::Found(home) => {
             let scan = scan_nupm_home(&home)?;
-            let (import_eligible, rejected_source) = count_source(&scan.source_roots);
+            let counts = count_source(&scan.source_roots);
             let name_overlap_count = count_name_overlap(numan_root, &lockfile, &scan.source_roots)?;
-            let report = NupmStatusReport {
+            NupmStatusReport {
                 nupm_home: Some(home.clone()),
                 home_not_configured: false,
                 modules_dir_present: home.join("modules").is_dir(),
                 scripts_dir_present: home.join("scripts").is_dir(),
-                import_eligible,
-                rejected_source,
+                import_eligible: counts.importable_now,
+                inspect_only: counts.inspect_only,
+                manual_migration_required: counts.manual_migration_required,
+                unsupported: counts.unsupported,
                 installed_only: scan.installed_only.len(),
                 script_entries: scan.script_entries,
                 unsafe_entries: scan.unsafe_entries,
                 numan_nupm_imports,
                 source_drift_count,
                 name_overlap_count,
-            };
-            format_status_report(&report, out)?;
-            Ok(())
+                source_roots: scan.source_roots,
+                installed_only_entries: scan.installed_only,
+            }
         }
+    };
+
+    if args.json {
+        writeln!(out, "{}", format_status_json(&report)?)?;
+    } else {
+        format_status_report(&report, out)?;
     }
+    Ok(())
 }
 
 fn count_name_overlap(
@@ -261,7 +278,7 @@ fn count_name_overlap(
     let imports = NupmImportsFile::load(numan_root)?;
     let mut count = 0usize;
     for root in source_roots {
-        if root.compatibility != NupmCompatibility::ImportableModule {
+        if root.assessment.outcome != NupmOutcome::ImportableNow {
             continue;
         }
         let Some(meta) = &root.metadata else {
@@ -312,7 +329,11 @@ fn run_inspect(args: &InspectArgs, out: &mut dyn Write) -> Result<()> {
             candidates,
             installed_only: scan.installed_only,
         };
-        format_inspection_report(&report, out)?;
+        if args.json {
+            writeln!(out, "{}", format_inspection_json(&report, Some(&home))?)?;
+        } else {
+            format_inspection_report(&report, out)?;
+        }
         ensure_eligible_if_requested(args.exit_on_ineligible, &report)?;
         Ok(())
     } else if let Some(path) = &args.path {
@@ -324,7 +345,11 @@ fn run_inspect(args: &InspectArgs, out: &mut dyn Write) -> Result<()> {
             candidates: vec![NupmCandidateReport { entry }],
             installed_only: vec![],
         };
-        format_inspection_report(&report, out)?;
+        if args.json {
+            writeln!(out, "{}", format_inspection_json(&report, None)?)?;
+        } else {
+            format_inspection_report(&report, out)?;
+        }
         ensure_eligible_if_requested(args.exit_on_ineligible, &report)?;
         Ok(())
     } else {
@@ -342,7 +367,7 @@ fn ensure_eligible_if_requested(
     let ineligible: Vec<String> = report
         .candidates
         .iter()
-        .filter(|c| c.entry.compatibility != NupmCompatibility::ImportableModule)
+        .filter(|c| c.entry.assessment.outcome != NupmOutcome::ImportableNow)
         .map(|c| {
             c.entry
                 .metadata
@@ -361,17 +386,29 @@ fn ensure_eligible_if_requested(
     );
 }
 
-fn count_source(roots: &[crate::nupm_compat::SourceRootEntry]) -> (usize, usize) {
-    let mut eligible = 0usize;
-    let mut rejected = 0usize;
+struct OutcomeCounts {
+    importable_now: usize,
+    inspect_only: usize,
+    manual_migration_required: usize,
+    unsupported: usize,
+}
+
+fn count_source(roots: &[crate::nupm_compat::SourceRootEntry]) -> OutcomeCounts {
+    let mut counts = OutcomeCounts {
+        importable_now: 0,
+        inspect_only: 0,
+        manual_migration_required: 0,
+        unsupported: 0,
+    };
     for r in roots {
-        if r.compatibility == NupmCompatibility::ImportableModule {
-            eligible += 1;
-        } else {
-            rejected += 1;
+        match r.assessment.outcome {
+            NupmOutcome::ImportableNow => counts.importable_now += 1,
+            NupmOutcome::InspectOnly => counts.inspect_only += 1,
+            NupmOutcome::ManualMigrationRequired => counts.manual_migration_required += 1,
+            NupmOutcome::Unsupported => counts.unsupported += 1,
         }
     }
-    (eligible, rejected)
+    counts
 }
 
 #[cfg(test)]
@@ -383,7 +420,10 @@ mod tests {
     fn status_not_configured_exits_ok_via_report() {
         let mut buf = Vec::new();
         let args = NupmArgs {
-            command: NupmCommands::Status(StatusArgs { nupm_home: None }),
+            command: NupmCommands::Status(StatusArgs {
+                nupm_home: None,
+                json: false,
+            }),
         };
         // Temporarily clear NUPM_HOME for test
         let prev = std::env::var_os("NUPM_HOME");
@@ -410,6 +450,7 @@ mod tests {
                 path: Some(path),
                 nupm_home: None,
                 exit_on_ineligible: true,
+                json: false,
             }),
         };
         assert!(execute(&args, root.path(), &mut buf).is_err());
@@ -427,6 +468,7 @@ mod tests {
                 path: Some(path),
                 nupm_home: None,
                 exit_on_ineligible: false,
+                json: false,
             }),
         };
         execute(&args, root.path(), &mut buf).unwrap();
@@ -447,6 +489,7 @@ mod tests {
                 path: Some(pkg),
                 nupm_home: None,
                 exit_on_ineligible: true,
+                json: false,
             }),
         };
         assert!(execute(&args, root.path(), &mut buf).is_err());

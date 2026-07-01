@@ -470,7 +470,7 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
         let public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &verifying_key.to_bytes(),
+            verifying_key.to_bytes(),
         );
         let mut trust = crate::core::trust::TrustStore {
             keys: std::collections::HashMap::new(),
@@ -493,7 +493,7 @@ mod tests {
         let signature = signing_key.sign(&canonical_bytes);
         let sig_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
         let envelope = crate::core::official_registry::RegistrySignature::new("custom", &sig_b64);
 
@@ -502,7 +502,7 @@ mod tests {
 
         let first_index = std::fs::read_to_string(reg_dir.join("index.json")).unwrap();
         assert!(first_index.contains("first"));
-        assert!(reg_dir.join("index.json.last-known-good").exists() == false);
+        assert!(!reg_dir.join("index.json.last-known-good").exists());
 
         // Second replace
         let index2 = RegistryIndex {
@@ -520,7 +520,7 @@ mod tests {
         let signature2 = signing_key.sign(&canonical_bytes2);
         let sig_b64_2 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature2.to_bytes(),
+            signature2.to_bytes(),
         );
         let envelope2 =
             crate::core::official_registry::RegistrySignature::new("custom", &sig_b64_2);
@@ -544,7 +544,7 @@ mod tests {
         let initial_verifying_key = initial_key.verifying_key();
         let initial_public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &initial_verifying_key.to_bytes(),
+            initial_verifying_key.to_bytes(),
         );
 
         // Successor key
@@ -552,7 +552,7 @@ mod tests {
         let successor_verifying_key = successor_key.verifying_key();
         let successor_public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &successor_verifying_key.to_bytes(),
+            successor_verifying_key.to_bytes(),
         );
 
         let mut trust = crate::core::trust::TrustStore {
@@ -582,7 +582,7 @@ mod tests {
         let signature = initial_key.sign(&canonical_bytes);
         let sig_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
         let envelope = crate::core::official_registry::RegistrySignature::new("custom", &sig_b64);
 
@@ -610,7 +610,7 @@ mod tests {
         let signature2 = successor_key.sign(&canonical_bytes2);
         let sig_b64_2 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature2.to_bytes(),
+            signature2.to_bytes(),
         );
         let envelope2 =
             crate::core::official_registry::RegistrySignature::new("successor", &sig_b64_2);

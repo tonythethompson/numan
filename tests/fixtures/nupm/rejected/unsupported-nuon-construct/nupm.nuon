@@ -1,0 +1,5 @@
+{
+    name: unsupported-nuon-construct
+    type: module
+    version: $bad
+}

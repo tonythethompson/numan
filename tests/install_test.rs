@@ -18,14 +18,14 @@ fn setup_trusted_key(root: &std::path::Path, registry_name: &str) -> SigningKey 
     let verifying_key = signing_key.verifying_key();
     let public_key_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &verifying_key.to_bytes(),
+        verifying_key.to_bytes(),
     );
 
     let mut trust = numan_cli::core::trust::TrustStore {
         keys: HashMap::new(),
     };
     trust.add_key(registry_name, &public_key_b64).unwrap();
-    trust.save(&root.to_path_buf()).unwrap();
+    trust.save(root).unwrap();
 
     signing_key
 }
@@ -60,7 +60,7 @@ fn create_signed_registry(
     let signature = signing_key.sign(&canonical_bytes);
     let sig_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &signature.to_bytes(),
+        signature.to_bytes(),
     );
     let envelope = RegistrySignature::new(registry_name, &sig_b64);
     std::fs::write(
@@ -276,7 +276,7 @@ fn integration_install_rejects_tampered_signature() {
     let signature = wrong_key.sign(&canonical_bytes);
     let sig_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &signature.to_bytes(),
+        signature.to_bytes(),
     );
     let envelope = RegistrySignature::new("test", &sig_b64);
     std::fs::write(

@@ -313,7 +313,7 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
         let public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &verifying_key.to_bytes(),
+            verifying_key.to_bytes(),
         );
         (signing_key, public_key_b64)
     }
@@ -323,7 +323,7 @@ mod tests {
         let signature = signing_key.sign(&canonical_bytes);
         let signature_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
         RegistrySignature::new("test-key", &signature_b64)
     }
