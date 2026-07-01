@@ -4,7 +4,7 @@
 
 - Follow [Semantic Versioning](https://semver.org/).
 - Single source of truth: `version` in `Cargo.toml` (crate `numan-cli`, binary `numan`).
-- MSRV: `rust-version` in `Cargo.toml` (currently **1.85**); enforced in CI with `cargo +1.85 check --locked`.
+- MSRV: `rust-version` in `Cargo.toml` (currently **1.88**); enforced in CI with `cargo +1.88 check --locked`.
 - Git tags use a `v` prefix: `v0.1.0`.
 
 ## Changelog

@@ -47,7 +47,7 @@ Numan is **early-stage** (v0.1.2). Core install, activate, update, remove, gc, r
 
 ### From source
 
-Requires [Rust](https://rustup.rs/) **1.85+** (stable recommended) and a Nushell binary on `PATH` for activation commands.
+Requires [Rust](https://rustup.rs/) **1.88+** (stable recommended) and a Nushell binary on `PATH` for activation commands.
 
 ```bash
 git clone https://github.com/tonythethompson/numan.git

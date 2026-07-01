@@ -37,7 +37,7 @@ jobs:
           repo: ${{ github.repository }}
           wait-interval: 30
           allowed-conclusions: success
-          check-regexp: ^(Test \(.*\)|Clippy|Format|MSRV \(1\.85\)|Package|Deny|Real-Nu acceptance \(.*\))$
+          check-regexp: ^(Test \(.*\)|Clippy|Format|MSRV \(1\.88\)|Package|Deny|Real-Nu acceptance \(.*\))$
 
   preflight:
     name: Release preflight

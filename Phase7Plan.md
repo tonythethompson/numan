@@ -67,7 +67,7 @@ Shipped:
 ## 7.5 CI / release hardening ✅
 
 1. **Release gates on green CI** — tag pushes wait for CI check success; preflight runs fmt/clippy/test/package before build
-2. **MSRV pin** — `rust-version = "1.85"` in `Cargo.toml` + MSRV CI job (`cargo +1.85 --locked`)
+2. **MSRV pin** — `rust-version = "1.88"` in `Cargo.toml` + MSRV CI job (`cargo +1.88 --locked`)
 3. **PR checks** — `cargo deny` (advisories/licenses) and `cargo package --locked` on CI
 4. **Release checklist** — [docs/RELEASING.md](docs/RELEASING.md) documents local pre-tag commands; CI also runs on tag pushes
 
