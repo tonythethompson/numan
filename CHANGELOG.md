@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- CI: MSRV job (1.76), `cargo deny`, `cargo package` checks; CI runs on version tags
+- CI: MSRV job (1.85), `cargo deny`, `cargo package` checks; CI runs on version tags
 - Release workflow gates on green CI + preflight (fmt, clippy, test, package) before build/publish
 - Homebrew formula (`packaging/homebrew/numan.rb`) and winget manifests for v0.1.2
 - [docs/PACKAGING.md](docs/PACKAGING.md) — packaging update checklist
