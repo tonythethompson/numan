@@ -2,7 +2,8 @@
 
 [advisories]
 version = 2
-ignore = []
+# indicatif → number_prefix; no fixed release yet (RUSTSEC-2025-0119)
+ignore = ["RUSTSEC-2025-0119"]
 
 [licenses]
 version = 2
@@ -13,6 +14,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
+    "MPL-2.0",
     "Unicode-3.0",
     "Zlib",
     "OpenSSL",
