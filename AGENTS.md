@@ -151,9 +151,10 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 6 complete: compatibility matrix (`docs/nupm-compatibility.md`); CI acceptance job for `#[ignore]` real-Nu tests
 - [x] Phase 7.1: Distribution baseline — GitHub Releases, crates.io, `numan init`, real-Nu CI ([Phase7Plan.md](Phase7Plan.md))
 - [x] Phase 7.2: `numan doctor` ([docs/numan-doctor.md](docs/numan-doctor.md))
-- [x] Phase 7.3 (partial): shell completions + error UX hints ([Phase7Plan.md](Phase7Plan.md))
+- [x] Phase 7.3: shell completions + error UX hints + README `--help` audit ([Phase7Plan.md](Phase7Plan.md))
 - [x] Phase 7.4: Onboarding path — init checklist, README quick start ([Phase7Plan.md](Phase7Plan.md))
-- [ ] Phase 7.5+: CI hardening, wider distribution — see [Phase7Plan.md](Phase7Plan.md)
+- [x] Phase 7.5: CI hardening — MSRV, cargo deny/package, release gates ([Phase7Plan.md](Phase7Plan.md))
+- [x] Phase 7.6: Wider distribution — Homebrew formula, winget manifests ([docs/PACKAGING.md](docs/PACKAGING.md))
 
 ## Testing
 - Unit tests inline with source modules

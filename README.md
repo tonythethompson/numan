@@ -47,7 +47,7 @@ Numan is **early-stage** (v0.1.2). Core install, activate, update, remove, gc, r
 
 ### From source
 
-Requires [Rust](https://rustup.rs/) (stable) and a Nushell binary on `PATH` for activation commands.
+Requires [Rust](https://rustup.rs/) **1.88+** (stable recommended) and a Nushell binary on `PATH` for activation commands.
 
 ```bash
 git clone https://github.com/tonythethompson/numan.git
@@ -83,6 +83,38 @@ Expand-Archive numan-<version>-x86_64-pc-windows-msvc.zip -DestinationPath .
 ```
 
 Verify downloads with the `SHA256SUMS` file attached to each release.
+
+### From git (latest `master`)
+
+```bash
+cargo install --git https://github.com/tonythethompson/numan
+```
+
+Tracks the default branch; pin a tag with `--tag v0.1.2` for reproducible installs.
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb
+```
+
+See [packaging/homebrew/README.md](packaging/homebrew/README.md) for an optional dedicated tap workflow.
+
+### winget (Windows)
+
+After the package is listed in [winget-pkgs](https://github.com/microsoft/winget-pkgs):
+
+```powershell
+winget install TonyTheThompson.Numan
+```
+
+Until then, install from the in-repo manifest (from a clone of this repository):
+
+```powershell
+winget install --manifest .\packaging\winget\manifests\t\TonyTheThompson\Numan\0.1.2
+```
+
+See [packaging/winget/README.md](packaging/winget/README.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ### crates.io
 
@@ -230,6 +262,8 @@ Payload paths are immutable: `packages/<type>/<owner>/<name>/<version>-<hash>/`.
 
 ## Command reference
 
+Global flag: `--root <path>` — override the Numan root directory (all commands).
+
 | Command | Description |
 |---------|-------------|
 | `numan init [--refresh]` | Probe Nu and cache paths for activation |
@@ -251,7 +285,21 @@ Payload paths are immutable: `packages/<type>/<owner>/<name>/<version>-<hash>/`.
 | `numan completions <shell>` | Generate bash, fish, zsh, or powershell completions |
 | `numan doctor [--fix] [--yes] [--json]` | Diagnose root health; optional safe repairs |
 
-Global flag: `--root <path>` — override the Numan root directory.
+### Common flags (by command)
+
+| Command | Flags |
+|---------|-------|
+| `install` | `--force` reinstall; `-v` / `--verbose` |
+| `activate` | `--yes` skip prompt; `--verbose`; `--list` status only; `--check` integrity only |
+| `deactivate` | `--yes` skip prompt; `--verbose` |
+| `update` | `--check` report only; `-v` / `--verbose` |
+| `remove` | `--force` remove despite active activation |
+| `gc` | `--dry-run` preview only |
+| `registry add` | `--key <base64-public-key>` (required) |
+| `nupm status` | `--nupm-home <path>` |
+| `nupm inspect` | `--all` scan home; `--nupm-home <path>`; `--exit-on-ineligible` fail on ineligible |
+| `nupm import` | `--as owner/name` (single import); `--manifest <file>` (batch); `--nupm-home <path>`; `--yes` skip consent |
+| `doctor` | `--fix` apply safe repairs; `--yes` skip confirm tier; `--json` machine output; `--nupm-home <path>` |
 
 Run `numan <command> --help` for full flag documentation.
 
@@ -325,7 +373,8 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | Source builds, lockfile rollback snapshots | 🔜 Planned |
 | Distribution (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
 | Doctor, completions, onboarding | ✅ [Phase 7.2–7.4](Phase7Plan.md) |
-| CI hardening, wider distribution | 🔜 [Phase 7.5+](Phase7Plan.md) |
+| CI hardening, `--help` audit | ✅ [Phase 7.5](Phase7Plan.md) |
+| Wider distribution (Homebrew, winget) | ✅ [Phase 7.6](Phase7Plan.md) |
 
 ---
 

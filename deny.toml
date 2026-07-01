@@ -1,0 +1,31 @@
+# cargo-deny configuration — see https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+version = 2
+# indicatif → number_prefix; no fixed release yet (RUSTSEC-2025-0119)
+ignore = ["RUSTSEC-2025-0119"]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+    "OpenSSL",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"

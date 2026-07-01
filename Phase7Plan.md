@@ -12,10 +12,10 @@ Take Numan from feature-complete core (Phases 1–6) to a distributable, polishe
 |-------|--------|--------|
 | 7.1 | Distribution baseline | ✅ Done |
 | 7.2 | `numan doctor` | ✅ Done |
-| 7.3 | Daily-driver polish | 🚧 Partial — completions + error UX shipped; `--help` audit remains |
+| 7.3 | Daily-driver polish | ✅ Done |
 | 7.4 | Onboarding path | ✅ Done |
-| 7.5 | CI / release hardening | 🔜 Planned |
-| 7.6 | Wider distribution | 🔜 Optional |
+| 7.5 | CI / release hardening | ✅ Done |
+| 7.6 | Wider distribution | ✅ Done (Homebrew, winget; Scoop deferred) |
 
 ---
 
@@ -44,16 +44,13 @@ Shipped:
 
 ---
 
-## 7.3 Daily-driver polish 🚧
+## 7.3 Daily-driver polish ✅
 
-Shipped (partial):
+Shipped:
 
 1. **Shell completions** — `numan completions bash|fish|zsh|powershell` via `clap_complete`
 2. **Error message UX pass** — `init`, `install`, `activate`, `nupm import` use `util::hints` aligned with doctor `fix` strings
-
-Remaining:
-
-3. **`--help` audit** — README command table vs clap flags
+3. **`--help` audit** — README command table + common flags aligned with clap definitions
 
 ---
 
@@ -67,21 +64,25 @@ Shipped:
 
 ---
 
-## 7.5 CI / release hardening 🔜
+## 7.5 CI / release hardening ✅
 
-1. Gate release workflow on green `ci.yml`
-2. MSRV pin in `Cargo.toml` + CI
-3. Optional: `cargo deny`, `cargo package` on PRs
-4. Release checklist: `cargo fmt --check` before tag (lesson from v0.1.1)
+1. **Release gates on green CI** — tag pushes wait for CI check success; preflight runs fmt/clippy/test/package before build
+2. **MSRV pin** — `rust-version = "1.88"` in `Cargo.toml` + MSRV CI job (`cargo +1.88 --locked`)
+3. **PR checks** — `cargo deny` (advisories/licenses) and `cargo package --locked` on CI
+4. **Release checklist** — [docs/RELEASING.md](docs/RELEASING.md) documents local pre-tag commands; CI also runs on tag pushes
 
 ---
 
-## 7.6 Wider distribution (optional) 🔜
+## 7.6 Wider distribution ✅
 
-- Homebrew tap, Winget, Scoop manifests
-- Document `cargo install --git`
+Shipped:
 
-Lower priority until install-channel demand exists.
+1. **Homebrew** — `packaging/homebrew/numan.rb` (direct `--formula` URL install; optional tap documented)
+2. **winget** — `packaging/winget/manifests/t/TonyTheThompson/Numan/<version>/` (local `--manifest` install; winget-pkgs PR path documented)
+3. **`cargo install --git`** — documented in README
+4. **[docs/PACKAGING.md](docs/PACKAGING.md)** — release checksum update checklist
+
+Deferred: Scoop manifest (low demand).
 
 ---
 
