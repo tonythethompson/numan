@@ -471,4 +471,32 @@ mod tests {
     fn official_registry_is_placeholder() {
         assert!(OFFICIAL_REGISTRY.is_placeholder_key());
     }
+
+    /// Guards against a half-applied trust-root edit: key_id and
+    /// public_key_b64 must move off their placeholder values together, and
+    /// once real, the public key must be well-formed. This is the invariant
+    /// scripts/update-official-trust-root.sh enforces at edit time; this
+    /// test enforces it at build time regardless of how the field got set.
+    #[test]
+    fn official_registry_key_id_and_public_key_are_consistent() {
+        let key_id_is_placeholder = OFFICIAL_REGISTRY.key_id == "official-placeholder";
+        let public_key_is_placeholder = OFFICIAL_REGISTRY.public_key_b64 == "PLACEHOLDER";
+        assert_eq!(
+            key_id_is_placeholder, public_key_is_placeholder,
+            "key_id and public_key_b64 must both be placeholders or both be real values"
+        );
+
+        if !public_key_is_placeholder {
+            let bytes = base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                OFFICIAL_REGISTRY.public_key_b64,
+            )
+            .expect("OFFICIAL_REGISTRY.public_key_b64 must be valid base64");
+            assert_eq!(
+                bytes.len(),
+                32,
+                "OFFICIAL_REGISTRY.public_key_b64 must decode to 32 bytes"
+            );
+        }
+    }
 }
