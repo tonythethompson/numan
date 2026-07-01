@@ -4,6 +4,7 @@
 
 - Follow [Semantic Versioning](https://semver.org/).
 - Single source of truth: `version` in `Cargo.toml` (crate `numan-cli`, binary `numan`).
+- MSRV: `rust-version` in `Cargo.toml` (currently **1.76**); enforced in CI.
 - Git tags use a `v` prefix: `v0.1.0`.
 
 ## Changelog
@@ -14,18 +15,46 @@
 
 ## Release checklist
 
+Run locally before tagging (matches CI + release preflight):
+
+```bash
+cargo fmt --all -- --check
+cargo clippy -- -D warnings
+cargo test
+cargo package --locked
+```
+
+Then:
+
 1. Bump `version` in `Cargo.toml`.
 2. Update `CHANGELOG.md` (new section, clear `[Unreleased]`).
-3. Merge to `master` and verify CI is green.
+3. Merge to `master` and **wait for CI to pass** on the release commit.
 4. Tag and push:
 
    ```bash
-   git tag v0.1.1
-   git push origin v0.1.1
+   git tag v0.1.3
+   git push origin master
+   git push origin v0.1.3
    ```
 
-5. Confirm the [Release workflow](https://github.com/tonythethompson/numan/actions/workflows/release.yml) uploads platform archives and `SHA256SUMS`.
-6. Confirm the **Publish to crates.io** job succeeds (requires `CRATES_IO_TOKEN` repository secret).
+5. The [Release workflow](https://github.com/tonythethompson/numan/actions/workflows/release.yml) waits for green CI on the tagged commit, runs preflight checks, then builds archives and publishes.
+6. Confirm platform archives and `SHA256SUMS` on GitHub Releases.
+7. Confirm the **Publish to crates.io** job succeeds (requires `CRATES_IO_TOKEN` repository secret).
+8. Update [packaging manifests](PACKAGING.md) (Homebrew `sha256`, winget version folder) from release `SHA256SUMS`.
+
+**Do not tag until CI is green on `master`.** The release workflow gates on CI check results for tag pushes; pushing a tag on a failing commit blocks publication.
+
+## CI jobs (reference)
+
+| Job | Purpose |
+|-----|---------|
+| Test | `cargo test` on Linux, Windows, macOS |
+| Clippy | `cargo clippy -- -D warnings` |
+| Format | `cargo fmt --all -- --check` |
+| MSRV | `cargo check` on pinned `rust-version` |
+| Package | `cargo package --locked` (crates.io manifest sanity) |
+| Deny | `cargo deny` advisories + licenses |
+| Real-Nu acceptance | `cargo test -- --ignored` with Nu 0.113 |
 
 ## crates.io
 
@@ -41,3 +70,5 @@
 | GitHub Release | Download archive from [Releases](https://github.com/tonythethompson/numan/releases) |
 | crates.io | `cargo install numan-cli` |
 | From source | `cargo install --path .` or `cargo install --git https://github.com/tonythethompson/numan` |
+| Homebrew | See [PACKAGING.md](PACKAGING.md) |
+| winget | See [PACKAGING.md](PACKAGING.md) |

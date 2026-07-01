@@ -18,13 +18,49 @@ on:
 
 permissions:
   contents: write
+  checks: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify-ci:
+    name: Wait for green CI
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for CI checks on tagged commit
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          repo: ${{ github.repository }}
+          wait-interval: 30
+          allowed-conclusions: success
+          check-regexp: ^(Test \(.*\)|Clippy|Format|MSRV \(1\.76\)|Package|Deny|Real-Nu acceptance \(.*\))$
+
+  preflight:
+    name: Release preflight
+    needs: [verify-ci]
+    if: always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+      - name: Package manifest
+        run: cargo package --locked
+
   build:
     name: Build (${{ matrix.target }})
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -137,6 +173,7 @@ jobs:
 
   publish-crate:
     name: Publish to crates.io
+    needs: preflight
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:

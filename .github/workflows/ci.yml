@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [master, main]
+    tags:
+      - "v*.*.*"
   pull_request:
     branches: [master, main]
 
@@ -43,6 +45,31 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  msrv:
+    name: MSRV (1.76)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.76
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --all-targets
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo package --locked
+
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
 
   real-nu-acceptance:
     name: Real-Nu acceptance (${{ matrix.os }})

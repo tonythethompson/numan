@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI: MSRV job (1.76), `cargo deny`, `cargo package` checks; CI runs on version tags
+- Release workflow gates on green CI + preflight (fmt, clippy, test, package) before build/publish
+- Homebrew formula (`packaging/homebrew/numan.rb`) and winget manifests for v0.1.2
+- [docs/PACKAGING.md](docs/PACKAGING.md) — packaging update checklist
+
+### Changed
+
+- README command reference: common flags table aligned with clap `--help`
+- README: `cargo install --git`, Homebrew, and winget install paths
+- [docs/RELEASING.md](docs/RELEASING.md): pre-tag local checklist and CI gate documentation
+
 ## [0.1.2] - 2026-06-30
 
 ### Added
