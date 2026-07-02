@@ -26,21 +26,23 @@ packages — not just `tonythethompson/numan-registry`. It is a client-side
 
 ### Relationship to existing work
 
-This formalizes and extends invariants and mechanisms that already exist:
+This separates invariants and mechanisms that already exist from follow-up
+requirements this ADR introduces:
 
 - **Already implemented, unchanged by this ADR:**
   - Install is inert; only `activate` touches Nu (`CLAUDE.md` Critical Rule 1).
-  - Registry signatures are mandatory (Ed25519, `src/core/official_registry.rs`,
-    `src/core/registry.rs`).
+  - Ed25519 trust-store and registry verification primitives exist in
+    `src/core/trust.rs` and `src/core/registry.rs`
+    (`RegistryManager::verify_and_load`, `RegistryManager::load_verified`).
   - Artifact SHA-256 is mandatory for plugin artifacts (Critical Rule 4).
   - Lockfile snapshots before mutation; activation uses journal recovery
     (Critical Rule 5, Phase 3).
-  - Registry sync already does atomic index promotion with last-known-good
-    fallback on verification failure
-    (`RegistryManager::last_known_good_index_path`,
-    `load_last_known_good`, `src/core/registry.rs`) — the "Registry Trust
-    Requirements" section below records this as a standing requirement
-    rather than proposing new behavior.
+- **Not yet implemented — follow-up requirement from this ADR:**
+  atomic verified registry sync that downloads index+signature to temporary
+  paths, verifies/parses the downloaded bytes, and preserves the active cache
+  on failure. Today `numan registry sync` is implemented in
+  `src/cmd/registry.rs` and does not provide that promotion/rollback behavior;
+  the "Registry Trust Requirements" section below records the target behavior.
 - **A distinct, narrower layer this ADR does not replace:**
   `docs/nupm-compatibility.md` owns the *mechanics* of importing one
   specific source format (`nupm.nuon` parsing, `NupmOutcome`,
@@ -51,7 +53,7 @@ This formalizes and extends invariants and mechanisms that already exist:
   package's origin." A package can simultaneously be `importable_now` in
   nupm-compatibility terms and `unreviewed discovery result` in this ADR's
   terms — the two taxonomies compose, they don't collapse into one.
-- **Not yet implemented — genuinely new work:**
+- **Also not yet implemented — genuinely new work:**
   the package status taxonomy, the metadata model fields (`fork_of`,
   `patches`, `maintenance_status`, etc.), and the `inspect` / `audit` /
   `provenance` / `compatibility` UX surface. `src/cmd/info.rs` is the
@@ -207,7 +209,7 @@ verbose output or external docs only — extend `numan info` (or add
 `inspect` / `audit` / `provenance` / `compatibility`) to surface it
 directly.
 
-### Registry trust requirements (standing requirement, largely already met)
+### Registry trust requirements (target behavior, partially implemented)
 
 Registry sync must: download index+signature to temporary paths; require a
 signature for trusted registries; verify against the configured Ed25519
@@ -233,8 +235,7 @@ Do not begin by creating forks. Sequence:
 1. This ADR and status taxonomy.
 2. Versioned package metadata schema.
 3. `inspect` / `audit` output exposing provenance and maintenance state.
-4. Atomic verified registry sync (already implemented — confirm coverage
-   and add regression tests tied explicitly to this ADR).
+4. Atomic verified registry sync with active-cache preservation on failure.
 5. CI evidence capture for verified artifacts.
 6. Temporary compatibility-patch workflow.
 7. Maintained-fork workflow, only after the above exists.
