@@ -29,10 +29,10 @@ pub struct OfficialRegistry {
 pub const OFFICIAL_REGISTRY: OfficialRegistry = OfficialRegistry {
     name: "official",
     production_url: "https://tonythethompson.github.io/numan-registry/index.json",
-    key_id: "official-placeholder",
+    key_id: "official-2026-07-01",
     // Intentionally invalid base64; any attempt to verify a real signature with
     // this placeholder will fail with a clear error.
-    public_key_b64: "PLACEHOLDER",
+    public_key_b64: "1F0STZT/Fk4OiP/7Hqs3/MurixBKoe7GYVoCto2/mCc=",
 };
 
 impl OfficialRegistry {
@@ -467,9 +467,15 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("bad-key"));
     }
 
+    /// Guards the post-cutover state: the built-in trust root is the real
+    /// production key, not a placeholder. Before the production cutover,
+    /// this asserted the opposite (is_placeholder_key() == true); flip it
+    /// back only if the trust root is ever deliberately reset to
+    /// placeholder (e.g. before the real key exists again after a full
+    /// re-provision).
     #[test]
-    fn official_registry_is_placeholder() {
-        assert!(OFFICIAL_REGISTRY.is_placeholder_key());
+    fn official_registry_is_not_placeholder() {
+        assert!(!OFFICIAL_REGISTRY.is_placeholder_key());
     }
 
     /// Guards against a half-applied trust-root edit: key_id and
