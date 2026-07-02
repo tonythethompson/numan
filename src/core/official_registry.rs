@@ -29,17 +29,16 @@ pub struct OfficialRegistry {
 pub const OFFICIAL_REGISTRY: OfficialRegistry = OfficialRegistry {
     name: "official",
     production_url: "https://tonythethompson.github.io/numan-registry/index.json",
-    key_id: "official-2026-07-01",
-    // Intentionally invalid base64; any attempt to verify a real signature with
-    // this placeholder will fail with a clear error.
-    public_key_b64: "1F0STZT/Fk4OiP/7Hqs3/MurixBKoe7GYVoCto2/mCc=",
+    key_id: "official-placeholder",
+    // Placeholder sentinel; updated by scripts/update-official-trust-root.sh during cutover.
+    public_key_b64: "PLACEHOLDER",
 };
 
 impl OfficialRegistry {
     /// Returns true when the built-in key has not been replaced with a real
     /// production key yet.
     pub fn is_placeholder_key(&self) -> bool {
-        self.public_key_b64 == "PLACEHOLDER"
+        self.key_id == "official-placeholder" || self.public_key_b64 == "PLACEHOLDER"
     }
 }
 
