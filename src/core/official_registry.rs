@@ -227,7 +227,7 @@ pub struct VerifiedIndex {
 /// - The `key_id` is present in the trust root.
 /// - The signature is valid over the canonical JSON bytes of the index.
 /// - The index declares a recognized `schema_version`.
-/// - The declared SHA-256 of the canonical bytes matches.
+/// - Computes `index_sha256` as the SHA-256 of the canonical bytes.
 ///
 /// Returns the parsed index, the key used, and any successor keys declared in
 /// the signed index.
