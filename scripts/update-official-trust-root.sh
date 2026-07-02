@@ -116,8 +116,17 @@ if [[ -n "${URL}" ]] && ! [[ "${URL}" =~ ^https:// ]]; then
   exit 1
 fi
 
-CURRENT_KEY_ID="$(grep -oP '(?<=key_id: ")[^"]*' "${TARGET_FILE}" | head -1)"
-CURRENT_PUBLIC_KEY="$(grep -oP '(?<=public_key_b64: ")[^"]*' "${TARGET_FILE}" | head -1)"
+read -r CURRENT_KEY_ID CURRENT_PUBLIC_KEY < <(
+  python3 - "${TARGET_FILE}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], "r", encoding="utf-8").read()
+key_id = re.search(r'key_id:\s*"([^"]+)"', text).group(1)
+pub = re.search(r'public_key_b64:\s*"([^"]+)"', text).group(1)
+print(key_id, pub)
+PY
+)
 
 if [[ "${CURRENT_KEY_ID}" != "official-placeholder" && "${CURRENT_PUBLIC_KEY}" != "PLACEHOLDER" && "${FORCE}" -ne 1 ]]; then
   echo "FAIL: ${TARGET_FILE} already has a non-placeholder trust root (key_id=${CURRENT_KEY_ID})." >&2
