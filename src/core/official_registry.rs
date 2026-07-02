@@ -467,16 +467,12 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("bad-key"));
     }
 
-    /// Guards the post-cutover state: the built-in trust root is the real
-    /// production key, not a placeholder. Before the production cutover,
-    /// this asserted the opposite (is_placeholder_key() == true); flip it
-    /// back only if the trust root is ever deliberately reset to
-    /// placeholder (e.g. before the real key exists again after a full
-    /// re-provision).
-    #[test]
-    fn official_registry_is_not_placeholder() {
-        assert!(!OFFICIAL_REGISTRY.is_placeholder_key());
-    }
+/// Guards the pre-cutover state: the built-in trust root must remain a
+/// placeholder until the production key and URL are provisioned and committed.
+#[test]
+fn official_registry_is_placeholder_in_draft() {
+    assert!(OFFICIAL_REGISTRY.is_placeholder_key());
+}
 
     /// Guards against a half-applied trust-root edit: key_id and
     /// public_key_b64 must move off their placeholder values together, and
