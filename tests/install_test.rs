@@ -1,5 +1,6 @@
 use ed25519_dalek::{Signer, SigningKey};
 use numan_cli::core::nu_version::NuVersion;
+use numan_cli::core::official_registry::RegistrySignature;
 use numan_cli::core::package::{
     Artifact, Package, PackageType, RegistryIndex, ScopedId, TargetArtifact, VersionEntry,
 };
@@ -37,26 +38,36 @@ fn create_signed_registry(
     signing_key: &SigningKey,
 ) -> (String, String) {
     let index = RegistryIndex {
-        version: 1,
+        schema_version: 1,
         updated_at: "2026-06-27T00:00:00Z".to_string(),
         registry_revision: Some("abc123".to_string()),
+        trust: None,
         packages,
     };
 
     let content = serde_json::to_string_pretty(&index).unwrap();
-    let index_sha256 = numan_cli::core::integrity::compute_sha256(content.as_bytes());
+    let canonical_bytes = numan_cli::core::official_registry::canonical_json_bytes(
+        &serde_json::from_str(&content).unwrap(),
+    )
+    .unwrap();
+    let index_sha256 = numan_cli::core::integrity::compute_sha256(&canonical_bytes);
 
     let reg_dir = root.join("registry").join(registry_name);
     std::fs::create_dir_all(&reg_dir).unwrap();
     std::fs::write(reg_dir.join("index.json"), &content).unwrap();
 
-    // Sign the raw bytes
-    let signature = signing_key.sign(content.as_bytes());
+    // Sign the canonical JSON bytes and write a structured envelope.
+    let signature = signing_key.sign(&canonical_bytes);
     let sig_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
         &signature.to_bytes(),
     );
-    std::fs::write(reg_dir.join("index.json.sig"), &sig_b64).unwrap();
+    let envelope = RegistrySignature::new(registry_name, &sig_b64);
+    std::fs::write(
+        reg_dir.join("index.json.sig"),
+        serde_json::to_string_pretty(&envelope).unwrap(),
+    )
+    .unwrap();
 
     (index_sha256, index.registry_revision.unwrap())
 }
@@ -82,7 +93,7 @@ fn integration_full_install_from_signed_registry() {
     let root = tmp.path().to_path_buf();
 
     // Setup: trusted key
-    let signing_key = setup_trusted_key(&root, "official");
+    let signing_key = setup_trusted_key(&root, "test");
 
     // Setup: plugin artifact
     let artifacts_dir = root.join("artifacts");
@@ -128,12 +139,12 @@ fn integration_full_install_from_signed_registry() {
     };
 
     let (_index_sha, _revision) =
-        create_signed_registry(&root, "official", vec![package], &signing_key);
+        create_signed_registry(&root, "test", vec![package], &signing_key);
 
     // Setup: config
     std::fs::write(
         root.join("config.toml"),
-        "[general]\ndefault_registry = \"official\"\n",
+        "[general]\ndefault_registry = \"test\"\n",
     )
     .unwrap();
 
@@ -189,12 +200,13 @@ fn integration_install_rejects_unsigned_registry() {
     let root = tmp.path().to_path_buf();
 
     // Create unsigned registry (no .sig file)
-    let reg_dir = root.join("registry/official");
+    let reg_dir = root.join("registry/test");
     std::fs::create_dir_all(&reg_dir).unwrap();
     let index = RegistryIndex {
-        version: 1,
+        schema_version: 1,
         updated_at: "2026-06-27T00:00:00Z".to_string(),
         registry_revision: None,
+        trust: None,
         packages: vec![],
     };
     std::fs::write(
@@ -204,7 +216,7 @@ fn integration_install_rejects_unsigned_registry() {
     .unwrap();
     std::fs::write(
         root.join("config.toml"),
-        "[general]\ndefault_registry = \"official\"\n",
+        "[general]\ndefault_registry = \"test\"\n",
     )
     .unwrap();
 
@@ -239,33 +251,43 @@ fn integration_install_rejects_tampered_signature() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
 
-    let _signing_key = setup_trusted_key(&root, "official");
+    let _signing_key = setup_trusted_key(&root, "test");
 
     // Create index
     let index = RegistryIndex {
-        version: 1,
+        schema_version: 1,
         updated_at: "2026-06-27T00:00:00Z".to_string(),
         registry_revision: Some("abc123".to_string()),
+        trust: None,
         packages: vec![],
     };
     let content = serde_json::to_string_pretty(&index).unwrap();
+    let canonical_bytes = numan_cli::core::official_registry::canonical_json_bytes(
+        &serde_json::from_str(&content).unwrap(),
+    )
+    .unwrap();
 
-    let reg_dir = root.join("registry/official");
+    let reg_dir = root.join("registry/test");
     std::fs::create_dir_all(&reg_dir).unwrap();
     std::fs::write(reg_dir.join("index.json"), &content).unwrap();
 
     // Sign with a DIFFERENT key
     let wrong_key = SigningKey::generate(&mut OsRng);
-    let signature = wrong_key.sign(content.as_bytes());
+    let signature = wrong_key.sign(&canonical_bytes);
     let sig_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
         &signature.to_bytes(),
     );
-    std::fs::write(reg_dir.join("index.json.sig"), &sig_b64).unwrap();
+    let envelope = RegistrySignature::new("test", &sig_b64);
+    std::fs::write(
+        reg_dir.join("index.json.sig"),
+        serde_json::to_string_pretty(&envelope).unwrap(),
+    )
+    .unwrap();
 
     std::fs::write(
         root.join("config.toml"),
-        "[general]\ndefault_registry = \"official\"\n",
+        "[general]\ndefault_registry = \"test\"\n",
     )
     .unwrap();
 
@@ -299,7 +321,7 @@ fn integration_resolve_exact_rejects_incompatible() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
 
-    let signing_key = setup_trusted_key(&root, "official");
+    let signing_key = setup_trusted_key(&root, "test");
 
     let package = Package {
         id: ScopedId::new("test", "plugin"),
@@ -337,10 +359,10 @@ fn integration_resolve_exact_rejects_incompatible() {
         }],
     };
 
-    create_signed_registry(&root, "official", vec![package], &signing_key);
+    create_signed_registry(&root, "test", vec![package], &signing_key);
     std::fs::write(
         root.join("config.toml"),
-        "[general]\ndefault_registry = \"official\"\n",
+        "[general]\ndefault_registry = \"test\"\n",
     )
     .unwrap();
 
@@ -375,7 +397,7 @@ fn integration_snapshot_before_install() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
 
-    let signing_key = setup_trusted_key(&root, "official");
+    let signing_key = setup_trusted_key(&root, "test");
 
     let artifacts_dir = root.join("artifacts");
     std::fs::create_dir_all(&artifacts_dir).unwrap();
@@ -418,10 +440,10 @@ fn integration_snapshot_before_install() {
         }],
     };
 
-    create_signed_registry(&root, "official", vec![package.clone()], &signing_key);
+    create_signed_registry(&root, "test", vec![package.clone()], &signing_key);
     std::fs::write(
         root.join("config.toml"),
-        "[general]\ndefault_registry = \"official\"\n",
+        "[general]\ndefault_registry = \"test\"\n",
     )
     .unwrap();
 
@@ -488,7 +510,7 @@ fn integration_snapshot_before_install() {
     };
 
     // Re-create registry with both packages
-    create_signed_registry(&root, "official", vec![package, package2], &signing_key);
+    create_signed_registry(&root, "test", vec![package, package2], &signing_key);
 
     // Second install — should snapshot before mutation
     transaction::install_package("test/other", None, &options).unwrap();
