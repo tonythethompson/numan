@@ -8,6 +8,8 @@ This document is the **versioned compatibility contract** for Numan's nupm inter
 
 **Phase 6.1 ships:** read-only `numan nupm status` and `numan nupm inspect`. Phase 6.2 adds `numan nupm import`. Phase 6.3 adds drift detection, bulk manifest import, and activation verification.
 
+**Relationship to [ADR 0001](adr/0001-ecosystem-trust-upstream-contribution-fork-stewardship.md):** this document owns the *mechanics* of importing one specific source format — `nupm.nuon` parsing, `NupmOutcome`/`NupmReasonCode`, and import provenance. ADR 0001 owns the orthogonal question of trust and maintenance relationship (upstream / patched / forked / unreviewed / quarantined) that applies across all package sources, nupm included. A package's `NupmOutcome` and its ADR 0001 status class are independent fields, not the same taxonomy.
+
 ---
 
 ## Pinned nupm revision
