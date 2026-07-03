@@ -43,6 +43,7 @@ pub fn execute(args: &InstallArgs, root: &PathBuf) -> Result<()> {
         force: args.force,
         verbose: args.verbose,
         registry_name: None,
+        snapshot_trigger: crate::state::snapshot::SnapshotTrigger::Install,
     };
 
     let version = if args.package.contains('@') {

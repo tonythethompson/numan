@@ -161,6 +161,8 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
             promoted_payload_path: None,
             batch_package_ids: Vec::new(),
             batch_staging_dirs: Vec::new(),
+            target_snapshot_id: None,
+            pre_rollback_snapshot_id: None,
         };
         journal.save(root)?;
 
@@ -171,6 +173,7 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
             force: false,
             verbose: args.verbose,
             registry_name: Some(&update.registry_name),
+            snapshot_trigger: crate::state::snapshot::SnapshotTrigger::Update,
         };
 
         match transaction::install_package(&update.package_id, Some(&update.to_version), &options) {

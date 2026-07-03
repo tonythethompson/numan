@@ -344,6 +344,8 @@ fn begin_import_journal(
         promoted_payload_path: None,
         batch_package_ids: batch_package_ids.to_vec(),
         batch_staging_dirs: Vec::new(),
+        target_snapshot_id: None,
+        pre_rollback_snapshot_id: None,
     };
     journal.save(root)?;
     Ok(journal)
@@ -520,9 +522,18 @@ fn commit_imports(
     journal: &mut PendingLifecycle,
 ) -> Result<()> {
     let mut lockfile = Lockfile::load(root)?;
-    if !lockfile.is_empty() {
-        lockfile.snapshot(root)?;
-    }
+    crate::state::snapshot::create_snapshot(
+        root,
+        crate::state::snapshot::SnapshotReason::PreMutation,
+        match journal.op {
+            LifecycleOp::NupmImportManifest => {
+                crate::state::snapshot::SnapshotTrigger::NupmImportManifest
+            }
+            _ => crate::state::snapshot::SnapshotTrigger::NupmImport,
+        },
+        None,
+        None,
+    )?;
 
     let installed_at = format_timestamp();
     let mut imports = NupmImportsFile::load(root)?;
@@ -621,6 +632,7 @@ fn lifecycle_op_label(op: &LifecycleOp) -> &'static str {
         LifecycleOp::Remove => "remove",
         LifecycleOp::NupmImport => "nupm import",
         LifecycleOp::NupmImportManifest => "nupm manifest import",
+        LifecycleOp::Rollback => "snapshot rollback",
     }
 }
 

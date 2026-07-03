@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::state::lifecycle_journal::{LifecycleOp, LifecycleStage, PendingLifecycle};
 use crate::state::lockfile::Lockfile;
+use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::acquire_mutation_lock;
 
@@ -49,6 +50,16 @@ pub fn execute(args: &RemoveArgs, root: &Path) -> Result<()> {
     let payload_path = entry.payload_path().to_string();
     let payload_dir = root.join(&payload_path);
 
+    // Snapshot current state before any mutation or journal write so the
+    // pre-remove activation graph is recoverable via `numan snapshot rollback`.
+    create_snapshot(
+        root,
+        SnapshotReason::PreMutation,
+        SnapshotTrigger::Remove,
+        None,
+        None,
+    )?;
+
     // Write lifecycle journal before any mutation so a crash is detectable.
     let journal = PendingLifecycle {
         op: LifecycleOp::Remove,
@@ -63,13 +74,10 @@ pub fn execute(args: &RemoveArgs, root: &Path) -> Result<()> {
         promoted_payload_path: None,
         batch_package_ids: Vec::new(),
         batch_staging_dirs: Vec::new(),
+        target_snapshot_id: None,
+        pre_rollback_snapshot_id: None,
     };
     journal.save(root)?;
-
-    // Snapshot lockfile before mutation.
-    if !lockfile.is_empty() {
-        lockfile.snapshot(root)?;
-    }
 
     // Remove from lockfile (atomic write).
     lockfile.packages.remove(&args.package);

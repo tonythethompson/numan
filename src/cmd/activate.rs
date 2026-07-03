@@ -15,6 +15,7 @@ use crate::state::autoload_journal::{
 use crate::state::autoload_state::AutoloadState;
 use crate::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
 use crate::state::lockfile::{Lockfile, ModuleActivation, PluginActivation};
+use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::format_timestamp;
 use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
@@ -195,10 +196,14 @@ fn execute_with_registrar_and_runner(
         return Ok(());
     }
 
-    // 11. Snapshot lockfile once before first mutation
-    if !lockfile.is_empty() {
-        lockfile.snapshot(root)?;
-    }
+    // 11. Snapshot current state once before first mutation
+    let snapshot = create_snapshot(
+        root,
+        SnapshotReason::PreMutation,
+        SnapshotTrigger::Activate,
+        None,
+        None,
+    )?;
 
     let mut any_failed = false;
 
@@ -235,6 +240,7 @@ fn execute_with_registrar_and_runner(
             &module_targets,
             &managed_file_path,
             runner_ref,
+            Some(snapshot.id.clone()),
         )?;
         if module_failed {
             any_failed = true;
@@ -351,6 +357,7 @@ fn run_module_lane(
     targets: &[ModuleTarget],
     managed_file_path: &str,
     runner: &dyn CandidateRunner,
+    pre_mutation_snapshot_id: Option<String>,
 ) -> Result<bool> {
     let vendor_autoload_dir = nu_paths
         .vendor_autoload_dir
@@ -483,6 +490,7 @@ fn run_module_lane(
         desired_active_module_ids: desired_active_ids.clone(),
         targeted_module_ids: targeted_ids,
         created_at: format_timestamp(),
+        pre_mutation_snapshot_id,
     };
     journal.save(root)?;
 

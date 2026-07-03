@@ -4,3 +4,5 @@ pub mod journal;
 pub mod lifecycle_journal;
 pub mod lockfile;
 pub mod nupm_import;
+pub mod rollback;
+pub mod snapshot;

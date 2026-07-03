@@ -12,6 +12,7 @@ use crate::core::resolve::Resolver;
 use crate::install::download;
 use crate::install::extract::{self, ArchiveFormat, ExtractConfig};
 use crate::state::lockfile::{Lockfile, LockfileEntry};
+use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::hints::{self, CMD_REGISTRY_SYNC};
 use std::collections::BTreeMap;
 
@@ -23,6 +24,8 @@ pub struct InstallOptions<'a> {
     pub verbose: bool,
     /// Registry to install from. Defaults to the configured default registry.
     pub registry_name: Option<&'a str>,
+    /// Lifecycle boundary recorded on the pre-mutation snapshot.
+    pub snapshot_trigger: SnapshotTrigger,
 }
 
 #[derive(Debug)]
@@ -293,10 +296,14 @@ pub fn install_package(
         }
     }
 
-    // 9. Snapshot lockfile before mutation
-    if !lockfile.is_empty() {
-        lockfile.snapshot(options.root)?;
-    }
+    // 9. Snapshot lockfile before mutation (after download/extraction preflight succeeds).
+    create_snapshot(
+        options.root,
+        SnapshotReason::PreMutation,
+        options.snapshot_trigger,
+        None,
+        None,
+    )?;
 
     // 10. Atomic move from staging to final location
     // If --force, don't delete — create a new path (immutable)

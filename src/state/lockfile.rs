@@ -231,15 +231,6 @@ impl Lockfile {
         write_json_atomic(&lock_path, self)
     }
 
-    pub fn snapshot(&self, root: &Path) -> Result<String> {
-        let timestamp = crate::util::format_timestamp();
-        let snapshot_dir = root.join(format!("snapshots/{timestamp}"));
-        std::fs::create_dir_all(&snapshot_dir)?;
-        let lock_path = snapshot_dir.join("lockfile.json");
-        write_json_atomic(&lock_path, self)?;
-        Ok(timestamp)
-    }
-
     pub fn empty() -> Self {
         Self {
             version: 2,

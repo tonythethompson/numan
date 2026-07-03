@@ -86,6 +86,10 @@ pub struct PendingAutoload {
 
     /// Timestamp when the journal was first written.
     pub created_at: String,
+    /// Snapshot ID created before this mutation began. Used for rollback and
+    /// recovery boundaries.
+    #[serde(default)]
+    pub pre_mutation_snapshot_id: Option<String>,
 }
 
 impl PendingAutoload {
@@ -331,6 +335,7 @@ mod tests {
             desired_active_module_ids: vec!["owner/foo".to_string()],
             targeted_module_ids: vec!["owner/foo".to_string()],
             created_at: "0000000000000001".to_string(),
+            pre_mutation_snapshot_id: None,
         }
     }
 
