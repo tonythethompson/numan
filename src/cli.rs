@@ -50,6 +50,9 @@ pub enum Commands {
     /// Registry management
     #[command(subcommand)]
     Registry(cmd::registry::RegistryCommands),
+    /// Immutable activation snapshots and rollback
+    #[command(subcommand)]
+    Snapshot(cmd::snapshot::SnapshotCommands),
     /// Read-only nupm discovery and inspection
     Nupm(cmd::nupm::NupmArgs),
     /// Generate shell completion scripts

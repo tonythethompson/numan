@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::state::lifecycle_journal::{check_stale_journal, PendingLifecycle};
 use crate::state::lockfile::Lockfile;
+use crate::state::snapshot::{legacy_snapshot_payload_paths, list_snapshots, load_snapshot};
 use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Garbage-collect orphaned package directories
@@ -36,12 +37,28 @@ pub fn execute(args: &GcArgs, root: &Path) -> Result<()> {
 
     let lockfile = Lockfile::load(root)?;
 
-    // Build absolute paths of all referenced payload directories.
-    let referenced: HashSet<PathBuf> = lockfile
+    // Build absolute paths of all referenced payload directories: the current
+    // lockfile, every committed snapshot's lockfile, and legacy timestamp-only
+    // snapshots. Snapshots are live roots — a payload still referenced by a
+    // rollback target must survive GC even after it's been superseded in the
+    // current lockfile.
+    let mut referenced: HashSet<PathBuf> = lockfile
         .packages
         .values()
         .map(|e| root.join(e.payload_path()))
         .collect();
+
+    for manifest in list_snapshots(root).unwrap_or_default() {
+        if let Ok(snap) = load_snapshot(root, &manifest.id) {
+            referenced.extend(
+                snap.lockfile
+                    .packages
+                    .values()
+                    .map(|e| root.join(e.payload_path())),
+            );
+        }
+    }
+    referenced.extend(legacy_snapshot_payload_paths(root).unwrap_or_default());
 
     let packages_dir = root.join("packages");
     if !packages_dir.exists() {
@@ -271,5 +288,86 @@ mod tests {
 
         assert_eq!(orphans.len(), 1);
         assert_eq!(orphans[0], orphan_dir);
+    }
+
+    #[test]
+    fn gc_preserves_payload_referenced_only_by_a_snapshot() {
+        use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("state")).unwrap();
+
+        let old_payload = root.join("packages/modules/owner/pkg/1.0.0-abc12345");
+        std::fs::create_dir_all(&old_payload).unwrap();
+        std::fs::write(old_payload.join("mod.nu"), "# v1").unwrap();
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
+            "owner/pkg".to_string(),
+            crate::state::lockfile::LockfileEntry {
+                version: "1.0.0".to_string(),
+                package_type: "module".to_string(),
+                source: "archive".to_string(),
+                target: None,
+                artifact_url: None,
+                artifact_sha256: None,
+                executable_path: None,
+                archive_root: None,
+                include: None,
+                entry: Some("mod.nu".to_string()),
+                installed_at: "0".to_string(),
+                nu_version_at_install: None,
+                activation: None,
+                registry_url: None,
+                registry_revision: None,
+                index_sha256: None,
+                signing_key_fingerprint: None,
+                git_url: None,
+                git_rev: None,
+                cargo_name: None,
+                cargo_lock_sha256: None,
+                built_sha256: None,
+                payload_path: "packages/modules/owner/pkg/1.0.0-abc12345".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
+                module_activation: None,
+                module_import_mode: None,
+                locked_dependencies: BTreeMap::new(),
+            },
+        );
+        lockfile.save(root).unwrap();
+
+        // Snapshot the pre-update state, then simulate an update to 2.0.0 —
+        // the 1.0.0 payload is no longer referenced by the current lockfile,
+        // only by the snapshot.
+        create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Update,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let new_payload = root.join("packages/modules/owner/pkg/2.0.0-def67890");
+        std::fs::create_dir_all(&new_payload).unwrap();
+        std::fs::write(new_payload.join("mod.nu"), "# v2").unwrap();
+        let mut lockfile = Lockfile::load(root).unwrap();
+        let entry = lockfile.packages.get_mut("owner/pkg").unwrap();
+        entry.version = "2.0.0".to_string();
+        entry.payload_path = "packages/modules/owner/pkg/2.0.0-def67890".to_string();
+        lockfile.save(root).unwrap();
+
+        execute(&GcArgs { dry_run: false }, root).unwrap();
+
+        assert!(
+            old_payload.exists(),
+            "payload referenced only by a snapshot must survive GC"
+        );
+        assert!(new_payload.exists());
     }
 }

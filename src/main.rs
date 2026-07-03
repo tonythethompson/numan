@@ -28,6 +28,7 @@ fn main() -> anyhow::Result<()> {
         Commands::List => numan_cli::cmd::list::execute(&root),
         Commands::Init(args) => numan_cli::cmd::init::execute(&args, &root),
         Commands::Registry(cmd) => numan_cli::cmd::registry::execute(cmd, &root),
+        Commands::Snapshot(cmd) => numan_cli::cmd::snapshot::execute(cmd, &root),
         Commands::Nupm(args) => {
             let mut stdout = std::io::stdout();
             numan_cli::cmd::nupm::execute(&args, &root, &mut stdout)

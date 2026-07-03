@@ -225,6 +225,16 @@ numan gc --dry-run                # preview orphaned payload dirs
 numan gc                          # delete unreferenced payloads
 ```
 
+Numan snapshots activation state before `update`, `remove`, `activate`, and `deactivate`, so a bad change can be undone:
+
+```bash
+numan snapshot list
+numan snapshot inspect <id>       # affected packages, digests, payload check
+numan snapshot rollback <id>      # restore exactly that state
+```
+
+See [docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md) for scope, retention, and safety guarantees.
+
 #### 6. Verify health
 
 ```bash
@@ -276,6 +286,10 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | `numan update [--check] [pkg]` | Upgrade installed packages |
 | `numan remove [--force] <pkg>` | Remove from lockfile and delete payload |
 | `numan gc [--dry-run]` | Delete orphaned package directories |
+| `numan snapshot list` | List all committed activation snapshots |
+| `numan snapshot inspect <id>` | Show snapshot contents and rollback diff (read-only) |
+| `numan snapshot delete <id> [--yes]` | Delete a snapshot |
+| `numan snapshot rollback <id> [--yes]` | Restore exactly a stored snapshot |
 | `numan registry list\|sync\|add\|remove\|packages` | Registry management |
 | `numan nupm status` | Summarize nupm home and import eligibility |
 | `numan nupm inspect [--all] [path]` | Classify nupm packages at a path |

@@ -594,6 +594,157 @@ mod tests {
         );
     }
 
+    /// Build a minimal `NuPaths` + vendor-autoload dir + Numan-owned managed
+    /// file + lockfile module activation, so `create_snapshot` captures a
+    /// `Present` autoload projection. Returns the managed file path.
+    fn setup_module_activation(root: &Path, nu_hash: &str, content_suffix: &str) -> PathBuf {
+        let vendor_dir = root.join("nu_vendor_autoload");
+        std::fs::create_dir_all(&vendor_dir).unwrap();
+        let managed_path = vendor_dir.join("numan.nu");
+        let vendor_dir_str = vendor_dir.to_string_lossy().to_string();
+        let managed_path_str = managed_path.to_string_lossy().to_string();
+
+        std::fs::write(
+            &managed_path,
+            format!(
+                "{}{}",
+                crate::util::fs_safety::OWNERSHIP_MARKER,
+                content_suffix
+            ),
+        )
+        .unwrap();
+
+        let nu_paths = crate::nu::paths::NuPaths {
+            nu_executable: root.join("fake-nu").to_string_lossy().to_string(),
+            nu_version: "0.113.1".to_string(),
+            plugin_registry_path: root.join("plugin.msgpackz").to_string_lossy().to_string(),
+            nu_executable_hash: nu_hash.to_string(),
+            platform: "x86_64-linux-gnu".to_string(),
+            data_dir: None,
+            vendor_autoload_dirs: vec![vendor_dir_str.clone()],
+            vendor_autoload_dir: Some(vendor_dir_str.clone()),
+        };
+        nu_paths.save(root).unwrap();
+
+        install_fake_package(root, "owner/mod", "1.0.0-abc12345", "# module");
+        let mut lockfile = Lockfile::load(root).unwrap();
+        let entry = lockfile.packages.get_mut("owner/mod").unwrap();
+        entry.module_activation = Some(crate::state::lockfile::ModuleActivation {
+            entry_path: root
+                .join("packages/modules/owner/mod/1.0.0-abc12345/mod.nu")
+                .to_string_lossy()
+                .to_string(),
+            import_mode: crate::core::package::ModuleImportMode::Module,
+            vendor_autoload_dir: vendor_dir_str,
+            managed_file_path: managed_path_str,
+            nu_executable_sha256: nu_hash.to_string(),
+            nu_version: "0.113.1".to_string(),
+            activated_at: "0".to_string(),
+        });
+        entry.module_import_mode = Some(crate::core::package::ModuleImportMode::Module);
+        lockfile.save(root).unwrap();
+
+        managed_path
+    }
+
+    #[test]
+    fn rollback_restores_managed_autoload_file_content() {
+        let dir = make_root();
+        let root = dir.path();
+
+        let managed_path = setup_module_activation(root, "hash-1", "use \"v1\"\n");
+        let snap = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Deactivate,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Simulate a later mutation: managed file content changes (still
+        // Numan-owned) and the module is deactivated in the lockfile.
+        std::fs::write(
+            &managed_path,
+            format!("{}use \"v2\"\n", crate::util::fs_safety::OWNERSHIP_MARKER),
+        )
+        .unwrap();
+        let mut lockfile = Lockfile::load(root).unwrap();
+        lockfile
+            .packages
+            .get_mut("owner/mod")
+            .unwrap()
+            .module_activation = None;
+        lockfile.save(root).unwrap();
+
+        let runner = FakeCandidateRunner::success();
+        let report = rollback_to_snapshot(root, &snap.id, &runner).unwrap();
+        assert!(report.autoload_action.contains("restored"));
+
+        let restored_content = std::fs::read_to_string(&managed_path).unwrap();
+        assert!(restored_content.contains("v1"));
+        assert!(!restored_content.contains("v2"));
+    }
+
+    #[test]
+    fn rollback_refuses_to_overwrite_non_numan_owned_file() {
+        let dir = make_root();
+        let root = dir.path();
+
+        let managed_path = setup_module_activation(root, "hash-1", "use \"v1\"\n");
+        let snap = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Deactivate,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // The user replaces the managed file with their own hand-written
+        // content that lacks the Numan ownership marker.
+        std::fs::write(&managed_path, "# hand-edited by user\n").unwrap();
+
+        let runner = FakeCandidateRunner::success();
+        let err = rollback_to_snapshot(root, &snap.id, &runner).unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("owned")
+                || err.to_string().to_lowercase().contains("ownership"),
+            "{err}"
+        );
+
+        // The user's file must be untouched.
+        let content = std::fs::read_to_string(&managed_path).unwrap();
+        assert_eq!(content, "# hand-edited by user\n");
+    }
+
+    #[test]
+    fn rollback_refuses_nu_identity_mismatch_for_module_activation() {
+        let dir = make_root();
+        let root = dir.path();
+
+        setup_module_activation(root, "hash-1", "use \"v1\"\n");
+        let snap = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Deactivate,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Nu was upgraded — the cached identity no longer matches what the
+        // snapshot's autoload content was validated against.
+        let mut nu_paths = crate::nu::paths::NuPaths::load(root).unwrap();
+        nu_paths.nu_executable_hash = "hash-2".to_string();
+        nu_paths.save(root).unwrap();
+
+        let runner = FakeCandidateRunner::success();
+        let err = rollback_to_snapshot(root, &snap.id, &runner).unwrap_err();
+        assert!(err.to_string().contains("Nu identity"), "{err}");
+        assert!(PendingLifecycle::load(root).unwrap().is_none());
+    }
+
     #[test]
     fn rollback_refuses_root_mismatch() {
         let dir = make_root();
