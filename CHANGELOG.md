@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Registry index JSON: top-level `version` key renamed to `schema_version` on write; legacy cached `index.json` files using `version` still deserialize (`serde` alias)
 - README command reference: common flags table aligned with clap `--help`
 - README: `cargo install --git`, Homebrew, and winget install paths
 - [docs/RELEASING.md](docs/RELEASING.md): pre-tag local checklist and CI gate documentation

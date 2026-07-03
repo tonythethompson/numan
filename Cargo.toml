@@ -69,7 +69,7 @@ tempfile = "3"
 fd-lock = "4"
 
 # Stable collision-resistant snapshot IDs
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v7", "v4"] }
 
 # Git (for source builds and registry sync)
 git2 = "0.21"

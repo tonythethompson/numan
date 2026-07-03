@@ -765,6 +765,7 @@ fn lockfile_save_failure_after_replacement_leaves_replaced_journal() {
         desired_active_module_ids: vec![pkg_id.clone()],
         targeted_module_ids: vec![pkg_id.clone()],
         created_at: "0000000000000001".to_string(),
+        pre_mutation_snapshot_id: None,
     };
     // Ensure state dir exists before saving journal.
     std::fs::create_dir_all(env.root().join("state")).unwrap();
@@ -836,6 +837,7 @@ fn recovery_completes_updates_from_replaced_journal() {
         desired_active_module_ids: vec![pkg_id.clone()],
         targeted_module_ids: vec![pkg_id.clone()],
         created_at: "0000000000000001".to_string(),
+        pre_mutation_snapshot_id: None,
     };
     std::fs::create_dir_all(env.root().join("state")).unwrap();
     journal.save(env.root()).unwrap();

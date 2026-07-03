@@ -145,7 +145,7 @@ mod tests {
         let (signing_key, verifying_key) = test_keypair();
         let public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &verifying_key.to_bytes(),
+            verifying_key.to_bytes(),
         );
 
         let mut store = TrustStore {
@@ -159,7 +159,7 @@ mod tests {
         let signature = signing_key.sign(data);
         let sig_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
 
         assert!(store.verify_signature("test", data, &sig_b64).unwrap());
@@ -172,7 +172,7 @@ mod tests {
 
         let public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &verifying_key1.to_bytes(),
+            verifying_key1.to_bytes(),
         );
 
         let mut store = TrustStore {
@@ -184,7 +184,7 @@ mod tests {
         let signature = signing_key2.sign(data);
         let sig_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
 
         assert!(!store.verify_signature("test", data, &sig_b64).unwrap());
@@ -195,7 +195,7 @@ mod tests {
         let (signing_key, verifying_key) = test_keypair();
         let public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &verifying_key.to_bytes(),
+            verifying_key.to_bytes(),
         );
 
         let mut store = TrustStore {
@@ -207,7 +207,7 @@ mod tests {
         let signature = signing_key.sign(data);
         let sig_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
 
         assert!(!store

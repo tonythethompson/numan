@@ -226,6 +226,7 @@ pub fn is_safe_package_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::fs;
 
     #[test]
