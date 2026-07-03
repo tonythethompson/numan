@@ -26,6 +26,7 @@ pub fn execute(args: &GcArgs, root: &Path) -> Result<()> {
                 crate::state::lifecycle_journal::LifecycleOp::NupmImportManifest => {
                     "nupm manifest import"
                 }
+                crate::state::lifecycle_journal::LifecycleOp::Rollback => "snapshot rollback",
             },
             journal.package_id
         );

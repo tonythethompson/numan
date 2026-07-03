@@ -11,6 +11,7 @@ pub enum LifecycleOp {
     Remove,
     NupmImport,
     NupmImportManifest,
+    Rollback,
 }
 
 /// Stage of the in-flight lifecycle operation at the time the process last
@@ -28,6 +29,24 @@ pub enum LifecycleStage {
     PayloadsPromoted,
     /// nupm import: lockfile and provenance written.
     SelectionCommitted,
+    /// Rollback: journal written; no mutations applied yet.
+    RollbackPrepared,
+    /// Rollback: pre-rollback snapshot of current state created.
+    CurrentStateSnapshotted,
+    /// Rollback: candidate lockfile/autoload/imports staged.
+    CandidateStaged,
+    /// Rollback: candidate autoload validated with Nu.
+    CandidateValidated,
+    /// Rollback: lockfile committed.
+    LockfileCommitted,
+    /// Rollback: managed autoload file committed.
+    AutoloadCommitted,
+    /// Rollback: autoload-state projection committed.
+    AutoloadStateCommitted,
+    /// Rollback: nupm-imports sidecar committed.
+    ImportsCommitted,
+    /// Rollback: all owned state committed; journal clear pending.
+    Completed,
 }
 
 /// Crash-recovery journal written atomically before any destructive lifecycle
@@ -64,6 +83,12 @@ pub struct PendingLifecycle {
     /// For manifest import: staging dirs (relative) for crash recovery.
     #[serde(default)]
     pub batch_staging_dirs: Vec<String>,
+    /// For rollback: the snapshot being restored.
+    #[serde(default)]
+    pub target_snapshot_id: Option<String>,
+    /// For rollback: the snapshot of current state taken before rollback.
+    #[serde(default)]
+    pub pre_rollback_snapshot_id: Option<String>,
 }
 
 impl PendingLifecycle {
@@ -120,6 +145,8 @@ mod tests {
             promoted_payload_path: None,
             batch_package_ids: Vec::new(),
             batch_staging_dirs: Vec::new(),
+            target_snapshot_id: None,
+            pre_rollback_snapshot_id: None,
         }
     }
 

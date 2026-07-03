@@ -14,6 +14,7 @@ use crate::state::autoload_journal::{
 };
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::Lockfile;
+use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::{format_timestamp, fs_safety::acquire_mutation_lock};
 
 #[derive(Args, Debug)]
@@ -128,10 +129,14 @@ fn execute_with_runner(
     // Reload after reconciliation
     let mut lockfile = Lockfile::load(root)?;
 
-    // 8. Snapshot lockfile before any mutation
-    if !lockfile.is_empty() {
-        lockfile.snapshot(root)?;
-    }
+    // 8. Snapshot current state before any mutation
+    let snapshot = create_snapshot(
+        root,
+        SnapshotReason::PreMutation,
+        SnapshotTrigger::Deactivate,
+        None,
+        None,
+    )?;
 
     // All targets must agree on the same managed file path and vendor dir.
     // If activations point at different targets (e.g. after a stale refresh or
@@ -187,6 +192,7 @@ fn execute_with_runner(
             &vendor_autoload_dir,
             &managed_file_path,
             &currently_active_ids,
+            Some(snapshot.id.clone()),
         )?;
     } else {
         // ── PARTIAL DEACTIVATION ──────────────────────────────────────────────
@@ -212,6 +218,7 @@ fn execute_with_runner(
             &managed_file_path,
             &currently_active_ids,
             runner_ref,
+            Some(snapshot.id.clone()),
         )?;
     }
 
@@ -359,6 +366,7 @@ fn run_full_deactivation(
     vendor_autoload_dir: &str,
     managed_file_path: &str,
     previous_active_ids: &[String],
+    pre_mutation_snapshot_id: Option<String>,
 ) -> Result<()> {
     if !managed_path.exists() {
         // Nothing to delete — just clear lockfile records.
@@ -406,6 +414,7 @@ fn run_full_deactivation(
         desired_active_module_ids: vec![],
         targeted_module_ids: targets.iter().map(|m| m.package_id.clone()).collect(),
         created_at: format_timestamp(),
+        pre_mutation_snapshot_id,
     };
     journal.save(root)?;
 
@@ -467,6 +476,7 @@ fn run_partial_deactivation(
     managed_file_path: &str,
     previous_active_ids: &[String],
     runner: &dyn CandidateRunner,
+    pre_mutation_snapshot_id: Option<String>,
 ) -> Result<()> {
     // Resolve remaining module entries from the lockfile.
     let mut remaining_entries = Vec::new();
@@ -555,6 +565,7 @@ fn run_partial_deactivation(
         desired_active_module_ids: desired_active_ids.clone(),
         targeted_module_ids: targets.iter().map(|m| m.package_id.clone()).collect(),
         created_at: format_timestamp(),
+        pre_mutation_snapshot_id,
     };
     journal.save(root)?;
 
