@@ -45,6 +45,7 @@ pub fn execute(args: &UpdateArgs, root: &PathBuf) -> Result<()> {
             LifecycleOp::Remove => "remove",
             LifecycleOp::NupmImport => "nupm import",
             LifecycleOp::NupmImportManifest => "nupm manifest import",
+            LifecycleOp::Rollback => "rollback",
         };
         eprintln!(
             "Warning: A previous '{}' operation on '{}' was interrupted.",

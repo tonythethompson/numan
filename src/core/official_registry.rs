@@ -226,10 +226,10 @@ pub struct VerifiedIndex {
 /// - The `key_id` is present in the trust root.
 /// - The signature is valid over the canonical JSON bytes of the index.
 /// - The index declares a recognized `schema_version`.
-/// - Computes `index_sha256` as the SHA-256 of the canonical bytes.
 ///
-/// Returns the parsed index, the key used, and any successor keys declared in
-/// the signed index.
+/// Returns the parsed index, the key used, any successor keys declared in the
+/// signed index, and `index_sha256` — the SHA-256 of the canonical bytes,
+/// computed (not verified against a declared value) for callers to record.
 pub fn verify_registry_index(
     registry_name: &str,
     trust_root: &RegistryTrustRoot,
@@ -312,7 +312,7 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
         let public_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &verifying_key.to_bytes(),
+            verifying_key.to_bytes(),
         );
         (signing_key, public_key_b64)
     }
@@ -322,7 +322,7 @@ mod tests {
         let signature = signing_key.sign(&canonical_bytes);
         let signature_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &signature.to_bytes(),
+            signature.to_bytes(),
         );
         RegistrySignature::new("test-key", &signature_b64)
     }
@@ -466,12 +466,12 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("bad-key"));
     }
 
-/// Guards the pre-cutover state: the built-in trust root must remain a
-/// placeholder until the production key and URL are provisioned and committed.
-#[test]
-fn official_registry_is_placeholder_in_draft() {
-    assert!(OFFICIAL_REGISTRY.is_placeholder_key());
-}
+    /// Guards the pre-cutover state: the built-in trust root must remain a
+    /// placeholder until the production key and URL are provisioned and committed.
+    #[test]
+    fn official_registry_is_placeholder_in_draft() {
+        assert!(OFFICIAL_REGISTRY.is_placeholder_key());
+    }
 
     /// Guards against a half-applied trust-root edit: key_id and
     /// public_key_b64 must move off their placeholder values together, and

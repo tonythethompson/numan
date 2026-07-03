@@ -7,6 +7,7 @@ use numan_cli::core::package::{
 use numan_cli::core::platform::{Arch, Env, Os, Platform};
 use numan_cli::install::transaction::{self, InstallOptions};
 use numan_cli::state::lockfile::Lockfile;
+use numan_cli::state::snapshot::{list_snapshots, SnapshotTrigger};
 use rand_core::OsRng;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
@@ -18,14 +19,14 @@ fn setup_trusted_key(root: &std::path::Path, registry_name: &str) -> SigningKey 
     let verifying_key = signing_key.verifying_key();
     let public_key_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &verifying_key.to_bytes(),
+        verifying_key.to_bytes(),
     );
 
     let mut trust = numan_cli::core::trust::TrustStore {
         keys: HashMap::new(),
     };
     trust.add_key(registry_name, &public_key_b64).unwrap();
-    trust.save(&root.to_path_buf()).unwrap();
+    trust.save(root).unwrap();
 
     signing_key
 }
@@ -60,7 +61,7 @@ fn create_signed_registry(
     let signature = signing_key.sign(&canonical_bytes);
     let sig_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &signature.to_bytes(),
+        signature.to_bytes(),
     );
     let envelope = RegistrySignature::new(registry_name, &sig_b64);
     std::fs::write(
@@ -164,6 +165,7 @@ fn integration_full_install_from_signed_registry() {
         force: false,
         verbose: false,
         registry_name: None,
+        snapshot_trigger: SnapshotTrigger::Install,
     };
 
     let result = transaction::install_package("test/plugin", None, &options).unwrap();
@@ -234,6 +236,7 @@ fn integration_install_rejects_unsigned_registry() {
         force: false,
         verbose: false,
         registry_name: None,
+        snapshot_trigger: SnapshotTrigger::Install,
     };
 
     // Should fail: no signature
@@ -276,7 +279,7 @@ fn integration_install_rejects_tampered_signature() {
     let signature = wrong_key.sign(&canonical_bytes);
     let sig_b64 = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        &signature.to_bytes(),
+        signature.to_bytes(),
     );
     let envelope = RegistrySignature::new("test", &sig_b64);
     std::fs::write(
@@ -305,6 +308,7 @@ fn integration_install_rejects_tampered_signature() {
         force: false,
         verbose: false,
         registry_name: None,
+        snapshot_trigger: SnapshotTrigger::Install,
     };
 
     let result = transaction::install_package("test/plugin", None, &options);
@@ -381,6 +385,7 @@ fn integration_resolve_exact_rejects_incompatible() {
         force: false,
         verbose: false,
         registry_name: None,
+        snapshot_trigger: SnapshotTrigger::Install,
     };
 
     let result = transaction::install_package("test/plugin", Some("1.0.0"), &options);
@@ -461,12 +466,13 @@ fn integration_snapshot_before_install() {
         force: false,
         verbose: false,
         registry_name: None,
+        snapshot_trigger: SnapshotTrigger::Install,
     };
 
     // First install — no snapshot (lockfile was empty)
     transaction::install_package("test/plugin", None, &options).unwrap();
     assert!(
-        !root.join("snapshots").exists(),
+        !root.join("state/snapshots").exists(),
         "Should not snapshot from empty lockfile"
     );
 
@@ -515,12 +521,9 @@ fn integration_snapshot_before_install() {
     // Second install — should snapshot before mutation
     transaction::install_package("test/other", None, &options).unwrap();
     assert!(
-        root.join("snapshots").exists(),
+        root.join("state/snapshots").exists(),
         "Should have snapshots directory after second install"
     );
-    let snapshots: Vec<_> = std::fs::read_dir(root.join("snapshots"))
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
+    let snapshots = list_snapshots(&root).unwrap();
     assert_eq!(snapshots.len(), 1, "Should have exactly one snapshot");
 }

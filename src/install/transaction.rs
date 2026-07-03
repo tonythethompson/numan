@@ -297,13 +297,16 @@ pub fn install_package(
     }
 
     // 9. Snapshot lockfile before mutation (after download/extraction preflight succeeds).
-    create_snapshot(
-        options.root,
-        SnapshotReason::PreMutation,
-        options.snapshot_trigger,
-        None,
-        None,
-    )?;
+    // Skip when the lockfile is empty — there is no prior state worth restoring.
+    if !Lockfile::load(options.root)?.packages.is_empty() {
+        create_snapshot(
+            options.root,
+            SnapshotReason::PreMutation,
+            options.snapshot_trigger,
+            None,
+            None,
+        )?;
+    }
 
     // 10. Atomic move from staging to final location
     // If --force, don't delete — create a new path (immutable)

@@ -217,9 +217,8 @@ pub fn rollback_to_snapshot(
         None => {
             let imports_path = root.join("state/nupm-imports.json");
             if imports_path.exists() {
-                std::fs::remove_file(&imports_path).with_context(|| {
-                    format!("Failed to remove '{}'", imports_path.display())
-                })?;
+                std::fs::remove_file(&imports_path)
+                    .with_context(|| format!("Failed to remove '{}'", imports_path.display()))?;
             }
         }
     }
@@ -586,8 +585,8 @@ mod tests {
         let runner = FakeCandidateRunner::success();
         let report = rollback_to_snapshot(root, &snap.id, &runner).unwrap();
 
-        let pre = crate::state::snapshot::load_snapshot(root, &report.pre_rollback_snapshot_id)
-            .unwrap();
+        let pre =
+            crate::state::snapshot::load_snapshot(root, &report.pre_rollback_snapshot_id).unwrap();
         assert_eq!(pre.manifest.reason, SnapshotReason::PreRollback);
         assert_eq!(
             pre.manifest.related_snapshot_id.as_deref(),

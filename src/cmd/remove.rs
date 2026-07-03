@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::state::lifecycle_journal::{LifecycleOp, LifecycleStage, PendingLifecycle};
 use crate::state::lockfile::Lockfile;
-use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::state::nupm_import::NupmImportsFile;
+use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Remove an installed package

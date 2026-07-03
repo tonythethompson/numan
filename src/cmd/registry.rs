@@ -1,6 +1,7 @@
 use crate::core::official_registry::RegistrySignature;
 use crate::core::registry::{RegistryManager, VerifiedRegistry};
 use crate::core::trust::TrustStore;
+use crate::util::fs_safety::acquire_mutation_lock;
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
 use std::path::Path;
@@ -58,6 +59,7 @@ fn list_registries(root: &Path) -> Result<()> {
 }
 
 fn sync_registries(root: &Path) -> Result<()> {
+    let _lock = acquire_mutation_lock(root)?;
     let config = crate::config::Config::load(root)?;
     let mgr = RegistryManager::new(root)?;
 

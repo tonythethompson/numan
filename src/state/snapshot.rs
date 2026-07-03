@@ -8,18 +8,21 @@
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::core::integrity::compute_sha256;
-use crate::state::autoload_state::AutoloadState;
-use crate::state::autoload_journal::{PendingAutoload, SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION};
-use crate::state::lifecycle_journal::PendingLifecycle;
-use crate::state::lockfile::{compute_revision_id, Lockfile, LockfileEntry};
-use crate::state::nupm_import::NupmImportsFile;
 use crate::nu::paths::NuPaths;
+use crate::state::autoload_journal::PendingAutoload;
+#[cfg(test)]
+use crate::state::autoload_journal::SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION;
+use crate::state::autoload_state::AutoloadState;
+use crate::state::lifecycle_journal::PendingLifecycle;
+#[cfg(test)]
+use crate::state::lockfile::LockfileEntry;
+use crate::state::lockfile::{compute_revision_id, Lockfile};
+use crate::state::nupm_import::NupmImportsFile;
 use crate::util::atomic::write_json_atomic;
 use crate::util::fs_safety::is_symlink_or_reparse;
 
@@ -99,7 +102,9 @@ pub struct SnapshotAutoload {
 #[serde(rename_all = "snake_case")]
 pub enum ManagedAutoloadProjection {
     NotConfigured,
-    Absent { managed_file_path: String },
+    Absent {
+        managed_file_path: String,
+    },
     Present {
         managed_file_path: String,
         content: String,
@@ -114,7 +119,11 @@ pub enum ManagedAutoloadProjection {
 #[serde(rename_all = "snake_case")]
 pub enum SnapshotSidecar<T> {
     Absent,
-    Present { content: String, sha256: String, value: T },
+    Present {
+        content: String,
+        sha256: String,
+        value: T,
+    },
 }
 
 /// Loaded snapshot with all sidecars verified.
@@ -148,18 +157,6 @@ fn snapshot_dir(root: &Path, id: &str) -> PathBuf {
 
 fn manifest_path(root: &Path, id: &str) -> PathBuf {
     snapshot_dir(root, id).join("snapshot.json")
-}
-
-fn lockfile_path(root: &Path, id: &str) -> PathBuf {
-    snapshot_dir(root, id).join("lockfile.json")
-}
-
-fn autoload_path(root: &Path, id: &str) -> PathBuf {
-    snapshot_dir(root, id).join("autoload.json")
-}
-
-fn imports_path(root: &Path, id: &str) -> PathBuf {
-    snapshot_dir(root, id).join("imports.json")
 }
 
 /// Generate a new collision-resistant, time-sortable snapshot ID.
@@ -202,7 +199,7 @@ pub fn create_snapshot(
     let sidecar_digests = SidecarDigests {
         lockfile_sha256: sha256_json(&lockfile)?,
         autoload_sha256: Some(sha256_json(&autoload)?),
-        imports_sha256: imports.as_ref().map(|i| sha256_json(i).ok()).flatten(),
+        imports_sha256: imports.as_ref().and_then(|i| sha256_json(i).ok()),
     };
 
     let manifest = SnapshotManifest {
@@ -221,8 +218,12 @@ pub fn create_snapshot(
     };
 
     let stage = staging_dir(root).join(&id);
-    std::fs::create_dir_all(&stage)
-        .with_context(|| format!("Failed to create snapshot staging dir '{}'", stage.display()))?;
+    std::fs::create_dir_all(&stage).with_context(|| {
+        format!(
+            "Failed to create snapshot staging dir '{}'",
+            stage.display()
+        )
+    })?;
 
     write_json_atomic(&stage.join("snapshot.json"), &manifest)?;
     write_json_atomic(&stage.join("lockfile.json"), &lockfile)?;
@@ -264,7 +265,11 @@ pub fn load_snapshot(root: &Path, id: &str) -> Result<Snapshot> {
     }
 
     let lockfile: Lockfile = read_json(&dir.join("lockfile.json"))?;
-    verify_digest(&lockfile, &manifest.sidecar_digests.lockfile_sha256, "lockfile")?;
+    verify_digest(
+        &lockfile,
+        &manifest.sidecar_digests.lockfile_sha256,
+        "lockfile",
+    )?;
 
     let autoload: SnapshotAutoload = read_json(&dir.join("autoload.json"))?;
     if let Some(expected) = manifest.sidecar_digests.autoload_sha256.as_deref() {
@@ -357,7 +362,10 @@ pub fn delete_snapshot(root: &Path, id: &str) -> Result<()> {
         bail!("Snapshot '{}' does not exist", id);
     }
     if is_symlink_or_reparse(&dir)? {
-        bail!("Snapshot '{}' path is a symlink or reparse point; refusing to delete", id);
+        bail!(
+            "Snapshot '{}' path is a symlink or reparse point; refusing to delete",
+            id
+        );
     }
 
     std::fs::remove_dir_all(&dir)
@@ -425,9 +433,12 @@ pub fn find_legacy_snapshots(root: &Path) -> Result<Vec<LegacySnapshot>> {
     }
 
     let mut result = Vec::new();
-    for entry in std::fs::read_dir(&legacy_dir)
-        .with_context(|| format!("Failed to read legacy snapshots dir '{}'", legacy_dir.display()))?
-    {
+    for entry in std::fs::read_dir(&legacy_dir).with_context(|| {
+        format!(
+            "Failed to read legacy snapshots dir '{}'",
+            legacy_dir.display()
+        )
+    })? {
         let entry = entry?;
         let path = entry.path();
         if !path.is_dir() {
@@ -611,7 +622,9 @@ fn verify_digest<T: Serialize>(value: &T, expected: &str, label: &str) -> Result
 /// Count active modules from a captured autoload projection.
 pub fn count_active_modules(autoload: &SnapshotAutoload) -> usize {
     match &autoload.projection {
-        ManagedAutoloadProjection::Present { active_module_ids, .. } => active_module_ids.len(),
+        ManagedAutoloadProjection::Present {
+            active_module_ids, ..
+        } => active_module_ids.len(),
         _ => 0,
     }
 }
@@ -625,7 +638,7 @@ pub fn count_active_plugins(lockfile: &Lockfile, nu_identity: &SnapshotNuIdentit
         .values()
         .filter(|e| {
             e.package_type == "plugin"
-                && e.activation.as_ref().map_or(false, |a| {
+                && e.activation.as_ref().is_some_and(|a| {
                     a.nu_executable_sha256 == nu_identity.nu_executable_sha256
                         && a.nu_version == nu_identity.nu_version
                 })
@@ -724,7 +737,9 @@ mod tests {
         std::fs::write(payload.join("mod.nu"), "# module").unwrap();
 
         let mut lockfile = Lockfile::empty();
-        lockfile.packages.insert("owner/pkg".to_string(), empty_lockfile_entry());
+        lockfile
+            .packages
+            .insert("owner/pkg".to_string(), empty_lockfile_entry());
         lockfile.save(root).unwrap();
 
         let manifest = create_snapshot(
@@ -738,8 +753,12 @@ mod tests {
 
         assert_eq!(manifest.payload_revisions.len(), 1);
         let loaded = load_snapshot(root, &manifest.id).unwrap();
-        assert_eq!(loaded.manifest.payload_revisions, manifest.payload_revisions);
-        let errors = verify_payloads(root, &loaded.lockfile, &loaded.manifest.payload_revisions).unwrap();
+        assert_eq!(
+            loaded.manifest.payload_revisions,
+            manifest.payload_revisions
+        );
+        let errors =
+            verify_payloads(root, &loaded.lockfile, &loaded.manifest.payload_revisions).unwrap();
         assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
     }
 
@@ -750,7 +769,9 @@ mod tests {
         std::fs::create_dir_all(root.join("state")).unwrap();
 
         let mut lockfile = Lockfile::empty();
-        lockfile.packages.insert("owner/pkg".to_string(), empty_lockfile_entry());
+        lockfile
+            .packages
+            .insert("owner/pkg".to_string(), empty_lockfile_entry());
         lockfile.save(root).unwrap();
 
         assert!(create_snapshot(
@@ -769,8 +790,22 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join("state")).unwrap();
 
-        let m1 = create_snapshot(root, SnapshotReason::PreMutation, SnapshotTrigger::Install, None, None).unwrap();
-        let m2 = create_snapshot(root, SnapshotReason::PreMutation, SnapshotTrigger::Update, None, None).unwrap();
+        let m1 = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Install,
+            None,
+            None,
+        )
+        .unwrap();
+        let m2 = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Update,
+            None,
+            None,
+        )
+        .unwrap();
 
         let list = list_snapshots(root).unwrap();
         assert_eq!(list.len(), 2);
@@ -787,7 +822,14 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join("state")).unwrap();
 
-        let m = create_snapshot(root, SnapshotReason::PreMutation, SnapshotTrigger::Install, None, None).unwrap();
+        let m = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Install,
+            None,
+            None,
+        )
+        .unwrap();
 
         let journal = PendingAutoload {
             schema_version: AUTOLOAD_SCHEMA_VERSION,
@@ -826,10 +868,6 @@ mod tests {
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
-        assert!(delete_snapshot(
-            root,
-            "018ff000-0000-7fff-0000-000000000001"
-        )
-        .is_err());
+        assert!(delete_snapshot(root, "018ff000-0000-7fff-0000-000000000001").is_err());
     }
 }
