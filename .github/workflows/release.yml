@@ -165,6 +165,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Resolve release tag
         id: meta
         shell: bash
@@ -186,12 +188,16 @@ jobs:
           sha256sum numan-* > SHA256SUMS
           cat SHA256SUMS
 
+      - name: Prepare release notes from CHANGELOG
+        run: bash scripts/release-notes-from-changelog.sh "${{ steps.meta.outputs.tag }}" > release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: release-notes.md
           files: dist/*
 
   publish-crate:

@@ -11,7 +11,14 @@
 
 - Maintain [CHANGELOG.md](../CHANGELOG.md) using [Keep a Changelog](https://keepachangelog.com/).
 - Move items from `[Unreleased]` into a dated version section before tagging.
-- GitHub Release notes are auto-generated; the changelog is the human-curated record.
+- **GitHub Release body** is taken from that version's section in `CHANGELOG.md` via `scripts/release-notes-from-changelog.sh` — real Added/Changed/Fixed bullets, not auto-generated "Full Changelog: vX...vY" compare links.
+- Compare links at the bottom of `CHANGELOG.md` (`[0.1.4]: https://github.com/...`) stay in the file only; they are not copied into release notes.
+
+Preview release notes before tagging:
+
+```bash
+bash scripts/release-notes-from-changelog.sh v0.1.4
+```
 
 ## Release checklist
 
