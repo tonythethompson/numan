@@ -96,7 +96,7 @@ where
 
 /// When the built-in trust root is production-ready, seed the official registry
 /// in config so first-time users can `registry sync` without manual `registry add`.
-fn ensure_official_registry_config(root: &Path, config: &mut Config) -> Result<bool> {
+pub(crate) fn ensure_official_registry_config(root: &Path, config: &mut Config) -> Result<bool> {
     if OFFICIAL_REGISTRY.is_placeholder_key() {
         return Ok(false);
     }

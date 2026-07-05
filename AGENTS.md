@@ -15,7 +15,7 @@ cargo run -- list
 cargo run -- nupm status --nupm-home <path>
 cargo run -- nupm inspect <package-path>
 
-# Test (245+ tests)
+# Test (376 tests)
 cargo test
 
 # Test single module
@@ -36,6 +36,7 @@ src/
     package.rs         — ScopedId, Package, VersionEntry, Artifact types
     nu_version.rs      — Nu version detection and constraint matching
     registry.rs        — Registry index load/search/verify
+    official_registry.rs — Built-in official trust root + signature verification
     trust.rs           — Ed25519 trust store and signature verification
     integrity.rs       — SHA256 compute and verify
     resolve.rs         — Version resolution with strict plugin constraints
@@ -46,8 +47,9 @@ src/
     list.rs            — List subcommand
     registry.rs        — Registry management subcommands
     activate.rs        — Plugin + module activation (Phase 3 & 4); public entry: execute_with_candidate_runner
-    init.rs            — `numan init [--refresh]`: Nu probe, paths cache, activation identity refresh
+    init.rs            — `numan init [--refresh]`: Nu probe, paths cache, auto-configures official registry
     doctor.rs          — `numan doctor [--fix] [--yes]`: health checks + safe repairs (Phase 7.2; spec: docs/numan-doctor.md)
+    snapshot.rs        — `numan snapshot list|inspect|delete|rollback` (Phase 5.3)
     deactivate.rs      — Module deactivation: full (delete managed file) and partial (regenerate) (Phase 4)
     update.rs          — `numan update [--check] [pkg]`: detect and apply registry version upgrades (Phase 5)
     remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
@@ -63,6 +65,8 @@ src/
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
     lifecycle_journal.rs — pending-lifecycle.json for update/remove/nupm_import crash recovery (Phase 5–6)
+    snapshot.rs        — Immutable activation snapshots (`create_snapshot`, `list_snapshots`, etc.)
+    rollback.rs        — Journaled restore of Numan-owned state to a snapshot
     nupm_import.rs     — nupm-import provenance (`state/nupm-imports.json`, Phase 6.2)
   nu/
     paths.rs           — Nu path cache (detect, load, save, validate_drift)
@@ -82,6 +86,9 @@ src/
     report.rs          — NupmStatusReport, NupmInspectionReport formatters
 docs/
   nupm-compatibility.md — versioned nupm interoperability contract (authority for Phase 6)
+  PACKAGING.md          — Homebrew/winget release checklist
+  RELEASING.md          — version bump, tag, CI gates
+  snapshots-and-rollback.md — snapshot CLI scope and rollback guarantees
 tests/
   fixtures/nupm/       — supported/rejected fixture corpus for parser/classifier tests
   init_test.rs          — `numan init` / `init --refresh` (vendor drift, managed-file revalidation)
@@ -99,7 +106,7 @@ tests/
 - **Serialization**: `serde` + `serde_json` (JSON) + `toml` (config)
 - **CLI**: `clap` with derive macros
 - **Platform detection**: `#[cfg(target_env)]` from binary's build target, not `std::env::consts`
-- **Trust**: Ed25519 keys, `--key <base64-public-key>` for onboarding
+- **Trust**: Ed25519 signatures over registry indexes; built-in production trust root for `official` (`src/core/official_registry.rs`); custom registries use `--key <base64-public-key>` via `registry add`
 - **Immutability**: `packages/<type>/<scoped-name>/<version-hash>/` paths, never overwrite
 - **Activate testability**: `execute_with_registrar(args, root, registrar)` for plugins; `execute_with_candidate_runner(args, root, registrar, runner)` for modules — inject fakes in tests, never spawn a real Nu binary in unit tests
 - **Module autoload testability**: `FakeCandidateRunner::success()` / `::failure(msg)` from `nu/autoload.rs` — use as test seam for candidate validation without real Nu
@@ -121,9 +128,9 @@ tests/
 5. **Registry trust** — Ed25519 signatures over exact index.json bytes
 
 ## Development Workflow
-1. Create feature branch from `main`
+1. Create feature branch from `master`
 2. Implement with tests
-3. `cargo test` — all 234+ tests must pass
+3. `cargo test` — all 376 tests must pass
 4. Update AGENTS.md if structure/conventions change
 5. Open PR with description
 
@@ -140,9 +147,9 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 1: Foundation (types, platform, config, lockfile, registry, trust, CLI skeleton)
 - [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
 - [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
-- [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock, 234+ tests)
-- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal
-- [ ] Phase 5 (deferred): Source builds (5.2), lockfile snapshots/rollback (5.3), plugin gate (5.5)
+- [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock)
+- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md))
+- [ ] Phase 5 (deferred): Source builds (5.2), plugin gate (5.5)
 - [x] Phase 6.0: nupm compatibility audit + fixture corpus (`docs/nupm-compatibility.md`)
 - [x] Phase 6.1: read-only `numan nupm status|inspect` (no import, no nupm mutation, no Nu)
 - [x] Phase 6.2: one-way `numan nupm import` (staging, provenance, lifecycle journal; no activation)
@@ -155,6 +162,8 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 7.4: Onboarding path — init checklist, README quick start ([Phase7Plan.md](Phase7Plan.md))
 - [x] Phase 7.5: CI hardening — MSRV, cargo deny/package, release gates ([Phase7Plan.md](Phase7Plan.md))
 - [x] Phase 7.6: Wider distribution — Homebrew formula, winget manifests ([docs/PACKAGING.md](docs/PACKAGING.md))
+- [x] Post-7.6: Official registry production cutover + init auto-configures `official` (v0.1.4)
+- [x] Phase 7 complete (polish, CI, distribution) — see [Phase7Plan.md](Phase7Plan.md); toward 1.0: winget merge, registry intake, Phase 5.2/5.5
 
 ## Testing
 - Unit tests inline with source modules
@@ -171,5 +180,5 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 ## Git Conventions
 - Commits: imperative mood, <72 chars
 - Branches: `feature/description`, `fix/description`
-- No force-push to main
+- No force-push to `master`
 - Squash merge for features

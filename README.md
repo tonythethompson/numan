@@ -17,7 +17,7 @@ Numan fills that gap:
 
 | Concern | How Numan handles it |
 |--------|----------------------|
-| **Trust** | Ed25519 signatures over registry indexes; SHA256 verification of plugin binaries |
+| **Trust** | Ed25519 signatures over registry indexes; built-in production trust root for `official`; SHA256 verification of plugin binaries |
 | **Reproducibility** | Lockfile v2 pins version, payload hash, and install origin |
 | **Platform safety** | Artifacts resolved for the compile-time OS/arch/libc triple |
 | **Nu version matching** | Resolver respects per-package Nu constraints |
@@ -25,13 +25,14 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 325+ tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 376 tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
 
 ---
 
 ## Features
 
 - **Registry-backed installs** — search, inspect versions, and install `owner/name` or `owner/name@version`
+- **Official registry** — production trust root built in; `numan init` configures `official` automatically; `numan registry sync` verifies signed indexes
 - **Package types** — plugins, modules, scripts, completions
 - **Verified artifacts** — mandatory SHA256 for plugin binaries; signed registry indexes
 - **Scoped activation** — plugins active only when Nu executable hash, Nu version, and plugin registry path match
@@ -314,7 +315,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | `update` | `--check` report only; `-v` / `--verbose` |
 | `remove` | `--force` remove despite active activation |
 | `gc` | `--dry-run` preview only |
-| `registry add` | `--key <base64-public-key>` (required) |
+| `registry add` | `--key <base64-public-key>` (required for custom registries; official is auto-configured on `init`) |
 | `nupm status` | `--nupm-home <path>` |
 | `nupm inspect` | `--all` scan home; `--nupm-home <path>`; `--exit-on-ineligible` fail on ineligible |
 | `nupm import` | `--as owner/name` (single import); `--manifest <file>` (batch); `--nupm-home <path>`; `--yes` skip consent |
@@ -361,7 +362,7 @@ See [AGENTS.md](AGENTS.md) for architecture details aimed at contributors and ag
 
 ```bash
 cargo build
-cargo test                    # unit + integration (325+ tests)
+cargo test                    # unit + integration (376 tests)
 cargo clippy -- -D warnings   # lint (CI-enforced)
 cargo fmt                     # format
 
@@ -384,16 +385,49 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 
 ## Roadmap
 
-| Phase | Status |
-|-------|--------|
+**Current release:** [v0.1.4](https://github.com/tonythethompson/numan/releases/tag/v0.1.4) — feature-complete core, early-stage production trial.
+
+### Shipped
+
+| Area | Status |
+|------|--------|
 | Foundation, install, activate (plugins + modules) | ✅ Complete |
 | Update, remove, gc, lockfile v2 | ✅ Complete |
-| nupm status, inspect, import, drift | ✅ Complete |
-| Source builds, lockfile rollback snapshots | 🔜 Planned |
-| Distribution (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
+| Activation snapshots + rollback CLI | ✅ Complete — [docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md) |
+| nupm status, inspect, import, drift | ✅ Complete — [docs/nupm-compatibility.md](docs/nupm-compatibility.md) |
+| Official registry production cutover | ✅ Complete (v0.1.4) — built-in trust root; `numan init` auto-configures `official` |
+| Distribution baseline (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
 | Doctor, completions, onboarding | ✅ [Phase 7.2–7.4](Phase7Plan.md) |
 | CI hardening, `--help` audit | ✅ [Phase 7.5](Phase7Plan.md) |
-| Wider distribution (Homebrew, winget) | ✅ [Phase 7.6](Phase7Plan.md) |
+| Homebrew formula + tap | ✅ [Phase 7.6](Phase7Plan.md) — `brew tap tonythethompson/numan` |
+| winget manifests (in-repo) | ✅ [packaging/winget/README.md](packaging/winget/README.md) |
+
+### In progress
+
+| Area | Status |
+|------|--------|
+| winget community listing | 🔄 [winget-pkgs PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) — `winget install tonythethompson.Numan` after merge |
+| Official registry package growth | 🔄 Curated seed packages + acceptance checklist — [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) |
+
+### Planned
+
+| Area | Tracking |
+|------|----------|
+| Source builds (clone/build with consent) | Phase 5.2 — [#11](https://github.com/tonythethompson/numan/issues/11) |
+| Plugin lifecycle gate | Phase 5.5 — [#11](https://github.com/tonythethompson/numan/issues/11), [#22](https://github.com/tonythethompson/numan/issues/22) |
+| Registry intake automation (`registry lint`, discovery, validation reports) | [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) stages 2–4 |
+| Scoop manifest | Deferred (low demand) |
+
+### Toward 1.0
+
+Numan stays on **0.1.x** while dogfooding the official-registry onboarding path. **1.0** is targeted when:
+
+- Cross-platform fresh install works end-to-end (`init` → `registry sync` → `search` → `install` → `activate` → `doctor`)
+- Community winget install is available
+- Official registry has a small curated package set with repeatable acceptance
+- No open P0/P1 issues on core install/activate/update/remove lifecycle
+
+Track polish and distribution work in [Phase7Plan.md](Phase7Plan.md) ([#12](https://github.com/tonythethompson/numan/issues/12)).
 
 ---
 

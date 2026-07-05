@@ -52,7 +52,7 @@ Each finding has:
 - `id` — stable machine identifier (e.g. `nu_paths.missing`)
 - `severity` — `ok` \| `info` \| `warn` \| `error`
 - `message` — human-readable summary
-- `fix` — optional suggested command for manual issues (e.g. `numan registry add …`)
+- `fix` — optional suggested command for manual issues (e.g. `numan init` or `numan registry add …`)
 - `repair` — `none` \| `auto` \| `confirm` \| `manual` (whether `--fix` can act; see below)
 
 **Rules:**
@@ -70,9 +70,10 @@ When `--fix` is set, doctor acquires `acquire_mutation_lock(root)` once for the 
 |------|---------|-------------|--------|
 | **auto** | Never | `layout.*` (missing dirs), `nu_paths.missing` | `create_dir_all` for layout; `numan init` |
 | **auto** | Never | `registry.index_missing` | `numan registry sync` |
+| **auto** | Never | `registry.none` (production trust root only) | Add official registry via same path as `numan init` |
 | **confirm** | Unless `--yes` / non-TTY | `nu_paths.drift`, `nu_paths.vendor_drift` | `numan init --refresh` |
 | **confirm** | Unless `--yes` / non-TTY | `journal.plugin_pending`, `journal.autoload_pending`, `journal.plugin_stale`, `journal.autoload_stale`, `activation.plugin_stale`, `activation.module_stale`, `autoload.projection`, `autoload.managed_missing` | `numan activate` (empty package list — reconciles journals and re-activates stale entries; same entry point as normal activate recovery) |
-| **manual** | Never auto | `autoload.managed_foreign`, `payload.missing`, `journal.lifecycle_pending`, `journal.lifecycle_stale`, `registry.none`, `nu_paths.vendor_missing`, `nupm.*` | Print fix hint only |
+| **manual** | Never auto | `autoload.managed_foreign`, `payload.missing`, `journal.lifecycle_pending`, `journal.lifecycle_stale`, `registry.none` (placeholder trust root), `nu_paths.vendor_missing`, `nupm.*` | Print fix hint only |
 
 **Invariants during repair:**
 
@@ -142,7 +143,7 @@ No re-hash or revision recompute in v1 (too expensive for doctor).
 
 | ID | Severity | Condition |
 |----|----------|-----------|
-| `registry.none` | `warn` | `config.toml` has no registries → fix: `numan registry add …` |
+| `registry.none` | `warn` | `config.toml` has no registries → fix: `numan init` before first init; `numan doctor --fix` after init (production trust root); `numan registry add …` for custom/placeholder builds |
 | `registry.index_missing` | `info` | Enabled registry has no cached index under `registries/` → fix: `numan registry sync` |
 
 ### 7. nupm coexistence (optional section)

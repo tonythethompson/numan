@@ -32,9 +32,9 @@ Then:
 4. Tag and push:
 
    ```bash
-   git tag v0.1.3
+   git tag v0.1.4
    git push origin master
-   git push origin v0.1.3
+   git push origin v0.1.4
    ```
 
 5. The [Release workflow](https://github.com/tonythethompson/numan/actions/workflows/release.yml) waits for green CI on the tagged commit, runs preflight checks, then builds archives and publishes.

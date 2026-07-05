@@ -26,5 +26,6 @@ winget install tonythethompson.Numan
 2. Open a PR using [wingetcreate](https://github.com/microsoft/winget-cli/blob/master/doc/windows/package-manager/winget/create.md) or manually.
 3. Use manifest schema **1.12.0** (`$schema` URLs and `ManifestVersion` must match).
 4. Update `InstallerSha256` from the release `SHA256SUMS` file (uppercase hex).
+5. **One version per PR** to winget-pkgs — include only the new version directory; do not mix `0.1.3` and `0.1.4` in one PR.
 
 See [docs/PACKAGING.md](../../docs/PACKAGING.md) for the full release checklist.

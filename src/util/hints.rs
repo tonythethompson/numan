@@ -15,6 +15,9 @@ pub const CMD_ACTIVATE_CHECK: &str = "numan activate --check";
 /// `numan registry sync`
 pub const CMD_REGISTRY_SYNC: &str = "numan registry sync";
 
+/// `numan doctor --fix`
+pub const CMD_DOCTOR_FIX: &str = "numan doctor --fix";
+
 /// `numan registry add …`
 pub const CMD_REGISTRY_ADD: &str = "numan registry add <name> <url> --key <base64-public-key>";
 
@@ -38,6 +41,19 @@ pub const CMD_NUPM_INSPECT: &str = "numan nupm inspect <path>";
 
 pub fn nupm_diff_pkg(package_id: &str) -> String {
     format!("numan nupm diff {package_id}")
+}
+
+/// Fix hint when `config.toml` has no registries (`registry.none`).
+pub fn registry_none_fix(root: &std::path::Path) -> &'static str {
+    use crate::core::official_registry::OFFICIAL_REGISTRY;
+
+    if OFFICIAL_REGISTRY.is_placeholder_key() {
+        CMD_REGISTRY_ADD
+    } else if root.join("nu_state/paths.json").exists() {
+        CMD_DOCTOR_FIX
+    } else {
+        CMD_INIT
+    }
 }
 
 /// Format a single-command fix hint: `Run 'numan …'.`
@@ -65,5 +81,19 @@ mod tests {
             run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
             "Run 'numan init --refresh', then 'numan activate'."
         );
+    }
+
+    #[test]
+    fn registry_none_fix_prefers_init_before_first_init() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(registry_none_fix(dir.path()), CMD_INIT);
+    }
+
+    #[test]
+    fn registry_none_fix_prefers_doctor_fix_after_init_without_registries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("nu_state")).unwrap();
+        std::fs::write(dir.path().join("nu_state/paths.json"), b"{}").unwrap();
+        assert_eq!(registry_none_fix(dir.path()), CMD_DOCTOR_FIX);
     }
 }

@@ -18,7 +18,9 @@ After a GitHub Release is published (see [RELEASING.md](RELEASING.md)):
    - Set `InstallerSha256` to uppercase hex from `SHA256SUMS`
    - Update nested `RelativeFilePath` if the archive folder name changed
 4. Open a PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) for community winget installs (use WSL/Linux so `manifests/t/tonythethompson/` path casing is preserved).
-5. **Homebrew tap** — sync `packaging/homebrew/numan.rb` to [tonythethompson/homebrew-numan](https://github.com/tonythethompson/homebrew-numan) `Formula/numan.rb` (`scripts/sync-homebrew-tap.sh`).
+   - **One version per PR** — do not include multiple version folders in the same PR; WinGetSvc validation rejects duplicate publisher paths.
+   - **New package PR** — submit only the latest version (e.g. `0.1.4`); older versions are added in separate PRs after merge.
+5. **Homebrew tap** — sync `packaging/homebrew/numan.rb` to [tonythethompson/homebrew-numan](https://github.com/tonythethompson/homebrew-numan) `Formula/numan.rb` (`scripts/sync-homebrew-tap.sh`). Keep `packaging/homebrew-tap/Formula/numan.rb` in this repo aligned for reference.
 
 ## Install channels
 

@@ -15,7 +15,7 @@ Take Numan from feature-complete core (Phases 1–6) to a distributable, polishe
 | 7.3 | Daily-driver polish | ✅ Done |
 | 7.4 | Onboarding path | ✅ Done |
 | 7.5 | CI / release hardening | ✅ Done |
-| 7.6 | Wider distribution | ✅ Done (Homebrew, winget; Scoop deferred) |
+| 7.6 | Wider distribution | ✅ Done (Homebrew live; winget in-repo; community PR pending) |
 
 ---
 
@@ -58,7 +58,7 @@ Shipped:
 
 Shipped:
 
-1. **`numan init` onboarding checklist** — numbered next steps (registry, sync, search, install, activate, doctor) after first init
+1. **`numan init` onboarding checklist** — numbered next steps (sync, search, install, activate, doctor) after first init; official registry auto-configured when production trust root is present
 2. **README** — copy-paste quick start block plus step-by-step sections
 3. **Compatibility matrix** — promoted in README nupm section ([docs/nupm-compatibility.md](docs/nupm-compatibility.md))
 
@@ -78,7 +78,7 @@ Shipped:
 Shipped:
 
 1. **Homebrew** — `packaging/homebrew/numan.rb` (direct `--formula` URL install; optional tap documented)
-2. **winget** — `packaging/winget/manifests/t/TonyTheThompson/Numan/<version>/` (local `--manifest` install; winget-pkgs PR path documented)
+2. **winget** — `packaging/winget/manifests/t/tonythethompson/Numan/<version>/` (local `--manifest` install; winget-pkgs PR path documented)
 3. **`cargo install --git`** — documented in README
 4. **[docs/PACKAGING.md](docs/PACKAGING.md)** — release checksum update checklist
 
@@ -86,9 +86,36 @@ Deferred: Scoop manifest (low demand).
 
 ---
 
+## Post-7.6: Official registry cutover ✅
+
+Shipped in v0.1.4:
+
+1. **Production trust root** — `src/core/official_registry.rs` pins `official-2026-07-01` (see `scripts/update-official-trust-root.sh`)
+2. **Init auto-config** — `numan init` adds `registries.official` on first run when the built-in trust root is production
+3. **Onboarding** — quick start is `init` → `registry sync` → `search` (no manual `registry add` for official)
+4. **Distribution** — winget identifier `tonythethompson.Numan`; Homebrew tap synced for v0.1.4
+
+---
+
 ## Deferred (not Phase 7)
 
-**Phase 5** ([#11](https://github.com/tonythethompson/numan/issues/11)): source builds (5.2), snapshots/rollback (5.3), plugin lifecycle gate (5.5).
+**Phase 5** ([#11](https://github.com/tonythethompson/numan/issues/11)): source builds (5.2), plugin lifecycle gate (5.5). Snapshots/rollback (5.3) shipped — see [docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md).
+
+---
+
+## Toward 1.0
+
+Phase 7 core work is complete. Remaining work before **1.0**:
+
+| Milestone | Status |
+|-----------|--------|
+| winget community listing | 🔄 [PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) |
+| Official registry seeded packages | 🔄 [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) — stage 1 acceptance, then curated growth |
+| Cross-platform dogfooding | 🔄 Fresh-install checklist on Linux, macOS, Windows |
+| Source builds (5.2) | 🔜 [#11](https://github.com/tonythethompson/numan/issues/11) |
+| Plugin lifecycle gate (5.5) | 🔜 [#22](https://github.com/tonythethompson/numan/issues/22) |
+
+Stay on **0.1.x** until onboarding + distribution paths are stable; tag **1.0** when the table above is green and core lifecycle has no open P0/P1 issues.
 
 ---
 

@@ -6,7 +6,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cmd::activate::{execute as activate_execute, ActivateArgs};
-use crate::cmd::init::{execute as init_execute, InitArgs};
+use crate::cmd::init::{ensure_official_registry_config, execute as init_execute, InitArgs};
 use crate::cmd::registry::{self, RegistryCommands};
 use crate::config::Config;
 use crate::core::registry::RegistryManager;
@@ -22,8 +22,9 @@ use crate::state::lifecycle_journal::PendingLifecycle;
 use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
+use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::util::hints::{
-    self, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_ADD, CMD_REGISTRY_SYNC,
+    self, registry_none_fix, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -615,12 +616,17 @@ fn check_registry(root: &Path, findings: &mut Vec<Finding>) {
     };
 
     if config.registries.is_empty() {
+        let repair = if OFFICIAL_REGISTRY.is_placeholder_key() {
+            RepairTier::Manual
+        } else {
+            RepairTier::Auto
+        };
         findings.push(finding(
             "registry.none",
             Severity::Warn,
             "No registries configured",
-            Some(CMD_REGISTRY_ADD),
-            RepairTier::Manual,
+            Some(registry_none_fix(root)),
+            repair,
         ));
         return;
     }
@@ -835,6 +841,34 @@ fn apply_repairs(
             status: RepairStatus::Skipped,
             reason: Some("skip_network".to_string()),
         });
+    }
+
+    if findings.iter().any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto) {
+        let id = "registry.none".to_string();
+        match Config::load(root) {
+            Ok(mut config) => match ensure_official_registry_config(root, &mut config) {
+                Ok(true) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Applied,
+                    reason: None,
+                }),
+                Ok(false) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Skipped,
+                    reason: Some("official registry already configured".to_string()),
+                }),
+                Err(e) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Failed,
+                    reason: Some(e.to_string()),
+                }),
+            },
+            Err(e) => records.push(RepairRecord {
+                id,
+                status: RepairStatus::Failed,
+                reason: Some(e.to_string()),
+            }),
+        }
     }
 
     let needs_refresh = findings.iter().any(|f| {
@@ -1149,6 +1183,88 @@ mod tests {
         assert_eq!(code, 0);
         assert!(root.join("nu_state").is_dir());
         assert!(root.join("nu_state/paths.json").is_file());
+    }
+
+    #[test]
+    fn doctor_fix_adds_official_registry_when_initialized_without_registries() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("nu_state")).unwrap();
+        std::fs::write(root.join("nu"), b"nu").unwrap();
+        fake_paths(root, &root.join("nu")).save(root).unwrap();
+        crate::config::Config::default().save(root).unwrap();
+
+        let args = DoctorArgs {
+            fix: true,
+            yes: true,
+            json: false,
+            nupm_home: None,
+        };
+        let report = run_checks(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: false,
+                nupm_home: None,
+            },
+            root,
+        )
+        .unwrap();
+        let none = report
+            .findings
+            .iter()
+            .find(|f| f.id == "registry.none")
+            .expect("registry.none finding");
+        if OFFICIAL_REGISTRY.is_placeholder_key() {
+            assert_eq!(none.fix.as_deref(), Some(hints::CMD_REGISTRY_ADD));
+            assert_eq!(none.repair, RepairTier::Manual);
+            return;
+        }
+        assert_eq!(none.fix.as_deref(), Some(hints::CMD_DOCTOR_FIX));
+        assert_eq!(none.repair, RepairTier::Auto);
+
+        execute_with_options(
+            &args,
+            root,
+            DoctorOptions {
+                skip_network: true,
+                init_repair: None,
+                activate_repair: None,
+            },
+        )
+        .unwrap();
+
+        let config = crate::config::Config::load(root).unwrap();
+        assert!(config.registries.contains_key(OFFICIAL_REGISTRY.name));
+    }
+
+    #[test]
+    fn doctor_registry_none_hints_init_before_first_init() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root).unwrap();
+        crate::config::Config::default().save(root).unwrap();
+
+        let report = run_checks(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: false,
+                nupm_home: None,
+            },
+            root,
+        )
+        .unwrap();
+        let none = report
+            .findings
+            .iter()
+            .find(|f| f.id == "registry.none")
+            .expect("registry.none finding");
+        if OFFICIAL_REGISTRY.is_placeholder_key() {
+            assert_eq!(none.fix.as_deref(), Some(hints::CMD_REGISTRY_ADD));
+        } else {
+            assert_eq!(none.fix.as_deref(), Some(CMD_INIT));
+        }
     }
 
     #[test]
