@@ -9,6 +9,7 @@ use crate::cmd::activate::{execute as activate_execute, ActivateArgs};
 use crate::cmd::init::{ensure_official_registry_config, execute as init_execute, InitArgs};
 use crate::cmd::registry::{self, RegistryCommands};
 use crate::config::Config;
+use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::core::registry::RegistryManager;
 use crate::nu::paths::NuPaths;
 use crate::nupm_compat::NupmCompatibility;
@@ -22,7 +23,6 @@ use crate::state::lifecycle_journal::PendingLifecycle;
 use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
-use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::util::hints::{
     self, registry_none_fix, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC,
 };
@@ -843,7 +843,10 @@ fn apply_repairs(
         });
     }
 
-    if findings.iter().any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto) {
+    if findings
+        .iter()
+        .any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto)
+    {
         let id = "registry.none".to_string();
         match Config::load(root) {
             Ok(mut config) => match ensure_official_registry_config(root, &mut config) {
