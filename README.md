@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.2). Core install, activate, update, remove, gc, registry, doctor, nupm interoperability, and shell completions are implemented and covered by 325+ tests plus real-Nu acceptance on CI. Source builds and lockfile rollback snapshots remain planned; pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.3). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 325+ tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
 
 ---
 
@@ -90,7 +90,7 @@ Verify downloads with the `SHA256SUMS` file attached to each release.
 cargo install --git https://github.com/tonythethompson/numan
 ```
 
-Tracks the default branch; pin a tag with `--tag v0.1.2` for reproducible installs.
+Tracks the default branch; pin a tag with `--tag v0.1.3` for reproducible installs.
 
 ### Homebrew (macOS / Linux)
 

@@ -7,19 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-05
+
 ### Added
 
-- CI: MSRV job (1.88), `cargo deny`, `cargo package` checks; CI runs on version tags
-- Release workflow gates on green CI + preflight (fmt, clippy, test, package) before build/publish
-- Homebrew formula (`packaging/homebrew/numan.rb`) and winget manifests for v0.1.2
-- [docs/PACKAGING.md](docs/PACKAGING.md) — packaging update checklist
+- `numan snapshot list|inspect|delete|rollback` — CLI for immutable activation snapshots ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md))
+- Registry signature verification with built-in official trust root plumbing (`src/core/official_registry.rs`)
+- Detached `index.json.sig` validation on `numan registry sync`; last-known-good index fallback
+- CI: MSRV (1.88), `cargo deny`, `cargo package`; CI on version tags; release gates on green CI + preflight
+- Homebrew formula and winget manifests; [docs/PACKAGING.md](docs/PACKAGING.md)
+- `scripts/update-official-trust-root.sh` for client trust-root updates
 
 ### Changed
 
-- Registry index JSON: top-level `version` key renamed to `schema_version` on write; legacy cached `index.json` files using `version` still deserialize (`serde` alias)
-- README command reference: common flags table aligned with clap `--help`
-- README: `cargo install --git`, Homebrew, and winget install paths
-- [docs/RELEASING.md](docs/RELEASING.md): pre-tag local checklist and CI gate documentation
+- Registry index JSON: top-level `version` → `schema_version` on write; legacy `"version"` still deserializes
+- `numan gc` can prune unreferenced snapshot directories
+- README: install paths (git, Homebrew, winget), common flags table, snapshot docs
+- [docs/RELEASING.md](docs/RELEASING.md): pre-tag checklist and CI gate documentation
 
 ## [0.1.2] - 2026-06-30
 
@@ -53,7 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Release binaries for Linux, Windows, and macOS
 - Real-Nu acceptance CI job
 
-[Unreleased]: https://github.com/tonythethompson/numan/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/tonythethompson/numan/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/tonythethompson/numan/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/tonythethompson/numan/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tonythethompson/numan/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tonythethompson/numan/releases/tag/v0.1.0
