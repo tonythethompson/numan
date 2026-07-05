@@ -16,8 +16,8 @@ After a GitHub Release is published (see [RELEASING.md](RELEASING.md)):
    - `TonyTheThompson.Numan.locale.en-US.yaml`
    - Set `InstallerSha256` to uppercase hex from `SHA256SUMS`
    - Update nested `RelativeFilePath` if the archive folder name changed
-4. Open a PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) for community winget installs (optional but recommended).
-5. If using a dedicated Homebrew tap repo, copy the updated `numan.rb` to `Formula/numan.rb` there.
+4. Open a PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) for community winget installs (recommended).
+5. **Homebrew tap** — sync `packaging/homebrew/numan.rb` to [tonythethompson/homebrew-numan](https://github.com/tonythethompson/homebrew-numan) `Formula/numan.rb` (`scripts/sync-homebrew-tap.sh`).
 
 ## Install channels
 
@@ -26,7 +26,8 @@ After a GitHub Release is published (see [RELEASING.md](RELEASING.md)):
 | GitHub Release | Download archive from [Releases](https://github.com/tonythethompson/numan/releases) |
 | crates.io | `cargo install numan-cli` |
 | From git | `cargo install --git https://github.com/tonythethompson/numan` |
-| Homebrew | `brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb` |
+| Homebrew (tap) | `brew tap tonythethompson/numan && brew install numan` |
+| Homebrew (direct) | `brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb` |
 | winget (local manifest) | `winget install --manifest packaging/winget/manifests/t/TonyTheThompson/Numan/<version>` |
 | winget (community) | `winget install TonyTheThompson.Numan` (after winget-pkgs PR merges) |
 

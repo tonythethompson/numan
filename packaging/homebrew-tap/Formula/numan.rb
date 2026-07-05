@@ -1,17 +1,6 @@
 # typed: false
 # frozen_string_literal: true
 
-# Homebrew formula for Numan — cross-platform Nushell package manager.
-#
-# Install without a tap (uses this file from the main repo):
-#   brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb
-#
-# Install via tap:
-#   brew tap tonythethompson/numan
-#   brew install numan
-#
-# Update version and sha256 values when cutting a release (see docs/PACKAGING.md).
-
 class Numan < Formula
   desc "Cross-platform package manager for Nushell"
   homepage "https://github.com/tonythethompson/numan"

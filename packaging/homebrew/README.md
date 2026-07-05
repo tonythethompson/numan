@@ -1,6 +1,15 @@
 # Homebrew
 
-## Install (no tap required)
+## Install via tap (recommended)
+
+```bash
+brew tap tonythethompson/numan
+brew install numan
+```
+
+Tap repository: [github.com/tonythethompson/homebrew-numan](https://github.com/tonythethompson/homebrew-numan)
+
+## Install without a tap
 
 ```bash
 brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb
@@ -8,19 +17,6 @@ brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/m
 
 Requires a [Nushell](https://www.nushell.sh/) binary on `PATH` for `numan init` and `numan activate`.
 
-## Optional tap workflow
-
-To publish a dedicated tap (e.g. `tonythethompson/homebrew-numan`):
-
-1. Create a repository named `homebrew-numan`.
-2. Copy `numan.rb` to `Formula/numan.rb` in that repo.
-3. Users install with:
-
-   ```bash
-   brew tap tonythethompson/numan
-   brew install numan
-   ```
-
 ## Updating for a release
 
-Bump `version` and per-platform `sha256` in `numan.rb` from the GitHub Release `SHA256SUMS` file. See [docs/PACKAGING.md](../../docs/PACKAGING.md).
+Bump `version` and per-platform `sha256` in `numan.rb` from the GitHub Release `SHA256SUMS` file. Sync the same file to `homebrew-numan/Formula/numan.rb` (see `scripts/sync-homebrew-tap.sh`).

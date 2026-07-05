@@ -111,7 +111,7 @@ winget install TonyTheThompson.Numan
 Until then, install from the in-repo manifest (from a clone of this repository):
 
 ```powershell
-winget install --manifest .\packaging\winget\manifests\t\TonyTheThompson\Numan\0.1.2
+winget install --manifest .\packaging\winget\manifests\t\TonyTheThompson\Numan\0.1.3
 ```
 
 See [packaging/winget/README.md](packaging/winget/README.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
