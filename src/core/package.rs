@@ -55,6 +55,7 @@ impl FromStr for ScopedId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PackageType {
     Plugin,
     Module,
@@ -289,5 +290,32 @@ mod tests {
         }"#;
         let index: RegistryIndex = serde_json::from_str(json).unwrap();
         assert_eq!(index.schema_version, 1);
+    }
+
+    #[test]
+    fn parse_registry_index_lowercase_package_type() {
+        let json = r#"{
+            "schema_version": 1,
+            "updated_at": "2026-06-27T00:00:00Z",
+            "packages": [{
+                "id": { "owner": "o", "name": "n" },
+                "description": "d",
+                "repo": "https://example.com",
+                "type": "module",
+                "tags": [],
+                "versions": [{
+                    "version": "1.0.0",
+                    "nu_version": ">=0.113.0",
+                    "artifact": {
+                        "kind": "archive",
+                        "url": "https://example.com/pkg.zip",
+                        "sha256": "abc",
+                        "entry": "mod.nu"
+                    }
+                }]
+            }]
+        }"#;
+        let index: RegistryIndex = serde_json::from_str(json).unwrap();
+        assert_eq!(index.packages[0].package_type, PackageType::Module);
     }
 }

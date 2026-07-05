@@ -118,9 +118,7 @@ fn ensure_official_registry_config(root: &Path, config: &mut Config) -> Result<b
 }
 
 fn official_registry_configured(config: &Config) -> bool {
-    config
-        .registries
-        .contains_key(OFFICIAL_REGISTRY.name)
+    config.registries.contains_key(OFFICIAL_REGISTRY.name)
 }
 
 fn print_onboarding_next_steps(official_configured: bool) {

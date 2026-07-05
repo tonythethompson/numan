@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - winget manifests: `tonythethompson.Numan` identifier, schema 1.12.0, lowercase publisher path
 - README quick start: `init` → `registry sync` (no manual `registry add` for official)
 
+### Fixed
+
+- Deserialize lowercase registry package `type` values (`plugin`, `module`, etc.) from the official index
+
 ## [0.1.3] - 2026-07-05
 
 ### Added

@@ -12,6 +12,6 @@ Commands:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/tonythethompson/numan/releases/download/v0.1.4/numan-0.1.4-x86_64-pc-windows-msvc.zip
-    InstallerSha256: PLACEHOLDER_UPDATE_AFTER_RELEASE
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
 ManifestType: installer
 ManifestVersion: 1.12.0
