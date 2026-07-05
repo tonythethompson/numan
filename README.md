@@ -385,49 +385,49 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 
 ## Roadmap
 
-**Current release:** [v0.1.4](https://github.com/tonythethompson/numan/releases/tag/v0.1.4) — feature-complete core, early-stage production trial.
+**Current release:** [v0.1.4](https://github.com/tonythethompson/numan/releases/tag/v0.1.4) — feature-complete core on **0.1.x** while dogfooding the official registry.
 
-### Shipped
+| Phase | Scope | Status |
+|-------|--------|--------|
+| **1–2** | Types, platform, lockfile, signed registry, install transaction | ✅ |
+| **3–4** | Plugin + module activation, journals, managed autoloads | ✅ |
+| **5** | `update` / `remove` / `gc`, lockfile v2, [snapshots + rollback](docs/snapshots-and-rollback.md) | ✅ (source builds deferred) |
+| **6** | [nupm](docs/nupm-compatibility.md) status, inspect, import, drift | ✅ |
+| **7** | Doctor, completions, onboarding, CI hardening, [Homebrew/winget packaging](docs/PACKAGING.md) | ✅ — [plan](Phase7Plan.md) |
+| **Post-7.6** | Production [official registry](https://tonythethompson.github.io/numan-registry/) cutover; `numan init` and `numan doctor --fix` auto-configure `official` | ✅ (v0.1.4) |
 
-| Area | Status |
-|------|--------|
-| Foundation, install, activate (plugins + modules) | ✅ Complete |
-| Update, remove, gc, lockfile v2 | ✅ Complete |
-| Activation snapshots + rollback CLI | ✅ Complete — [docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md) |
-| nupm status, inspect, import, drift | ✅ Complete — [docs/nupm-compatibility.md](docs/nupm-compatibility.md) |
-| Official registry production cutover | ✅ Complete (v0.1.4) — built-in trust root; `numan init` auto-configures `official` |
-| Distribution baseline (releases, crates.io, `numan init`) | ✅ [Phase 7.1](Phase7Plan.md) |
-| Doctor, completions, onboarding | ✅ [Phase 7.2–7.4](Phase7Plan.md) |
-| CI hardening, `--help` audit | ✅ [Phase 7.5](Phase7Plan.md) |
-| Homebrew formula + tap | ✅ [Phase 7.6](Phase7Plan.md) — `brew tap tonythethompson/numan` |
-| winget manifests (in-repo) | ✅ [packaging/winget/README.md](packaging/winget/README.md) |
+### Next (toward 1.0)
 
-### In progress
-
-| Area | Status |
-|------|--------|
-| winget community listing | 🔄 [winget-pkgs PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) — `winget install tonythethompson.Numan` after merge |
-| Official registry package growth | 🔄 Curated seed packages + acceptance checklist — [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) |
-
-### Planned
-
-| Area | Tracking |
+| Item | Tracking |
 |------|----------|
-| Source builds (clone/build with consent) | Phase 5.2 — [#11](https://github.com/tonythethompson/numan/issues/11) |
-| Plugin lifecycle gate | Phase 5.5 — [#11](https://github.com/tonythethompson/numan/issues/11), [#22](https://github.com/tonythethompson/numan/issues/22) |
-| Registry intake automation (`registry lint`, discovery, validation reports) | [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) stages 2–4 |
+| Community **winget** install (`winget install tonythethompson.Numan`) | 🔄 [winget-pkgs PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) |
+| Curated **official registry** packages + trust/bootstrap policy | 🔄 [#18](https://github.com/tonythethompson/numan/issues/18), [intake roadmap](docs/registry-intake-roadmap.md) stage 1 |
+| Cross-platform **fresh-install** dogfooding | 🔄 `init` → `registry sync` → `search` → `install` → `activate` → `doctor` on Linux, macOS, Windows |
+
+**1.0** when the rows above are done and there are no open P0/P1 issues on the core install/activate/update/remove lifecycle.
+
+### Later
+
+| Item | Tracking |
+|------|----------|
+| Source builds (clone/build with consent) | [#20](https://github.com/tonythethompson/numan/issues/20) / Phase 5.2 |
+| Plugin lifecycle gate before mutation | [#22](https://github.com/tonythethompson/numan/issues/22) / Phase 5.5 |
+| Registry intake automation (lint, discovery, validation reports) | [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) stages 2–4 |
 | Scoop manifest | Deferred (low demand) |
 
-### Toward 1.0
+<details>
+<summary>Phase 7 detail (complete)</summary>
 
-Numan stays on **0.1.x** while dogfooding the official-registry onboarding path. **1.0** is targeted when:
+| Slice | Status |
+|-------|--------|
+| 7.1 Distribution baseline (releases, crates.io, `numan init`) | ✅ |
+| 7.2 `numan doctor` | ✅ |
+| 7.3 Completions + error UX | ✅ |
+| 7.4 Onboarding quick start | ✅ |
+| 7.5 CI / release hardening | ✅ |
+| 7.6 Homebrew tap + winget manifests (in-repo) | ✅ |
 
-- Cross-platform fresh install works end-to-end (`init` → `registry sync` → `search` → `install` → `activate` → `doctor`)
-- Community winget install is available
-- Official registry has a small curated package set with repeatable acceptance
-- No open P0/P1 issues on core install/activate/update/remove lifecycle
-
-Track polish and distribution work in [Phase7Plan.md](Phase7Plan.md) ([#12](https://github.com/tonythethompson/numan/issues/12)).
+</details>
 
 ---
 
