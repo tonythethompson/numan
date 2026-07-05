@@ -15,7 +15,7 @@
 class Numan < Formula
   desc "Cross-platform package manager for Nushell"
   homepage "https://github.com/tonythethompson/numan"
-  version "0.1.3"
+  version "0.1.4"
   license "MIT"
 
   on_macos do

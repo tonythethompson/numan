@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-05
+
+### Added
+
+- Production official registry trust root (`official-2026-07-01`) — `numan registry sync` verifies the live index without manual `--key` onboarding
+- `numan init` auto-configures the official registry when the built-in trust root is production-ready
+
+### Changed
+
+- winget manifests: `tonythethompson.Numan` identifier, schema 1.12.0, lowercase publisher path
+- README quick start: `init` → `registry sync` (no manual `registry add` for official)
+
 ## [0.1.3] - 2026-07-05
 
 ### Added
@@ -57,7 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Release binaries for Linux, Windows, and macOS
 - Real-Nu acceptance CI job
 
-[Unreleased]: https://github.com/tonythethompson/numan/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/tonythethompson/numan/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/tonythethompson/numan/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/tonythethompson/numan/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/tonythethompson/numan/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tonythethompson/numan/compare/v0.1.0...v0.1.1

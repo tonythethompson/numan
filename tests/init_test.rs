@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use numan_cli::cmd::init::{execute_with_runner, InitArgs};
+use numan_cli::config::Config;
 use numan_cli::core::integrity;
+use numan_cli::core::official_registry::OFFICIAL_REGISTRY;
 use numan_cli::core::package::ModuleImportMode;
 use numan_cli::nu::autoload::{CandidateRunner, FakeCandidateRunner};
 use numan_cli::nu::paths::NuPaths;
@@ -289,4 +291,51 @@ fn refresh_rejects_missing_managed_file_with_active_modules() {
         err.to_string().contains("Managed autoload file"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn first_init_configures_official_registry_when_trust_root_is_production() {
+    if OFFICIAL_REGISTRY.is_placeholder_key() {
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let nu_exe = root.join("nu");
+    std::fs::write(&nu_exe, b"nu-binary").unwrap();
+    let vendor = root.join("vendor").join("autoload");
+    std::fs::create_dir_all(&vendor).unwrap();
+
+    let bytes = std::fs::read(&nu_exe).unwrap();
+    let paths = NuPaths {
+        nu_executable: nu_exe.to_string_lossy().into_owned(),
+        nu_version: "0.113.1".to_string(),
+        plugin_registry_path: root.join("plugins.msgpackz").to_string_lossy().into_owned(),
+        nu_executable_hash: integrity::compute_sha256(&bytes),
+        platform: "test".to_string(),
+        data_dir: Some(root.join("data").to_string_lossy().into_owned()),
+        vendor_autoload_dirs: vec![vendor.to_string_lossy().into_owned()],
+        vendor_autoload_dir: Some(vendor.to_string_lossy().into_owned()),
+    };
+    let detect = {
+        let paths = paths.clone();
+        move || Ok(paths.clone())
+    };
+
+    execute_with_runner(
+        &InitArgs { refresh: false },
+        root,
+        detect,
+        fake_runner_factory,
+    )
+    .unwrap();
+
+    let config = Config::load(root).unwrap();
+    let official = config
+        .registries
+        .get(OFFICIAL_REGISTRY.name)
+        .expect("official registry should be configured");
+    assert_eq!(official.url, OFFICIAL_REGISTRY.production_url);
+    assert!(official.enabled);
+    assert!(official.trust_key.is_none());
 }

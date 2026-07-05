@@ -29,9 +29,8 @@ pub struct OfficialRegistry {
 pub const OFFICIAL_REGISTRY: OfficialRegistry = OfficialRegistry {
     name: "official",
     production_url: "https://tonythethompson.github.io/numan-registry/index.json",
-    key_id: "official-placeholder",
-    // Placeholder sentinel; updated by scripts/update-official-trust-root.sh during cutover.
-    public_key_b64: "PLACEHOLDER",
+    key_id: "official-2026-07-01",
+    public_key_b64: "1F0STZT/Fk4OiP/7Hqs3/MurixBKoe7GYVoCto2/mCc=",
 };
 
 impl OfficialRegistry {
@@ -466,11 +465,10 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("bad-key"));
     }
 
-    /// Guards the pre-cutover state: the built-in trust root must remain a
-    /// placeholder until the production key and URL are provisioned and committed.
+    /// Guards the post-cutover state: released builds must ship a real production key.
     #[test]
-    fn official_registry_is_placeholder_in_draft() {
-        assert!(OFFICIAL_REGISTRY.is_placeholder_key());
+    fn official_registry_is_not_placeholder_in_production() {
+        assert!(!OFFICIAL_REGISTRY.is_placeholder_key());
     }
 
     /// Guards against a half-applied trust-root edit: key_id and

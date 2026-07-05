@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.3). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 325+ tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 325+ tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
 
 ---
 
@@ -90,7 +90,7 @@ Verify downloads with the `SHA256SUMS` file attached to each release.
 cargo install --git https://github.com/tonythethompson/numan
 ```
 
-Tracks the default branch; pin a tag with `--tag v0.1.3` for reproducible installs.
+Tracks the default branch; pin a tag with `--tag v0.1.4` for reproducible installs.
 
 ### Homebrew (macOS / Linux)
 
@@ -112,13 +112,13 @@ See [packaging/homebrew/README.md](packaging/homebrew/README.md).
 After the package is listed in [winget-pkgs](https://github.com/microsoft/winget-pkgs):
 
 ```powershell
-winget install TonyTheThompson.Numan
+winget install tonythethompson.Numan
 ```
 
 Until then, install from the in-repo manifest (from a clone of this repository):
 
 ```powershell
-winget install --manifest .\packaging\winget\manifests\t\TonyTheThompson\Numan\0.1.3
+winget install --manifest .\packaging\winget\manifests\t\tonythethompson\Numan\0.1.4
 ```
 
 See [packaging/winget/README.md](packaging/winget/README.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
@@ -153,7 +153,7 @@ numan completions powershell | Out-File -Encoding utf8 $PROFILE
 
 ## Quick start
 
-Copy-paste path from install through first activation (replace registry URL and key with your source):
+Copy-paste path from install through first activation:
 
 ```bash
 # Install (pick one)
@@ -161,7 +161,6 @@ cargo install numan-cli
 # or: download a release archive from GitHub Releases and add numan to PATH
 
 numan init
-numan registry add official https://example.com/index.json --key <base64-public-key>
 numan registry sync
 numan search hooks
 numan install owner/package-name
@@ -189,12 +188,11 @@ Probe your local Nu installation and create Numan state under the default root (
 numan init
 ```
 
-`numan init` prints a numbered checklist when no registry is configured yet.
+`numan init` configures the official registry automatically and prints a numbered checklist when setup is incomplete.
 
-#### 2. Configure a registry
+#### 2. Sync the registry
 
 ```bash
-numan registry add official https://example.com/index.json --key <base64-public-key>
 numan registry sync
 ```
 

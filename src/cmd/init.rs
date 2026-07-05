@@ -2,7 +2,8 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use std::path::Path;
 
-use crate::config::Config;
+use crate::config::{Config, RegistryConfig};
+use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::nu::autoload::{validate_candidate, CandidateRunner, NuCandidateRunner};
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_state::AutoloadState;
@@ -66,33 +67,84 @@ where
 
     let config_path = root.join("config.toml");
     let config_created = !config_path.exists();
-    if config_created {
-        Config::default().save(root)?;
+    let mut config = if config_created {
+        let config = Config::default();
+        config.save(root)?;
         println!("Created default config at '{}'.", config_path.display());
+        config
+    } else {
+        Config::load(root)?
+    };
+
+    let official_added = ensure_official_registry_config(root, &mut config)?;
+    if official_added {
+        println!(
+            "Configured official registry '{}' at {}.",
+            OFFICIAL_REGISTRY.name, OFFICIAL_REGISTRY.production_url
+        );
     }
 
     print_summary(root, &paths, false);
     warn_missing_vendor_target(&paths);
 
-    if config_created || Config::load(root)?.registries.is_empty() {
-        print_onboarding_next_steps();
+    if config_created || config.registries.is_empty() || official_added {
+        print_onboarding_next_steps(official_registry_configured(&config));
     }
 
     Ok(())
 }
 
-fn print_onboarding_next_steps() {
+/// When the built-in trust root is production-ready, seed the official registry
+/// in config so first-time users can `registry sync` without manual `registry add`.
+fn ensure_official_registry_config(root: &Path, config: &mut Config) -> Result<bool> {
+    if OFFICIAL_REGISTRY.is_placeholder_key() {
+        return Ok(false);
+    }
+    if config.registries.contains_key(OFFICIAL_REGISTRY.name) {
+        return Ok(false);
+    }
+
+    config.registries.insert(
+        OFFICIAL_REGISTRY.name.to_string(),
+        RegistryConfig {
+            url: OFFICIAL_REGISTRY.production_url.to_string(),
+            sync_interval: "24h".to_string(),
+            enabled: true,
+            trust_key: None,
+        },
+    );
+    config.save(root)?;
+    Ok(true)
+}
+
+fn official_registry_configured(config: &Config) -> bool {
+    config
+        .registries
+        .contains_key(OFFICIAL_REGISTRY.name)
+}
+
+fn print_onboarding_next_steps(official_configured: bool) {
     println!();
     println!("Next steps:");
-    println!("  1. Add a registry:");
-    println!("     {CMD_REGISTRY_ADD}");
-    println!("  2. Sync the index:");
-    println!("     {CMD_REGISTRY_SYNC}");
-    println!("  3. Search and install:");
-    println!("     numan search <query>");
-    println!("     numan install owner/name");
-    println!("  4. Activate with Nu:");
-    println!("     {CMD_ACTIVATE}");
+    if official_configured {
+        println!("  1. Sync the registry index:");
+        println!("     {CMD_REGISTRY_SYNC}");
+        println!("  2. Search and install:");
+        println!("     numan search <query>");
+        println!("     numan install owner/name");
+        println!("  3. Activate with Nu:");
+        println!("     {CMD_ACTIVATE}");
+    } else {
+        println!("  1. Add a registry:");
+        println!("     {CMD_REGISTRY_ADD}");
+        println!("  2. Sync the index:");
+        println!("     {CMD_REGISTRY_SYNC}");
+        println!("  3. Search and install:");
+        println!("     numan search <query>");
+        println!("     numan install owner/name");
+        println!("  4. Activate with Nu:");
+        println!("     {CMD_ACTIVATE}");
+    }
     println!();
     println!(
         "Run 'numan doctor' to verify setup (use 'numan doctor --fix --yes' for safe repairs)."
