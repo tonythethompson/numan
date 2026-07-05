@@ -95,10 +95,17 @@ Tracks the default branch; pin a tag with `--tag v0.1.3` for reproducible instal
 ### Homebrew (macOS / Linux)
 
 ```bash
+brew tap tonythethompson/numan
+brew install numan
+```
+
+Or without a tap:
+
+```bash
 brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb
 ```
 
-See [packaging/homebrew/README.md](packaging/homebrew/README.md) for an optional dedicated tap workflow.
+See [packaging/homebrew/README.md](packaging/homebrew/README.md).
 
 ### winget (Windows)
 
