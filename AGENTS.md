@@ -56,6 +56,7 @@ src/
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
     completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell scripts (Phase 7.3)
+    setup.rs           — `numan setup loader`: vendored nushell-loader install + config.nu snippet
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
@@ -96,6 +97,7 @@ tests/
   doctor_test.rs       — `numan doctor` report-only, --fix auto tier, journal checks (Phase 7.2)
   nupm_compat_test.rs  — Phase 6 integration tests (T13–T25, import/drift/manifest/activation/platform)
   nupm_real_nu_test.rs — Phase 6.4 real-Nu #[ignore] acceptance tests (run with `cargo test -- --ignored`)
+  setup_test.rs        — `numan setup loader` install and config.nu snippet detection
 ```
 
 ## Key Conventions
