@@ -388,7 +388,7 @@ impl<'a> Parser<'a> {
             .copied()
             .collect::<Vec<_>>()
             .windows(2)
-            .any(|w| w == [b'|', b'|'])
+            .any(|w| w == *b"||")
         {
             return true;
         }
