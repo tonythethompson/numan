@@ -68,6 +68,14 @@ pub fn execute(cmd: SetupCommands, root: &Path) -> Result<()> {
 }
 
 pub fn execute_nu(args: &NuSetupArgs, root: &Path) -> Result<()> {
+    if args.use_existing.is_some() && args.skip_path {
+        bail!(
+            "numan setup nu --use-existing cannot be combined with --skip-path. \
+             Off-PATH registration must persist the binary directory to PATH; \
+             omit --skip-path or pass --skip-path only for managed downloads."
+        );
+    }
+
     let options = NuSetupOptions {
         yes: args.yes,
         force: args.force,

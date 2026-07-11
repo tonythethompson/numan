@@ -460,7 +460,15 @@ mod tests {
         let root = dir.path().join("numan-root");
         std::fs::create_dir_all(&root).unwrap();
 
-        let err = find_nu_executable_with_root(&root).unwrap_err();
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", "");
+        let result = find_nu_executable_with_root(&root);
+        match saved_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        let err = result.unwrap_err();
         assert!(err.to_string().contains("numan setup nu"));
     }
 

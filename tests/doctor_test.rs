@@ -34,6 +34,27 @@ fn nu_setup_repair_test(
     Ok(())
 }
 
+struct ClearedPath {
+    saved: Option<String>,
+}
+
+impl ClearedPath {
+    fn new() -> Self {
+        let saved = std::env::var("PATH").ok();
+        std::env::set_var("PATH", "");
+        Self { saved }
+    }
+}
+
+impl Drop for ClearedPath {
+    fn drop(&mut self) {
+        match &self.saved {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+}
+
 fn fake_runner(_exe: &str) -> Box<dyn numan_cli::nu::autoload::CandidateRunner> {
     Box::new(FakeCandidateRunner::success())
 }
@@ -186,6 +207,7 @@ fn doctor_reports_off_path_nu_without_download() {
 
     *TEST_OFF_PATH.lock().unwrap() = Some(off_path.clone());
 
+    let _cleared_path = ClearedPath::new();
     let args = DoctorArgs {
         fix: false,
         yes: false,
@@ -230,6 +252,7 @@ fn doctor_fix_registers_off_path_nu_without_network() {
     *TEST_OFF_PATH.lock().unwrap() = Some(off_path.clone());
     *TEST_NU_SETUP_CALLED.lock().unwrap() = false;
 
+    let _cleared_path = ClearedPath::new();
     let args = DoctorArgs {
         fix: true,
         yes: true,

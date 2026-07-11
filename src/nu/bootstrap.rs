@@ -10,6 +10,8 @@ use crate::install::download::download_file;
 use crate::install::extract::{extract_archive, ArchiveFormat, ExtractConfig};
 #[cfg(unix)]
 use crate::util::atomic::write_bytes_atomic;
+#[cfg(unix)]
+use crate::util::fs_safety::assert_not_symlink;
 
 const RELEASES_LATEST: &str = "https://api.github.com/repos/nushell/nushell/releases/latest";
 const USER_AGENT: &str = "numan-cli (https://github.com/tonythethompson/numan)";
@@ -313,22 +315,26 @@ pub fn persist_path_dir(dir: &Path) -> Result<()> {
 
 /// Register an existing Nushell binary: prepend its directory to PATH and persist when allowed.
 pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<PathBuf> {
-    let binary = binary
+    let input = binary.to_path_buf();
+    let resolved = input
         .canonicalize()
         .with_context(|| format!("Failed to resolve Nushell binary '{}'", binary.display()))?;
-    if !binary.is_file() {
+    if !resolved.is_file() {
         bail!(
             "'{}' is not an executable file. Pass the path to an existing nu binary.",
             binary.display()
         );
     }
 
-    let parent = binary.parent().with_context(|| {
+    let parent = input.parent().with_context(|| {
         format!(
             "Nushell binary '{}' has no parent directory",
             binary.display()
         )
     })?;
+    let parent = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
 
     if !options.yes && !std::io::stdin().is_terminal() {
         bail!(
@@ -351,9 +357,9 @@ pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<P
         }
     }
 
-    prepend_process_path(parent)?;
+    prepend_process_path(&parent)?;
     if !options.skip_path {
-        persist_path_dir(parent)?;
+        persist_path_dir(&parent)?;
         #[cfg(windows)]
         println!(
             "Added '{}' to your user PATH. Open a new terminal for PATH changes to apply everywhere.",
@@ -367,7 +373,7 @@ pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<P
     } else {
         println!(
             "Skipped persistent PATH update. This session can use '{}'.",
-            binary.display()
+            resolved.display()
         );
     }
 
@@ -375,7 +381,7 @@ pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<P
     println!("Next steps:");
     println!("  numan init");
     println!("  numan doctor");
-    Ok(binary)
+    Ok(resolved)
 }
 
 #[cfg(windows)]
@@ -471,6 +477,9 @@ fn append_shell_profile_line(
     let home = dirs::home_dir().context("Could not resolve home directory for PATH setup")?;
     for name in [".zshrc", ".bashrc", ".profile"] {
         let profile = home.join(name);
+        if profile.exists() {
+            assert_not_symlink(&profile, name)?;
+        }
         if profile.is_file() {
             let content = std::fs::read_to_string(&profile)
                 .with_context(|| format!("Failed to read shell profile '{}'", profile.display()))?;
@@ -632,12 +641,14 @@ mod tests {
         assert_eq!(EXPORT_LINE.matches('"').count(), 2);
     }
 
+    #[cfg(windows)]
     #[test]
     fn normalize_path_entry_str_strips_verbatim_prefix() {
         let entry = format!("{VERBATIM_PATH_PREFIX}C:\\foo\\bin");
         assert_eq!(normalize_path_entry_str(&entry), "C:\\foo\\bin");
     }
 
+    #[cfg(windows)]
     #[test]
     fn path_list_contains_matches_normalized_windows_paths() {
         let entry = format!("{VERBATIM_PATH_PREFIX}C:\\foo\\bin");

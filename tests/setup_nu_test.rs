@@ -102,7 +102,7 @@ fn setup_nu_use_existing_registers_binary_without_download() {
     execute_nu(
         &NuSetupArgs {
             force: false,
-            skip_path: true,
+            skip_path: false,
             yes: true,
             use_existing: Some(existing.clone()),
         },
@@ -123,10 +123,41 @@ fn setup_nu_use_existing_registers_binary_without_download() {
         .unwrap()
         .to_path_buf();
     let parent_str = parent.to_string_lossy().replace("\\\\?\\", "");
-    assert!(
+    let path_contains = if cfg!(windows) {
         path_var
             .split(';')
-            .any(|part| part.trim().eq_ignore_ascii_case(&parent_str)),
+            .any(|part| part.trim().eq_ignore_ascii_case(&parent_str))
+    } else {
+        path_var
+            .split(':')
+            .any(|part| part.trim().eq_ignore_ascii_case(&parent_str))
+    };
+    assert!(
+        path_contains,
         "PATH should contain the existing Nu directory after use-existing"
+    );
+}
+
+#[test]
+fn setup_nu_rejects_use_existing_with_skip_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let existing = root.join("nu");
+    std::fs::write(&existing, b"fake nu").unwrap();
+
+    let err = execute_nu(
+        &NuSetupArgs {
+            force: false,
+            skip_path: true,
+            yes: true,
+            use_existing: Some(existing),
+        },
+        root,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("cannot be combined with --skip-path"),
+        "unexpected error: {err}"
     );
 }
