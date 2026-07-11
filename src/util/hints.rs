@@ -18,6 +18,12 @@ pub const CMD_REGISTRY_SYNC: &str = "numan registry sync";
 /// `numan doctor --fix`
 pub const CMD_DOCTOR_FIX: &str = "numan doctor --fix";
 
+/// `numan setup nu`
+pub const CMD_SETUP_NU: &str = "numan setup nu";
+
+/// `numan setup loader`
+pub const CMD_SETUP_LOADER: &str = "numan setup loader";
+
 /// `numan registry add …`
 pub const CMD_REGISTRY_ADD: &str = "numan registry add <name> <url> --key <base64-public-key>";
 

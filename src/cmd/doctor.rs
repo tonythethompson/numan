@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 use crate::cmd::activate::{execute as activate_execute, ActivateArgs};
 use crate::cmd::init::{ensure_official_registry_config, execute as init_execute, InitArgs};
 use crate::cmd::registry::{self, RegistryCommands};
+use crate::cmd::setup::{self, NuSetupArgs};
 use crate::config::Config;
 use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::core::registry::RegistryManager;
-use crate::nu::paths::NuPaths;
+use crate::nu::paths::{find_nu_executable_with_root, NuPaths};
 use crate::nupm_compat::NupmCompatibility;
 use crate::nupm_compat::{
     count_drifted_imports, resolve_nupm_home, scan_nupm_home, NupmHomeResolution,
@@ -25,6 +26,7 @@ use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
 use crate::util::hints::{
     self, registry_none_fix, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC,
+    CMD_SETUP_NU,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -117,6 +119,8 @@ pub struct DoctorOptions {
     pub init_repair: Option<fn(&InitArgs, &Path) -> Result<()>>,
     /// Override activate repair (tests inject fakes; production uses `activate::execute`).
     pub activate_repair: Option<fn(&ActivateArgs, &Path) -> Result<()>>,
+    /// Override Nushell bootstrap repair (tests inject fakes; production uses `setup::execute_nu`).
+    pub nu_setup_repair: Option<fn(&NuSetupArgs, &Path) -> Result<()>>,
 }
 
 pub fn execute(args: &DoctorArgs, root: &Path) -> Result<i32> {
@@ -271,6 +275,25 @@ fn check_root_layout(root: &Path, findings: &mut Vec<Finding>) {
 }
 
 fn check_nu_paths(root: &Path, findings: &mut Vec<Finding>) -> Option<NuPaths> {
+    let nu_available = find_nu_executable_with_root(root).is_ok();
+    if !nu_available {
+        findings.push(finding(
+            "nu.binary.missing_on_path",
+            Severity::Error,
+            "Nu not found on PATH or in the Numan tools directory.",
+            Some(CMD_SETUP_NU),
+            RepairTier::Confirm,
+        ));
+    } else {
+        findings.push(finding(
+            "nu.binary.missing_on_path",
+            Severity::Ok,
+            "Nushell binary is available",
+            None,
+            RepairTier::None,
+        ));
+    }
+
     let paths_path = root.join("nu_state/paths.json");
     if !paths_path.exists() {
         findings.push(finding(
@@ -314,7 +337,7 @@ fn check_nu_paths(root: &Path, findings: &mut Vec<Finding>) -> Option<NuPaths> {
         )),
     }
 
-    if paths.data_dir.is_some() {
+    if paths.data_dir.is_some() && nu_available {
         match NuPaths::detect()
             .and_then(|live| paths.validate_vendor_drift(&live.vendor_autoload_dirs))
         {
@@ -799,6 +822,46 @@ fn apply_repairs(
         }
     }
 
+    if findings.iter().any(|f| {
+        f.id == "nu.binary.missing_on_path" && f.severity == Severity::Error
+    }) {
+        let id = "nu.binary.missing_on_path".to_string();
+        if !confirm {
+            records.push(RepairRecord {
+                id,
+                status: RepairStatus::Skipped,
+                reason: Some("not_confirmed".to_string()),
+            });
+        } else if options.skip_network {
+            records.push(RepairRecord {
+                id,
+                status: RepairStatus::Skipped,
+                reason: Some("skip_network".to_string()),
+            });
+        } else {
+            let setup_fn = options.nu_setup_repair.unwrap_or(setup::execute_nu);
+            match setup_fn(
+                &NuSetupArgs {
+                    force: false,
+                    skip_path: false,
+                    yes: true,
+                },
+                root,
+            ) {
+                Ok(()) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Applied,
+                    reason: None,
+                }),
+                Err(e) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Failed,
+                    reason: Some(e.to_string()),
+                }),
+            }
+        }
+    }
+
     if findings
         .iter()
         .any(|f| f.id == "nu_paths.missing" && f.severity == Severity::Error)
@@ -983,6 +1046,7 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
         (
             "Initialization",
             &[
+                "nu.binary.missing_on_path",
                 "nu_paths.missing",
                 "nu_paths.drift",
                 "nu_paths.vendor_drift",
@@ -1151,11 +1215,21 @@ mod tests {
         Box::new(FakeCandidateRunner::success())
     }
 
+    use crate::nu::bootstrap::managed_nu_binary;
+
+    fn ensure_fake_managed_nu(root: &Path) -> PathBuf {
+        let binary = managed_nu_binary(root);
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::write(&binary, b"nu").unwrap();
+        binary
+    }
+
     fn test_init_repair(args: &InitArgs, root: &Path) -> Result<()> {
+        let nu_exe = ensure_fake_managed_nu(root);
         execute_with_runner(
             args,
             root,
-            || Ok(fake_paths(root, &root.join("nu"))),
+            || Ok(fake_paths(root, &nu_exe)),
             fake_runner_factory,
         )
     }
@@ -1165,7 +1239,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root).unwrap();
-        std::fs::write(root.join("nu"), b"nu").unwrap();
+        std::env::set_var("NUMAN_ROOT", root);
+        ensure_fake_managed_nu(root);
 
         let args = DoctorArgs {
             fix: true,
@@ -1180,6 +1255,7 @@ mod tests {
                 skip_network: true,
                 init_repair: Some(test_init_repair),
                 activate_repair: None,
+                nu_setup_repair: None,
             },
         )
         .unwrap();
@@ -1193,8 +1269,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join("nu_state")).unwrap();
-        std::fs::write(root.join("nu"), b"nu").unwrap();
-        fake_paths(root, &root.join("nu")).save(root).unwrap();
+        std::env::set_var("NUMAN_ROOT", root);
+        let nu_exe = ensure_fake_managed_nu(root);
+        fake_paths(root, &nu_exe).save(root).unwrap();
         crate::config::Config::default().save(root).unwrap();
 
         let args = DoctorArgs {
@@ -1233,6 +1310,7 @@ mod tests {
                 skip_network: true,
                 init_repair: None,
                 activate_repair: None,
+                nu_setup_repair: None,
             },
         )
         .unwrap();

@@ -6,6 +6,7 @@ use numan_cli::cmd::doctor::{
 use numan_cli::cmd::init::{execute_with_runner, InitArgs};
 use numan_cli::core::integrity;
 use numan_cli::nu::autoload::FakeCandidateRunner;
+use numan_cli::nu::bootstrap::managed_nu_binary;
 use numan_cli::nu::paths::NuPaths;
 use numan_cli::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
 use std::path::Path;
@@ -16,7 +17,8 @@ fn fake_runner(_exe: &str) -> Box<dyn numan_cli::nu::autoload::CandidateRunner> 
 }
 
 fn fake_init(args: &InitArgs, root: &Path) -> anyhow::Result<()> {
-    let nu_exe = root.join("nu");
+    let nu_exe = managed_nu_binary(root);
+    std::fs::create_dir_all(nu_exe.parent().unwrap()).unwrap();
     std::fs::write(&nu_exe, b"nu").unwrap();
     let bytes = std::fs::read(&nu_exe).unwrap();
     let paths = NuPaths {
@@ -53,6 +55,10 @@ fn doctor_fix_auto_creates_layout_without_network() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root).unwrap();
+    std::env::set_var("NUMAN_ROOT", root);
+    let nu_exe = managed_nu_binary(root);
+    std::fs::create_dir_all(nu_exe.parent().unwrap()).unwrap();
+    std::fs::write(&nu_exe, b"nu").unwrap();
 
     let args = DoctorArgs {
         fix: true,
@@ -67,6 +73,7 @@ fn doctor_fix_auto_creates_layout_without_network() {
             skip_network: true,
             init_repair: Some(fake_init),
             activate_repair: None,
+            nu_setup_repair: None,
         },
     )
     .unwrap();
