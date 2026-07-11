@@ -41,6 +41,6 @@ fn main() -> anyhow::Result<()> {
             let code = numan_cli::cmd::doctor::execute(&args, &root)?;
             std::process::exit(code);
         }
-        Commands::Setup(cmd) => numan_cli::cmd::setup::execute(cmd),
+        Commands::Setup(cmd) => numan_cli::cmd::setup::execute(cmd, &root),
     }
 }

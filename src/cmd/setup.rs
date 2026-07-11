@@ -3,6 +3,8 @@ use clap::{Args, Subcommand};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::core::platform::Platform;
+use crate::nu::bootstrap::{self, NuSetupOptions};
 use crate::nu::paths::{find_nu_executable, probe_nu_config_path};
 use crate::util::atomic::write_bytes_atomic;
 use crate::util::fs_safety::assert_not_symlink;
@@ -18,8 +20,25 @@ source ($nu.config-path | path dirname | path join 'loader.nu')
 
 #[derive(Debug, Subcommand)]
 pub enum SetupCommands {
+    /// Download and install the official Nushell release under the Numan root
+    Nu(NuSetupArgs),
     /// Install the vendored nushell-loader script and print a config.nu snippet
     Loader(LoaderArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct NuSetupArgs {
+    /// Re-download and replace an existing managed Nushell install
+    #[arg(long)]
+    pub force: bool,
+
+    /// Skip updating the user PATH (Numan still uses the managed binary)
+    #[arg(long)]
+    pub skip_path: bool,
+
+    /// Skip confirmation prompts (required for non-TTY downloads)
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -37,10 +56,25 @@ pub struct LoaderArgs {
     pub yes: bool,
 }
 
-pub fn execute(cmd: SetupCommands) -> Result<()> {
+pub fn execute(cmd: SetupCommands, root: &Path) -> Result<()> {
     match cmd {
+        SetupCommands::Nu(args) => execute_nu(&args, root),
         SetupCommands::Loader(args) => execute_loader(&args),
     }
+}
+
+pub fn execute_nu(args: &NuSetupArgs, root: &Path) -> Result<()> {
+    let platform = Platform::detect();
+    bootstrap::execute_nu_setup(
+        root,
+        &platform,
+        &NuSetupOptions {
+            yes: args.yes,
+            force: args.force,
+            skip_path: args.skip_path,
+        },
+    )?;
+    Ok(())
 }
 
 pub fn execute_loader(args: &LoaderArgs) -> Result<()> {

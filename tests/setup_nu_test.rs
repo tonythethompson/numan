@@ -1,0 +1,86 @@
+//! `numan setup nu` integration tests.
+
+use numan_cli::cmd::setup::{execute_nu, NuSetupArgs};
+use numan_cli::core::platform::Platform;
+use numan_cli::nu::bootstrap::{self, install_from_archive, NuSetupOptions};
+use numan_cli::nu::paths::find_nu_executable_with_root;
+use std::io::Write;
+use zip::write::SimpleFileOptions;
+use zip::ZipWriter;
+
+#[test]
+fn managed_nu_is_discovered_after_install() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::env::set_var("NUMAN_ROOT", root);
+    let zip_path = root.join("nu-test.zip");
+
+    {
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        let inner = if cfg!(windows) {
+            "nu-0.0.0-test/nu.exe"
+        } else {
+            "nu-0.0.0-test/nu"
+        };
+        zip.start_file(inner, options).unwrap();
+        zip.write_all(b"fake nu binary").unwrap();
+        zip.finish().unwrap();
+    }
+
+    install_from_archive(&zip_path, root, "0.0.0-test").unwrap();
+    bootstrap::prepend_process_path(&bootstrap::managed_nu_dir(root)).unwrap();
+
+    let resolved = find_nu_executable_with_root(root).unwrap();
+    assert_eq!(resolved, bootstrap::managed_nu_binary(root).to_string_lossy());
+}
+
+#[test]
+fn setup_nu_uses_injected_installer_without_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let platform = Platform::detect();
+
+    let installer = |install_root: &std::path::Path, _platform: &Platform| {
+        let binary = bootstrap::managed_nu_binary(install_root);
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::write(&binary, b"fake nu").unwrap();
+        Ok(binary)
+    };
+
+    bootstrap::execute_nu_setup_with_installer(
+        root,
+        &platform,
+        &NuSetupOptions {
+            yes: true,
+            force: false,
+            skip_path: true,
+        },
+        installer,
+    )
+    .unwrap();
+
+    assert!(bootstrap::managed_nu_binary(root).is_file());
+}
+
+#[test]
+fn execute_nu_command_wraps_installer() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Pre-install managed binary so execute_nu short-circuits without network.
+    let binary = bootstrap::managed_nu_binary(root);
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::write(&binary, b"fake nu").unwrap();
+
+    execute_nu(
+        &NuSetupArgs {
+            force: false,
+            skip_path: true,
+            yes: true,
+        },
+        root,
+    )
+    .unwrap();
+}
