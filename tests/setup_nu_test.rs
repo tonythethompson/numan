@@ -1,10 +1,14 @@
 //! `numan setup nu` integration tests.
+//!
+//! Tests that invoke a real Nushell binary are marked `#[ignore]` and run in the
+//! Real-Nu acceptance CI job (`cargo test -- --ignored`).
 
 use numan_cli::cmd::setup::{execute_nu, NuSetupArgs};
 use numan_cli::core::platform::Platform;
 use numan_cli::nu::bootstrap::{self, install_from_archive, NuSetupOptions};
-use numan_cli::nu::paths::find_nu_executable_with_root;
+use numan_cli::nu::paths::{find_nu_executable_with_root, validate_nushell_binary};
 use std::io::Write;
+use std::path::PathBuf;
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
@@ -90,32 +94,37 @@ fn execute_nu_command_wraps_installer() {
     .unwrap();
 }
 
+/// Return the first runnable Nushell binary on `$PATH` (or `/usr/local/bin/nu` on Unix).
+fn runnable_nu_on_path() -> Option<PathBuf> {
+    let nu_name = if cfg!(windows) { "nu.exe" } else { "nu" };
+    let mut candidates: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path)
+                .map(|dir| dir.join(nu_name))
+                .collect()
+        })
+        .unwrap_or_default();
+    if cfg!(unix) {
+        candidates.push(PathBuf::from("/usr/local/bin/nu"));
+    }
+    candidates
+        .into_iter()
+        .filter(|p| p.is_file())
+        .find(|p| validate_nushell_binary(p).is_ok())
+}
+
 #[test]
+#[ignore = "requires real Nu binary on $PATH — run in platform acceptance job"]
 fn setup_nu_use_existing_registers_binary_without_download() {
+    let Some(nu_source) = runnable_nu_on_path() else {
+        return;
+    };
+
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let existing_dir = dir.path().join("existing-nu");
     std::fs::create_dir_all(&existing_dir).unwrap();
     let existing = existing_dir.join(if cfg!(windows) { "nu.exe" } else { "nu" });
-
-    let nu_source = std::env::var_os("PATH")
-        .map(|path| {
-            std::env::split_paths(&path)
-                .map(|dir| dir.join(if cfg!(windows) { "nu.exe" } else { "nu" }))
-                .find(|p| p.is_file())
-        })
-        .flatten()
-        .or_else(|| {
-            if cfg!(unix) {
-                Some(std::path::PathBuf::from("/usr/local/bin/nu"))
-            } else {
-                None
-            }
-        })
-        .filter(|p| p.is_file());
-    let Some(nu_source) = nu_source else {
-        return;
-    };
     std::fs::copy(&nu_source, &existing).unwrap();
     #[cfg(unix)]
     {
