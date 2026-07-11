@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::core::integrity;
 use crate::core::platform::{Arch, Env, Os, Platform};
 use crate::install::download::download_file;
 use crate::install::extract::{extract_archive, ArchiveFormat, ExtractConfig};
@@ -27,6 +28,10 @@ struct GitHubRelease {
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
+    size: u64,
+    /// GitHub release asset digest, when present (e.g. `sha256:…`).
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 pub fn managed_nu_dir(root: &Path) -> PathBuf {
@@ -201,6 +206,34 @@ pub fn install_from_archive(archive_path: &Path, root: &Path, version: &str) -> 
     Ok(dest)
 }
 
+fn verify_downloaded_archive(path: &Path, asset: &GitHubAsset) -> Result<()> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("Failed to read downloaded archive '{}'", path.display()))?;
+    if bytes.len() as u64 != asset.size {
+        bail!(
+            "Downloaded archive size mismatch for '{}': expected {} bytes, got {} bytes",
+            asset.name,
+            asset.size,
+            bytes.len()
+        );
+    }
+
+    if let Some(digest) = asset.digest.as_deref() {
+        let expected = digest
+            .strip_prefix("sha256:")
+            .with_context(|| format!("Unsupported digest format for '{}': {digest}", asset.name))?;
+        let computed = integrity::compute_sha256(&bytes);
+        if !computed.eq_ignore_ascii_case(expected) {
+            bail!(
+                "Downloaded archive checksum mismatch for '{}': expected {expected}, got {computed}",
+                asset.name
+            );
+        }
+    }
+
+    Ok(())
+}
+
 pub fn install_latest(root: &Path, platform: &Platform) -> Result<PathBuf> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
@@ -215,8 +248,15 @@ pub fn install_latest(root: &Path, platform: &Platform) -> Result<PathBuf> {
 
     println!("Downloading Nushell {} ({})…", release.tag_name, asset.name);
     download_file(&asset.browser_download_url, &archive_path)?;
+    verify_downloaded_archive(&archive_path, asset)?;
 
     let installed = install_from_archive(&archive_path, root, &release.tag_name)?;
+    validate_nushell_binary(&installed).with_context(|| {
+        format!(
+            "Installed Nushell binary at '{}' failed validation",
+            installed.display()
+        )
+    })?;
     println!(
         "Installed Nushell {} to '{}'.",
         release.tag_name,
@@ -658,6 +698,8 @@ mod tests {
             assets: vec![GitHubAsset {
                 name: "nu-0.114.0-x86_64-pc-windows-msvc.zip".to_string(),
                 browser_download_url: "https://example.invalid/nu.zip".to_string(),
+                size: 0,
+                digest: None,
             }],
         }
     }
