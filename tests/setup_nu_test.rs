@@ -33,7 +33,11 @@ fn managed_nu_is_discovered_after_install() {
     bootstrap::prepend_process_path(&bootstrap::managed_nu_dir(root)).unwrap();
 
     let resolved = find_nu_executable_with_root(root).unwrap();
-    assert_eq!(resolved, bootstrap::managed_nu_binary(root).to_string_lossy());
+    let expected = bootstrap::managed_nu_binary(root);
+    assert_eq!(
+        std::fs::canonicalize(&resolved).unwrap(),
+        std::fs::canonicalize(&expected).unwrap(),
+    );
 }
 
 #[test]

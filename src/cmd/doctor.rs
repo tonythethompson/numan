@@ -304,10 +304,7 @@ fn check_nu_paths(
             findings.push(finding(
                 "nu.binary.found_off_path",
                 Severity::Warn,
-                format!(
-                    "Nushell found at '{}' but not on PATH.",
-                    off_path.display()
-                ),
+                format!("Nushell found at '{}' but not on PATH.", off_path.display()),
                 Some(&fix_hint),
                 RepairTier::Confirm,
             ));
@@ -865,9 +862,10 @@ fn apply_repairs(
         }
     }
 
-    if findings.iter().any(|f| {
-        f.id == "nu.binary.found_off_path" && f.severity == Severity::Warn
-    }) {
+    if findings
+        .iter()
+        .any(|f| f.id == "nu.binary.found_off_path" && f.severity == Severity::Warn)
+    {
         let id = "nu.binary.found_off_path".to_string();
         if !confirm {
             records.push(RepairRecord {
@@ -906,9 +904,10 @@ fn apply_repairs(
         }
     }
 
-    if findings.iter().any(|f| {
-        f.id == "nu.binary.missing_on_path" && f.severity == Severity::Error
-    }) {
+    if findings
+        .iter()
+        .any(|f| f.id == "nu.binary.missing_on_path" && f.severity == Severity::Error)
+    {
         let id = "nu.binary.missing_on_path".to_string();
         if !confirm {
             records.push(RepairRecord {

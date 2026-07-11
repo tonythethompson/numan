@@ -210,10 +210,7 @@ pub fn install_latest(root: &Path, platform: &Platform) -> Result<PathBuf> {
     std::fs::create_dir_all(&cache_dir)?;
     let archive_path = cache_dir.join(&asset.name);
 
-    println!(
-        "Downloading Nushell {} ({})…",
-        release.tag_name, asset.name
-    );
+    println!("Downloading Nushell {} ({})…", release.tag_name, asset.name);
     download_file(&asset.browser_download_url, &archive_path)?;
 
     let installed = install_from_archive(&archive_path, root, &release.tag_name)?;
@@ -394,21 +391,16 @@ fn persist_user_path_unix(binary: &Path) -> Result<()> {
     if link_path.exists() {
         std::fs::remove_file(&link_path)?;
     }
-    symlink(binary, &link_path).with_context(|| {
-        format!(
-            "Failed to symlink Nushell into '{}'",
-            link_path.display()
-        )
-    })?;
+    symlink(binary, &link_path)
+        .with_context(|| format!("Failed to symlink Nushell into '{}'", link_path.display()))?;
     Ok(())
 }
 
 #[cfg(unix)]
 fn ensure_local_bin_on_path() -> Result<()> {
-    append_shell_profile_line(
-        r#"export PATH="$HOME/.local/bin:$PATH"#,
-        |content| content.contains(".local/bin"),
-    )
+    append_shell_profile_line(r#"export PATH="$HOME/.local/bin:$PATH"#, |content| {
+        content.contains(".local/bin")
+    })
 }
 
 #[cfg(unix)]
@@ -420,9 +412,8 @@ fn append_shell_profile_line(
     for name in [".zshrc", ".bashrc", ".profile"] {
         let profile = home.join(name);
         if profile.is_file() {
-            let content = std::fs::read_to_string(&profile).with_context(|| {
-                format!("Failed to read shell profile '{}'", profile.display())
-            })?;
+            let content = std::fs::read_to_string(&profile)
+                .with_context(|| format!("Failed to read shell profile '{}'", profile.display()))?;
             if already_present(&content) {
                 return Ok(());
             }
@@ -435,9 +426,8 @@ fn append_shell_profile_line(
     }
 
     let profile = home.join(".profile");
-    write_bytes_atomic(profile.as_path(), format!("{export_line}\n").as_bytes()).with_context(
-        || format!("Failed to create shell profile '{}'", profile.display()),
-    )?;
+    write_bytes_atomic(profile.as_path(), format!("{export_line}\n").as_bytes())
+        .with_context(|| format!("Failed to create shell profile '{}'", profile.display()))?;
     Ok(())
 }
 
@@ -448,7 +438,11 @@ pub struct NuSetupOptions {
     pub skip_path: bool,
 }
 
-pub fn execute_nu_setup(root: &Path, platform: &Platform, options: &NuSetupOptions) -> Result<PathBuf> {
+pub fn execute_nu_setup(
+    root: &Path,
+    platform: &Platform,
+    options: &NuSetupOptions,
+) -> Result<PathBuf> {
     execute_nu_setup_with_installer(root, platform, options, install_latest)
 }
 

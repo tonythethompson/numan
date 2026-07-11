@@ -20,7 +20,10 @@ fn discover_off_path_test() -> Option<PathBuf> {
     TEST_OFF_PATH.lock().ok()?.clone()
 }
 
-fn nu_setup_repair_test(args: &numan_cli::cmd::setup::NuSetupArgs, _root: &Path) -> anyhow::Result<()> {
+fn nu_setup_repair_test(
+    args: &numan_cli::cmd::setup::NuSetupArgs,
+    _root: &Path,
+) -> anyhow::Result<()> {
     let expected = TEST_OFF_PATH.lock().unwrap();
     assert_eq!(
         args.use_existing.as_deref(),
