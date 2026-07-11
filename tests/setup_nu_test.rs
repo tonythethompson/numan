@@ -158,10 +158,8 @@ fn setup_nu_use_existing_registers_binary_without_download() {
         .unwrap()
         .to_path_buf();
     let parent_str = parent.to_string_lossy().replace("\\\\?\\", "");
-    let path_contains = std::env::split_paths(&path_var).any(|part| {
-        part.to_string_lossy()
-            .eq_ignore_ascii_case(&parent_str)
-    });
+    let path_contains = std::env::split_paths(&path_var)
+        .any(|part| part.to_string_lossy().eq_ignore_ascii_case(&parent_str));
     assert!(
         path_contains,
         "PATH should contain the existing Nu directory after use-existing"
