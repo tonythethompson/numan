@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::nu::paths::{find_nu_executable, probe_nu_config_path};
 use crate::util::atomic::write_bytes_atomic;
+use crate::util::fs_safety::assert_not_symlink;
 
 const VENDOR_LOADER: &str = include_str!("../../assets/nushell-loader/loader.nu");
 
@@ -134,6 +135,10 @@ fn install_loader_file(loader_path: &Path, args: &LoaderArgs) -> Result<()> {
 }
 
 fn configure_config_nu(config_path: &Path, args: &LoaderArgs) -> Result<()> {
+    if config_path.exists() {
+        assert_not_symlink(config_path, "config.nu")?;
+    }
+
     if config_path.exists() && !config_path.is_file() {
         bail!(
             "Refusing to modify non-file config at '{}'.",
@@ -287,6 +292,26 @@ mod tests {
             std::fs::read(&loader_path).unwrap(),
             VENDOR_LOADER.as_bytes()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configure_rejects_symlinked_config() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("config.real.nu");
+        std::fs::write(&target, "export-env {}\n").unwrap();
+        let config_path = dir.path().join("config.nu");
+        symlink(&target, &config_path).unwrap();
+
+        let args = LoaderArgs {
+            force: false,
+            configure: true,
+            yes: true,
+        };
+        let err = configure_config_nu(&config_path, &args).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
     }
 
     #[test]

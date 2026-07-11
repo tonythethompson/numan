@@ -22,7 +22,7 @@ for item in $aidnem_loader_configs {
   if not ($target | path exists) {
     print $"[Aidnem Loader] File not found for ($item.name), generating it now."
     print $"[Aidnem Loader] Running `($item.command) | save ($target)`"
-    nu -c $item.command | save $target
+    nu -n -c $item.command | save $target
   }
 }
 
