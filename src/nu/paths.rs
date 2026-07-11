@@ -2,8 +2,10 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::config::Config;
 use crate::core::integrity;
 use crate::core::platform::Platform;
+use crate::nu::bootstrap::managed_nu_binary;
 use crate::util::atomic::write_json_atomic;
 
 /// Nu environment state, cached to `<root>/nu_state/paths.json` at `numan init`.
@@ -200,8 +202,30 @@ impl NuPaths {
     }
 }
 
-/// Locate the `nu` executable by searching PATH via platform-native tool.
+/// Locate the `nu` executable on PATH, then under the Numan-managed tools directory.
 pub fn find_nu_executable() -> Result<String> {
+    find_nu_executable_with_root(&Config::resolve_root(&Platform::detect()))
+}
+
+/// Locate `nu` on PATH, then under `<root>/tools/nushell/`.
+pub fn find_nu_executable_with_root(root: &Path) -> Result<String> {
+    if let Ok(path) = find_nu_on_path() {
+        return Ok(path);
+    }
+
+    let managed = managed_nu_binary(root);
+    if managed.is_file() {
+        return Ok(managed.to_string_lossy().into_owned());
+    }
+
+    bail!(
+        "Nu not found on PATH or in '{}'. Install Nushell with: numan setup nu",
+        managed.display()
+    );
+}
+
+/// Search PATH only (no Numan-managed fallback).
+pub fn find_nu_on_path() -> Result<String> {
     #[cfg(target_os = "windows")]
     {
         let output = std::process::Command::new("where.exe")

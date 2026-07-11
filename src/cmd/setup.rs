@@ -138,7 +138,6 @@ fn configure_config_nu(config_path: &Path, args: &LoaderArgs) -> Result<()> {
     if config_path.exists() {
         assert_not_symlink(config_path, "config.nu")?;
     }
-
     if config_path.exists() && !config_path.is_file() {
         bail!(
             "Refusing to modify non-file config at '{}'.",
@@ -313,7 +312,6 @@ mod tests {
         let err = configure_config_nu(&config_path, &args).unwrap_err();
         assert!(err.to_string().contains("symlink"));
     }
-
     #[test]
     fn configure_appends_snippet_to_existing_config() {
         let dir = TempDir::new().unwrap();
