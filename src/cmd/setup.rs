@@ -163,6 +163,8 @@ fn install_loader_file(loader_path: &Path, args: &LoaderArgs) -> Result<()> {
         }
     }
 
+    assert_not_symlink(loader_path, "loader.nu")?;
+
     write_bytes_atomic(loader_path, VENDOR_LOADER.as_bytes()).with_context(|| {
         format!(
             "Failed to write loader script to '{}'",
@@ -175,9 +177,7 @@ fn install_loader_file(loader_path: &Path, args: &LoaderArgs) -> Result<()> {
 }
 
 fn configure_config_nu(config_path: &Path, args: &LoaderArgs) -> Result<()> {
-    if config_path.exists() {
-        assert_not_symlink(config_path, "config.nu")?;
-    }
+    assert_not_symlink(config_path, "config.nu")?;
     if config_path.exists() && !config_path.is_file() {
         bail!(
             "Refusing to modify non-file config at '{}'.",

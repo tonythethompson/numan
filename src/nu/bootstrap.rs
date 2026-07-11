@@ -223,6 +223,7 @@ pub fn install_latest(root: &Path, platform: &Platform) -> Result<PathBuf> {
 }
 
 pub fn prepend_process_path(dir: &Path) -> Result<()> {
+    let dir = normalize_path_entry(dir);
     let dir_str = dir
         .to_str()
         .with_context(|| format!("PATH entry '{}' is not valid UTF-8", dir.display()))?;
@@ -238,10 +239,35 @@ pub fn prepend_process_path(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+const VERBATIM_PATH_PREFIX: &str = "\\\\?\\";
+
+/// Strip Windows extended-length prefixes so PATH entries round-trip through `std::env::var("PATH")`.
+fn normalize_path_entry_str(entry: &str) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(stripped) = entry.strip_prefix(VERBATIM_PATH_PREFIX) {
+            return stripped.to_string();
+        }
+    }
+    entry.to_string()
+}
+
+fn normalize_path_entry(path: &Path) -> PathBuf {
+    PathBuf::from(normalize_path_entry_str(&path.to_string_lossy()))
+}
+
 fn path_list_contains(path_var: &str, entry: &str) -> bool {
-    path_var
-        .split([';', ':'])
-        .any(|part| part.eq_ignore_ascii_case(entry))
+    let entry_str = normalize_path_entry_str(entry);
+    if cfg!(windows) {
+        path_var
+            .split(';')
+            .any(|part| normalize_path_entry_str(part.trim()).eq_ignore_ascii_case(&entry_str))
+    } else {
+        path_var
+            .split(':')
+            .any(|part| normalize_path_entry_str(part.trim()).eq_ignore_ascii_case(&entry_str))
+    }
 }
 
 pub fn persist_user_path(binary: &Path) -> Result<()> {
@@ -354,6 +380,7 @@ pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<P
 
 #[cfg(windows)]
 fn persist_path_dir_windows(dir: &Path) -> Result<()> {
+    let dir = normalize_path_entry(dir);
     let dir_str = dir
         .to_str()
         .with_context(|| format!("PATH entry '{}' is not valid UTF-8", dir.display()))?;
@@ -388,17 +415,50 @@ fn persist_user_path_unix(binary: &Path) -> Result<()> {
     let local_bin = home.join(".local").join("bin");
     std::fs::create_dir_all(&local_bin)?;
     let link_path = local_bin.join("nu");
+    let managed = binary.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve managed Nushell binary '{}'",
+            binary.display()
+        )
+    })?;
+
     if link_path.exists() {
-        std::fs::remove_file(&link_path)?;
+        if link_path.is_symlink() {
+            let existing = std::fs::read_link(&link_path).with_context(|| {
+                format!("Failed to read existing symlink '{}'", link_path.display())
+            })?;
+            let existing_resolved = if existing.is_absolute() {
+                existing.canonicalize().ok()
+            } else {
+                link_path
+                    .parent()
+                    .and_then(|parent| parent.join(&existing).canonicalize().ok())
+            };
+            if existing_resolved.as_ref() == Some(&managed) {
+                return Ok(());
+            }
+            bail!(
+                "'{}' already points to another Nushell install ({}). \
+                 Pass --skip-path to leave it unchanged.",
+                link_path.display(),
+                existing.display()
+            );
+        }
+        bail!(
+            "'{}' already exists and is not a symlink. \
+             Pass --skip-path to leave it unchanged.",
+            link_path.display()
+        );
     }
-    symlink(binary, &link_path)
+
+    symlink(&managed, &link_path)
         .with_context(|| format!("Failed to symlink Nushell into '{}'", link_path.display()))?;
     Ok(())
 }
 
 #[cfg(unix)]
 fn ensure_local_bin_on_path() -> Result<()> {
-    append_shell_profile_line(r#"export PATH="$HOME/.local/bin:$PATH"#, |content| {
+    append_shell_profile_line(r##"export PATH="$HOME/.local/bin:$PATH""##, |content| {
         content.contains(".local/bin")
     })
 }
@@ -563,6 +623,49 @@ mod tests {
         }
         let asset = select_release_asset(&release, &platform).unwrap();
         assert!(asset.name.contains("x86_64-pc-windows-msvc.zip"));
+    }
+
+    #[test]
+    fn ensure_local_bin_export_line_is_well_quoted() {
+        const EXPORT_LINE: &str = r##"export PATH="$HOME/.local/bin:$PATH""##;
+        assert!(EXPORT_LINE.ends_with('"'));
+        assert_eq!(EXPORT_LINE.matches('"').count(), 2);
+    }
+
+    #[test]
+    fn normalize_path_entry_str_strips_verbatim_prefix() {
+        let entry = format!("{VERBATIM_PATH_PREFIX}C:\\foo\\bin");
+        assert_eq!(normalize_path_entry_str(&entry), "C:\\foo\\bin");
+    }
+
+    #[test]
+    fn path_list_contains_matches_normalized_windows_paths() {
+        let entry = format!("{VERBATIM_PATH_PREFIX}C:\\foo\\bin");
+        let path_var = r"C:\foo\bin;C:\Windows";
+        assert!(path_list_contains(path_var, &entry));
+    }
+
+    #[test]
+    fn prepend_process_path_adds_canonical_dir() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("bin");
+        std::fs::create_dir_all(&sub).unwrap();
+        let canonical = std::fs::canonicalize(&sub).unwrap();
+        let before = std::env::var("PATH").unwrap();
+        prepend_process_path(&canonical).unwrap();
+        let path_var = std::env::var("PATH").unwrap();
+        let dir_str = normalize_path_entry(&canonical)
+            .to_string_lossy()
+            .into_owned();
+        assert_ne!(
+            before, path_var,
+            "PATH should change when prepending a new directory"
+        );
+        assert!(
+            path_list_contains(&path_var, &dir_str),
+            "PATH should contain prepended directory; got PATH prefix: {}",
+            path_var.split(';').next().unwrap_or("")
+        );
     }
 
     #[test]

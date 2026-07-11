@@ -81,12 +81,9 @@ impl NuPaths {
         write_json_atomic(&paths_path, self)
     }
 
-    /// Discover Nu on PATH, probe it once, and build a `NuPaths`.
-    ///
-    /// Called only by `numan init` / `numan init --refresh`. The `activate`
-    /// command calls `load()` then `validate_drift()` — never `detect()`.
-    pub fn detect() -> Result<Self> {
-        let nu_exe = find_nu_executable()?;
+    /// Discover Nu on PATH (or under `root`), probe it once, and build a `NuPaths`.
+    pub fn detect_with_root(root: &Path) -> Result<Self> {
+        let nu_exe = find_nu_executable_with_root(root)?;
         let probe = probe_nu(&nu_exe)?;
         let nu_bytes = std::fs::read(&nu_exe)
             .with_context(|| format!("Failed to read Nu binary at '{nu_exe}'"))?;
@@ -108,6 +105,14 @@ impl NuPaths {
             vendor_autoload_dirs: probe.vendor_autoload_dirs,
             vendor_autoload_dir,
         })
+    }
+
+    /// Discover Nu using the default Numan root from config/env.
+    ///
+    /// Called only by `numan init` / `numan init --refresh`. The `activate`
+    /// command calls `load()` then `validate_drift()` — never `detect()`.
+    pub fn detect() -> Result<Self> {
+        Self::detect_with_root(&Config::resolve_root(&Platform::detect()))
     }
 
     /// Verify that the cached Nu binary still exists, its SHA256 still matches,
@@ -387,7 +392,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let s = canonical.to_string_lossy();
-        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        if let Some(stripped) = s.strip_prefix("\\\\?\\") {
             return PathBuf::from(stripped);
         }
     }
