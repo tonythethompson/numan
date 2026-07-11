@@ -240,9 +240,13 @@ pub fn known_nu_search_paths() -> Vec<PathBuf> {
     paths
 }
 
-/// Return the first existing Nushell binary from `candidates`.
+/// Return the first runnable Nushell binary from `candidates`.
 pub fn discover_nu_off_path_in(candidates: &[PathBuf]) -> Option<PathBuf> {
-    candidates.iter().find(|path| path.is_file()).cloned()
+    candidates
+        .iter()
+        .filter(|path| path.is_file())
+        .find(|path| validate_nushell_binary(path).is_ok())
+        .cloned()
 }
 
 /// Probe common install roots when Nushell is installed but not on PATH.
@@ -466,13 +470,13 @@ mod tests {
     }
 
     #[test]
-    fn discover_nu_off_path_in_returns_first_existing_candidate() {
+    fn discover_nu_off_path_in_skips_non_nu_files() {
         let dir = tempfile::tempdir().unwrap();
-        let nu_path = dir.path().join("nu.exe");
+        let nu_path = dir.path().join(if cfg!(windows) { "nu.exe" } else { "nu" });
         std::fs::write(&nu_path, b"fake").unwrap();
         let missing = dir.path().join("missing").join("nu.exe");
-        let found = discover_nu_off_path_in(&[missing, nu_path.clone()]);
-        assert_eq!(found, Some(nu_path));
+        let found = discover_nu_off_path_in(&[missing, nu_path]);
+        assert!(found.is_none());
     }
 
     #[test]
