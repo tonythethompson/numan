@@ -56,7 +56,7 @@ src/
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
     completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell scripts (Phase 7.3)
-    setup.rs           — `numan setup loader`: vendored nushell-loader install + config.nu snippet
+    setup.rs           — `numan setup nu|loader`: Nushell bootstrap + nushell-loader install
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
@@ -70,6 +70,7 @@ src/
     rollback.rs        — Journaled restore of Numan-owned state to a snapshot
     nupm_import.rs     — nupm-import provenance (`state/nupm-imports.json`, Phase 6.2)
   nu/
+    bootstrap.rs        — download/install official Nushell release under tools/nushell
     paths.rs           — Nu path cache (detect, load, save, validate_drift)
     autoload.rs        — render_use_statement, generate_autoload_content, FakeCandidateRunner, managed-file ops (Phase 4)
   util/
@@ -98,6 +99,7 @@ tests/
   nupm_compat_test.rs  — Phase 6 integration tests (T13–T25, import/drift/manifest/activation/platform)
   nupm_real_nu_test.rs — Phase 6.4 real-Nu #[ignore] acceptance tests (run with `cargo test -- --ignored`)
   setup_test.rs        — `numan setup loader` install and config.nu snippet detection
+  setup_nu_test.rs     — `numan setup nu` managed binary discovery and injected installer
 ```
 
 ## Key Conventions

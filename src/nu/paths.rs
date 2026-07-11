@@ -2,8 +2,10 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::config::Config;
 use crate::core::integrity;
 use crate::core::platform::Platform;
+use crate::nu::bootstrap::managed_nu_binary;
 use crate::util::atomic::write_json_atomic;
 
 /// Nu environment state, cached to `<root>/nu_state/paths.json` at `numan init`.
@@ -79,12 +81,9 @@ impl NuPaths {
         write_json_atomic(&paths_path, self)
     }
 
-    /// Discover Nu on PATH, probe it once, and build a `NuPaths`.
-    ///
-    /// Called only by `numan init` / `numan init --refresh`. The `activate`
-    /// command calls `load()` then `validate_drift()` — never `detect()`.
-    pub fn detect() -> Result<Self> {
-        let nu_exe = find_nu_executable()?;
+    /// Discover Nu on PATH (or under `root`), probe it once, and build a `NuPaths`.
+    pub fn detect_with_root(root: &Path) -> Result<Self> {
+        let nu_exe = find_nu_executable_with_root(root)?;
         let probe = probe_nu(&nu_exe)?;
         let nu_bytes = std::fs::read(&nu_exe)
             .with_context(|| format!("Failed to read Nu binary at '{nu_exe}'"))?;
@@ -106,6 +105,14 @@ impl NuPaths {
             vendor_autoload_dirs: probe.vendor_autoload_dirs,
             vendor_autoload_dir,
         })
+    }
+
+    /// Discover Nu using the default Numan root from config/env.
+    ///
+    /// Called only by `numan init` / `numan init --refresh`. The `activate`
+    /// command calls `load()` then `validate_drift()` — never `detect()`.
+    pub fn detect() -> Result<Self> {
+        Self::detect_with_root(&Config::resolve_root(&Platform::detect()))
     }
 
     /// Verify that the cached Nu binary still exists, its SHA256 still matches,
@@ -200,8 +207,83 @@ impl NuPaths {
     }
 }
 
-/// Locate the `nu` executable by searching PATH via platform-native tool.
+fn nu_binary_file_name() -> &'static str {
+    if cfg!(windows) {
+        "nu.exe"
+    } else {
+        "nu"
+    }
+}
+
+/// Well-known locations to probe when `nu` is not on PATH and not managed by Numan.
+pub fn known_nu_search_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".cargo").join("bin").join(nu_binary_file_name()));
+        #[cfg(windows)]
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            paths.push(
+                PathBuf::from(local_app_data)
+                    .join("Programs")
+                    .join("nushell")
+                    .join("nu.exe"),
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            paths.push(PathBuf::from("/opt/homebrew/bin/nu"));
+            paths.push(home.join(".local").join("bin").join("nu"));
+        }
+    }
+    paths.push(PathBuf::from("/usr/local/bin/nu"));
+    paths.push(PathBuf::from("/usr/bin/nu"));
+    paths
+}
+
+/// Return the first existing Nushell binary from `candidates`.
+pub fn discover_nu_off_path_in(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|path| path.is_file()).cloned()
+}
+
+/// Probe common install roots when Nushell is installed but not on PATH.
+pub fn discover_nu_off_path() -> Option<PathBuf> {
+    discover_nu_off_path_in(&known_nu_search_paths())
+}
+
+/// Locate the `nu` executable under the Numan-managed tools directory, then on PATH.
 pub fn find_nu_executable() -> Result<String> {
+    find_nu_executable_with_root(&Config::resolve_root(&Platform::detect()))
+}
+
+/// Locate `nu` under `<root>/tools/nushell/`, then on PATH.
+pub fn find_nu_executable_with_root(root: &Path) -> Result<String> {
+    let managed = managed_nu_binary(root);
+    if managed.is_file() {
+        return Ok(managed.to_string_lossy().into_owned());
+    }
+
+    if let Ok(path) = find_nu_on_path() {
+        return Ok(path);
+    }
+
+    if let Some(off_path) = discover_nu_off_path() {
+        bail!(
+            "Nu not found on PATH or in '{}', but an install exists at '{}'. \
+             Add it to PATH with: numan setup nu --use-existing {}",
+            managed.display(),
+            off_path.display(),
+            off_path.display()
+        );
+    }
+
+    bail!(
+        "Nu not found on PATH or in '{}'. Install Nushell with: numan setup nu",
+        managed.display()
+    );
+}
+
+/// Search PATH only (no Numan-managed fallback).
+pub fn find_nu_on_path() -> Result<String> {
     #[cfg(target_os = "windows")]
     {
         let output = std::process::Command::new("where.exe")
@@ -272,6 +354,27 @@ pub fn probe_nu_config_path(nu_exe: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(probe.config_path))
 }
 
+/// Validate that a path is an executable Nushell binary before PATH mutation.
+pub fn validate_nushell_binary(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)
+            .with_context(|| format!("Failed to read metadata for '{}'", path.display()))?
+            .permissions()
+            .mode();
+        if mode & 0o111 == 0 {
+            bail!(
+                "'{}' is not executable. Pass a runnable Nushell binary.",
+                path.display()
+            );
+        }
+    }
+
+    probe_nu(&path.to_string_lossy())?;
+    Ok(())
+}
+
 /// Run a single Nu invocation and parse the resulting JSON probe output.
 ///
 /// The probe emits one JSON object, so no ad-hoc line splitting is needed.
@@ -310,7 +413,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let s = canonical.to_string_lossy();
-        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        if let Some(stripped) = s.strip_prefix("\\\\?\\") {
             return PathBuf::from(stripped);
         }
     }
@@ -360,6 +463,62 @@ mod tests {
             vendor_autoload_dirs: vec![],
             vendor_autoload_dir: None,
         }
+    }
+
+    #[test]
+    fn discover_nu_off_path_in_returns_first_existing_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let nu_path = dir.path().join("nu.exe");
+        std::fs::write(&nu_path, b"fake").unwrap();
+        let missing = dir.path().join("missing").join("nu.exe");
+        let found = discover_nu_off_path_in(&[missing, nu_path.clone()]);
+        assert_eq!(found, Some(nu_path));
+    }
+
+    #[test]
+    fn find_nu_executable_with_root_errors_when_nu_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("numan-root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", "");
+        let result = find_nu_executable_with_root(&root);
+        match saved_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("numan setup nu"));
+    }
+
+    #[test]
+    fn find_nu_executable_with_root_prefers_managed_over_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("numan-root");
+        let managed = crate::nu::bootstrap::managed_nu_binary(&root);
+        std::fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        std::fs::write(&managed, b"managed nu").unwrap();
+
+        let path_dir = dir.path().join("path-nu");
+        std::fs::create_dir_all(&path_dir).unwrap();
+        let path_nu = path_dir.join(if cfg!(windows) { "nu.exe" } else { "nu" });
+        std::fs::write(&path_nu, b"path nu").unwrap();
+
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", &path_dir);
+
+        let resolved = find_nu_executable_with_root(&root).unwrap();
+        match saved_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        assert_eq!(
+            std::fs::canonicalize(resolved).unwrap(),
+            std::fs::canonicalize(&managed).unwrap()
+        );
     }
 
     #[test]

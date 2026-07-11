@@ -3,9 +3,11 @@ use clap::{Args, Subcommand};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
-use crate::nu::paths::{find_nu_executable, probe_nu_config_path};
+use crate::core::platform::Platform;
+use crate::nu::bootstrap::{self, NuSetupOptions};
+use crate::nu::paths::{find_nu_executable_with_root, probe_nu_config_path};
 use crate::util::atomic::write_bytes_atomic;
-use crate::util::fs_safety::assert_not_symlink;
+use crate::util::fs_safety::{acquire_mutation_lock, assert_not_symlink};
 
 const VENDOR_LOADER: &str = include_str!("../../assets/nushell-loader/loader.nu");
 
@@ -18,8 +20,29 @@ source ($nu.config-path | path dirname | path join 'loader.nu')
 
 #[derive(Debug, Subcommand)]
 pub enum SetupCommands {
+    /// Download and install the official Nushell release under the Numan root
+    Nu(NuSetupArgs),
     /// Install the vendored nushell-loader script and print a config.nu snippet
     Loader(LoaderArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct NuSetupArgs {
+    /// Re-download and replace an existing managed Nushell install
+    #[arg(long)]
+    pub force: bool,
+
+    /// Skip updating the user PATH (Numan still uses the managed binary)
+    #[arg(long)]
+    pub skip_path: bool,
+
+    /// Skip confirmation prompts (required for non-TTY downloads)
+    #[arg(long)]
+    pub yes: bool,
+
+    /// Use an existing Nushell binary (add its directory to PATH instead of downloading)
+    #[arg(long, value_name = "PATH", conflicts_with = "force")]
+    pub use_existing: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -37,15 +60,46 @@ pub struct LoaderArgs {
     pub yes: bool,
 }
 
-pub fn execute(cmd: SetupCommands) -> Result<()> {
+pub fn execute(cmd: SetupCommands, root: &Path) -> Result<()> {
     match cmd {
-        SetupCommands::Loader(args) => execute_loader(&args),
+        SetupCommands::Nu(args) => execute_nu(&args, root),
+        SetupCommands::Loader(args) => execute_loader(&args, root),
     }
 }
 
-pub fn execute_loader(args: &LoaderArgs) -> Result<()> {
+pub fn execute_nu(args: &NuSetupArgs, root: &Path) -> Result<()> {
+    let _lock = acquire_mutation_lock(root)?;
+    execute_nu_impl(args, root)
+}
+
+/// Setup Nu without acquiring the mutation lock (caller must hold it).
+pub(crate) fn execute_nu_impl(args: &NuSetupArgs, root: &Path) -> Result<()> {
+    if args.use_existing.is_some() && args.skip_path {
+        bail!(
+            "numan setup nu --use-existing cannot be combined with --skip-path. \
+             Off-PATH registration must persist the binary directory to PATH; \
+             omit --skip-path or pass --skip-path only for managed downloads."
+        );
+    }
+
+    let options = NuSetupOptions {
+        yes: args.yes,
+        force: args.force,
+        skip_path: args.skip_path,
+    };
+    if let Some(existing) = &args.use_existing {
+        bootstrap::register_existing_nu(existing, &options)?;
+        return Ok(());
+    }
+
+    let platform = Platform::detect();
+    bootstrap::execute_nu_setup(root, &platform, &options)?;
+    Ok(())
+}
+
+pub fn execute_loader(args: &LoaderArgs, root: &Path) -> Result<()> {
     execute_loader_with_probe(args, || {
-        let nu_exe = find_nu_executable()?;
+        let nu_exe = find_nu_executable_with_root(root)?;
         probe_nu_config_path(&nu_exe)
     })
 }
@@ -123,6 +177,8 @@ fn install_loader_file(loader_path: &Path, args: &LoaderArgs) -> Result<()> {
         }
     }
 
+    assert_not_symlink(loader_path, "loader.nu")?;
+
     write_bytes_atomic(loader_path, VENDOR_LOADER.as_bytes()).with_context(|| {
         format!(
             "Failed to write loader script to '{}'",
@@ -135,10 +191,7 @@ fn install_loader_file(loader_path: &Path, args: &LoaderArgs) -> Result<()> {
 }
 
 fn configure_config_nu(config_path: &Path, args: &LoaderArgs) -> Result<()> {
-    if config_path.exists() {
-        assert_not_symlink(config_path, "config.nu")?;
-    }
-
+    assert_not_symlink(config_path, "config.nu")?;
     if config_path.exists() && !config_path.is_file() {
         bail!(
             "Refusing to modify non-file config at '{}'.",
@@ -313,7 +366,6 @@ mod tests {
         let err = configure_config_nu(&config_path, &args).unwrap_err();
         assert!(err.to_string().contains("symlink"));
     }
-
     #[test]
     fn configure_appends_snippet_to_existing_config() {
         let dir = TempDir::new().unwrap();

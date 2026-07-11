@@ -1201,6 +1201,7 @@ dependencies = [
  "globset",
  "hex",
  "indicatif",
+ "libc",
  "rand_core",
  "reqwest",
  "semver",

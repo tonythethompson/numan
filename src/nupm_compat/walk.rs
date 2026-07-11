@@ -271,17 +271,26 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn create_test_fifo(path: &std::path::Path) {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = CString::new(path.as_os_str().as_bytes()).expect("fifo path contains NUL");
+        let rc = unsafe { libc::mkfifo(path.as_ptr(), 0o644) };
+        assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn module_tree_special_file_rejected() {
         use std::fs;
-        use std::process::Command;
 
         let dir = tempfile::tempdir().unwrap();
         let module_dir = dir.path().join("m");
         fs::create_dir_all(&module_dir).unwrap();
         fs::write(module_dir.join("mod.nu"), b"export def hi [] { 1 }").unwrap();
         let fifo = module_dir.join("pipe");
-        Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+        create_test_fifo(&fifo);
         assert!(check_module_tree_safe(&module_dir).is_err());
     }
 }

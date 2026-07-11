@@ -23,7 +23,12 @@ pub struct InitArgs {
 }
 
 pub fn execute(args: &InitArgs, root: &Path) -> Result<()> {
-    execute_with_runner(args, root, NuPaths::detect, nu_runner_factory)
+    execute_with_runner(
+        args,
+        root,
+        || NuPaths::detect_with_root(root),
+        nu_runner_factory,
+    )
 }
 
 fn nu_runner_factory(exe: &str) -> Box<dyn CandidateRunner> {
