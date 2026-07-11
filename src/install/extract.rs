@@ -50,6 +50,14 @@ pub struct ExtractConfig {
     pub archive_root: Option<String>,
     pub include: Option<Vec<String>>,
     pub entry: Option<String>,
+    /// Override the default 100 MiB uncompressed-size cap (e.g. official Nushell releases).
+    pub max_uncompressed_bytes: Option<u64>,
+}
+
+fn max_uncompressed_bytes(config: &ExtractConfig) -> u64 {
+    config
+        .max_uncompressed_bytes
+        .unwrap_or(MAX_UNCOMPRESSED_BYTES)
 }
 
 #[derive(Debug)]
@@ -149,10 +157,11 @@ fn extract_zip(
             );
         }
         total_bytes += entry.size();
-        if total_bytes > MAX_UNCOMPRESSED_BYTES {
+        if total_bytes > max_uncompressed_bytes(config) {
             bail!(
-                "Archive uncompressed size exceeds {MAX_UNCOMPRESSED_BYTES} bytes. \
-                 This may be an archive bomb."
+                "Archive uncompressed size exceeds {} bytes. \
+                 This may be an archive bomb.",
+                max_uncompressed_bytes(config)
             );
         }
 
@@ -266,10 +275,11 @@ fn extract_tar_inner<R: Read>(
             );
         }
         total_bytes += entry.header().size().unwrap_or(0);
-        if total_bytes > MAX_UNCOMPRESSED_BYTES {
+        if total_bytes > max_uncompressed_bytes(config) {
             bail!(
-                "Archive uncompressed size exceeds {MAX_UNCOMPRESSED_BYTES} bytes. \
-                 This may be an archive bomb."
+                "Archive uncompressed size exceeds {} bytes. \
+                 This may be an archive bomb.",
+                max_uncompressed_bytes(config)
             );
         }
 
@@ -495,6 +505,7 @@ mod tests {
             archive_root: Some("pkg-1.0.0".to_string()),
             include: None,
             entry: None,
+            ..ExtractConfig::default()
         };
 
         let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
@@ -522,6 +533,7 @@ mod tests {
             archive_root: None,
             include: Some(vec!["*.nu".to_string()]),
             entry: None,
+            ..ExtractConfig::default()
         };
 
         let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
@@ -550,6 +562,7 @@ mod tests {
             archive_root: None,
             include: Some(vec!["git/**".to_string()]),
             entry: None,
+            ..ExtractConfig::default()
         };
 
         let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();
@@ -574,6 +587,7 @@ mod tests {
             archive_root: None,
             include: None,
             entry: Some("git/mod.nu".to_string()),
+            ..ExtractConfig::default()
         };
 
         let result = extract_archive(&zip_path, &dest, &config, ArchiveFormat::Zip).unwrap();

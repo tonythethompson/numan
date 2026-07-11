@@ -244,6 +244,7 @@ pub fn install_package(
         archive_root: resolved.artifact.archive_root.clone(),
         include: resolved.artifact.include.clone(),
         entry: resolved.artifact.entry.clone(),
+        ..ExtractConfig::default()
     };
 
     if options.verbose {
