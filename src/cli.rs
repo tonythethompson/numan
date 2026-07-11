@@ -59,4 +59,7 @@ pub enum Commands {
     Completions(cmd::completions::CompletionsArgs),
     /// Diagnose Numan root health and optionally apply safe repairs
     Doctor(cmd::doctor::DoctorArgs),
+    /// Install optional Nushell integration helpers
+    #[command(subcommand)]
+    Setup(cmd::setup::SetupCommands),
 }

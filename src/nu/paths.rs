@@ -201,8 +201,7 @@ impl NuPaths {
 }
 
 /// Locate the `nu` executable by searching PATH via platform-native tool.
-/// Only called at `numan init` time.
-fn find_nu_executable() -> Result<String> {
+pub fn find_nu_executable() -> Result<String> {
     #[cfg(target_os = "windows")]
     {
         let output = std::process::Command::new("where.exe")
@@ -242,6 +241,35 @@ fn find_nu_executable() -> Result<String> {
         }
         Ok(path)
     }
+}
+
+/// Probe `$nu.config-path` from a live Nu binary.
+pub fn probe_nu_config_path(nu_exe: &str) -> Result<PathBuf> {
+    const PROBE_CONFIG_SCRIPT: &str = r#"{ config_path: $nu.config-path } | to json"#;
+
+    let output = std::process::Command::new(nu_exe)
+        .args(["-c", PROBE_CONFIG_SCRIPT])
+        .output()
+        .with_context(|| format!("Failed to invoke Nu at '{nu_exe}'"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Nu config-path probe failed at '{nu_exe}': {stderr}");
+    }
+
+    let stdout = String::from_utf8(output.stdout).context("Nu config-path probe is not UTF-8")?;
+    #[derive(Deserialize)]
+    struct ConfigProbe {
+        config_path: String,
+    }
+    let probe: ConfigProbe =
+        serde_json::from_str(stdout.trim()).context("Nu config-path probe JSON parse failed")?;
+
+    if probe.config_path.is_empty() || probe.config_path == "null" {
+        bail!("Nu config-path probe returned an empty config path.");
+    }
+
+    Ok(PathBuf::from(probe.config_path))
 }
 
 /// Run a single Nu invocation and parse the resulting JSON probe output.

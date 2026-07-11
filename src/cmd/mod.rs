@@ -11,5 +11,6 @@ pub mod nupm;
 pub mod registry;
 pub mod remove;
 pub mod search;
+pub mod setup;
 pub mod snapshot;
 pub mod update;
