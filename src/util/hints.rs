@@ -24,6 +24,14 @@ pub const CMD_SETUP_NU: &str = "numan setup nu";
 /// `numan setup loader`
 pub const CMD_SETUP_LOADER: &str = "numan setup loader";
 
+/// `numan setup nu --use-existing <path> --yes`
+pub fn setup_nu_use_existing(path: &std::path::Path) -> String {
+    format!(
+        "numan setup nu --use-existing {} --yes",
+        path.display()
+    )
+}
+
 /// `numan registry add …`
 pub const CMD_REGISTRY_ADD: &str = "numan registry add <name> <url> --key <base64-public-key>";
 

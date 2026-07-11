@@ -79,8 +79,35 @@ fn execute_nu_command_wraps_installer() {
             force: false,
             skip_path: true,
             yes: true,
+            use_existing: None,
         },
         root,
     )
     .unwrap();
+}
+
+#[test]
+fn setup_nu_use_existing_registers_binary_without_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let existing_dir = dir.path().join("existing-nu");
+    std::fs::create_dir_all(&existing_dir).unwrap();
+    let existing = existing_dir.join(if cfg!(windows) { "nu.exe" } else { "nu" });
+    std::fs::write(&existing, b"fake nu").unwrap();
+
+    execute_nu(
+        &NuSetupArgs {
+            force: false,
+            skip_path: true,
+            yes: true,
+            use_existing: Some(existing.clone()),
+        },
+        root,
+    )
+    .unwrap();
+
+    assert!(
+        !bootstrap::managed_nu_binary(root).is_file(),
+        "use-existing should not install a managed copy under NUMAN_ROOT"
+    );
 }

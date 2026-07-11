@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use crate::core::platform::{Arch, Env, Os, Platform};
 use crate::install::download::download_file;
 use crate::install::extract::{extract_archive, ArchiveFormat, ExtractConfig};
+#[cfg(unix)]
+use crate::util::atomic::write_bytes_atomic;
 
 const RELEASES_LATEST: &str = "https://api.github.com/repos/nushell/nushell/releases/latest";
 const USER_AGENT: &str = "numan-cli (https://github.com/tonythethompson/numan)";
@@ -170,7 +172,10 @@ pub fn install_from_archive(archive_path: &Path, root: &Path, version: &str) -> 
     extract_archive(
         archive_path,
         &extract_root,
-        &ExtractConfig::default(),
+        &ExtractConfig {
+            max_uncompressed_bytes: Some(256 * 1024 * 1024),
+            ..ExtractConfig::default()
+        },
         format,
     )
     .with_context(|| format!("Failed to extract '{}'", archive_path.display()))?;
@@ -251,11 +256,13 @@ pub fn persist_user_path(binary: &Path) -> Result<()> {
                 binary.display()
             )
         })?;
-        persist_user_path_windows(dir)
+        persist_path_dir(dir)
     }
     #[cfg(unix)]
     {
-        persist_user_path_unix(binary)
+        persist_user_path_unix(binary)?;
+        ensure_local_bin_on_path()?;
+        Ok(())
     }
     #[cfg(not(any(windows, unix)))]
     {
@@ -264,8 +271,92 @@ pub fn persist_user_path(binary: &Path) -> Result<()> {
     }
 }
 
+/// Add a directory to the user PATH persistently (Windows user PATH or Unix shell profile).
+pub fn persist_path_dir(dir: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        persist_path_dir_windows(dir)
+    }
+    #[cfg(unix)]
+    {
+        persist_path_dir_unix(dir)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
+/// Register an existing Nushell binary: prepend its directory to PATH and persist when allowed.
+pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<PathBuf> {
+    let binary = binary
+        .canonicalize()
+        .with_context(|| format!("Failed to resolve Nushell binary '{}'", binary.display()))?;
+    if !binary.is_file() {
+        bail!(
+            "'{}' is not an executable file. Pass the path to an existing nu binary.",
+            binary.display()
+        );
+    }
+
+    let parent = binary.parent().with_context(|| {
+        format!(
+            "Nushell binary '{}' has no parent directory",
+            binary.display()
+        )
+    })?;
+
+    if !options.yes && !std::io::stdin().is_terminal() {
+        bail!(
+            "Interactive confirmation required to update PATH in non-TTY sessions. \
+             Pass --yes to proceed."
+        );
+    }
+
+    if !options.yes && std::io::stdin().is_terminal() {
+        println!(
+            "This will add '{}' to your user PATH so Nushell can be found.",
+            parent.display()
+        );
+        print!("Proceed? [y/N] ");
+        std::io::stdout().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            bail!("Nushell PATH setup cancelled.");
+        }
+    }
+
+    prepend_process_path(parent)?;
+    if !options.skip_path {
+        persist_path_dir(parent)?;
+        #[cfg(windows)]
+        println!(
+            "Added '{}' to your user PATH. Open a new terminal for PATH changes to apply everywhere.",
+            parent.display()
+        );
+        #[cfg(unix)]
+        println!(
+            "Appended '{}' to your shell profile PATH. Restart your shell or open a new terminal.",
+            parent.display()
+        );
+    } else {
+        println!(
+            "Skipped persistent PATH update. This session can use '{}'.",
+            binary.display()
+        );
+    }
+
+    println!();
+    println!("Next steps:");
+    println!("  numan init");
+    println!("  numan doctor");
+    Ok(binary)
+}
+
 #[cfg(windows)]
-fn persist_user_path_windows(dir: &Path) -> Result<()> {
+fn persist_path_dir_windows(dir: &Path) -> Result<()> {
     let dir_str = dir
         .to_str()
         .with_context(|| format!("PATH entry '{}' is not valid UTF-8", dir.display()))?;
@@ -281,6 +372,15 @@ fn persist_user_path_windows(dir: &Path) -> Result<()> {
         bail!("Failed to update user PATH: {stderr}");
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn persist_path_dir_unix(dir: &Path) -> Result<()> {
+    let dir_str = dir
+        .to_str()
+        .with_context(|| format!("PATH entry '{}' is not valid UTF-8", dir.display()))?;
+    let export_line = format!(r#"export PATH="{dir_str}:$PATH""#);
+    append_shell_profile_line(&export_line, |content| content.contains(dir_str))
 }
 
 #[cfg(unix)]
@@ -300,6 +400,44 @@ fn persist_user_path_unix(binary: &Path) -> Result<()> {
             link_path.display()
         )
     })?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_local_bin_on_path() -> Result<()> {
+    append_shell_profile_line(
+        r#"export PATH="$HOME/.local/bin:$PATH"#,
+        |content| content.contains(".local/bin"),
+    )
+}
+
+#[cfg(unix)]
+fn append_shell_profile_line(
+    export_line: &str,
+    already_present: impl Fn(&str) -> bool,
+) -> Result<()> {
+    let home = dirs::home_dir().context("Could not resolve home directory for PATH setup")?;
+    for name in [".zshrc", ".bashrc", ".profile"] {
+        let profile = home.join(name);
+        if profile.is_file() {
+            let content = std::fs::read_to_string(&profile).with_context(|| {
+                format!("Failed to read shell profile '{}'", profile.display())
+            })?;
+            if already_present(&content) {
+                return Ok(());
+            }
+            let updated = format!("{}\n{export_line}\n", content.trim_end());
+            write_bytes_atomic(&profile, updated.as_bytes()).with_context(|| {
+                format!("Failed to update shell profile '{}'", profile.display())
+            })?;
+            return Ok(());
+        }
+    }
+
+    let profile = home.join(".profile");
+    write_bytes_atomic(profile.as_path(), format!("{export_line}\n").as_bytes()).with_context(
+        || format!("Failed to create shell profile '{}'", profile.display()),
+    )?;
     Ok(())
 }
 

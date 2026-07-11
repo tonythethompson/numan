@@ -202,6 +202,49 @@ impl NuPaths {
     }
 }
 
+fn nu_binary_file_name() -> &'static str {
+    if cfg!(windows) {
+        "nu.exe"
+    } else {
+        "nu"
+    }
+}
+
+/// Well-known locations to probe when `nu` is not on PATH and not managed by Numan.
+pub fn known_nu_search_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".cargo").join("bin").join(nu_binary_file_name()));
+        #[cfg(windows)]
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            paths.push(
+                PathBuf::from(local_app_data)
+                    .join("Programs")
+                    .join("nushell")
+                    .join("nu.exe"),
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            paths.push(PathBuf::from("/opt/homebrew/bin/nu"));
+            paths.push(home.join(".local").join("bin").join("nu"));
+        }
+    }
+    paths.push(PathBuf::from("/usr/local/bin/nu"));
+    paths.push(PathBuf::from("/usr/bin/nu"));
+    paths
+}
+
+/// Return the first existing Nushell binary from `candidates`.
+pub fn discover_nu_off_path_in(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|path| path.is_file()).cloned()
+}
+
+/// Probe common install roots when Nushell is installed but not on PATH.
+pub fn discover_nu_off_path() -> Option<PathBuf> {
+    discover_nu_off_path_in(&known_nu_search_paths())
+}
+
 /// Locate the `nu` executable on PATH, then under the Numan-managed tools directory.
 pub fn find_nu_executable() -> Result<String> {
     find_nu_executable_with_root(&Config::resolve_root(&Platform::detect()))
@@ -216,6 +259,16 @@ pub fn find_nu_executable_with_root(root: &Path) -> Result<String> {
     let managed = managed_nu_binary(root);
     if managed.is_file() {
         return Ok(managed.to_string_lossy().into_owned());
+    }
+
+    if let Some(off_path) = discover_nu_off_path() {
+        bail!(
+            "Nu not found on PATH or in '{}', but an install exists at '{}'. \
+             Add it to PATH with: numan setup nu --use-existing {}",
+            managed.display(),
+            off_path.display(),
+            off_path.display()
+        );
     }
 
     bail!(
@@ -384,6 +437,26 @@ mod tests {
             vendor_autoload_dirs: vec![],
             vendor_autoload_dir: None,
         }
+    }
+
+    #[test]
+    fn discover_nu_off_path_in_returns_first_existing_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let nu_path = dir.path().join("nu.exe");
+        std::fs::write(&nu_path, b"fake").unwrap();
+        let missing = dir.path().join("missing").join("nu.exe");
+        let found = discover_nu_off_path_in(&[missing, nu_path.clone()]);
+        assert_eq!(found, Some(nu_path));
+    }
+
+    #[test]
+    fn find_nu_executable_with_root_errors_when_nu_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("numan-root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let err = find_nu_executable_with_root(&root).unwrap_err();
+        assert!(err.to_string().contains("numan setup nu"));
     }
 
     #[test]

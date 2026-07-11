@@ -12,7 +12,7 @@ use crate::cmd::setup::{self, NuSetupArgs};
 use crate::config::Config;
 use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::core::registry::RegistryManager;
-use crate::nu::paths::{find_nu_executable_with_root, NuPaths};
+use crate::nu::paths::{discover_nu_off_path, find_nu_executable_with_root, NuPaths};
 use crate::nupm_compat::NupmCompatibility;
 use crate::nupm_compat::{
     count_drifted_imports, resolve_nupm_home, scan_nupm_home, NupmHomeResolution,
@@ -25,8 +25,8 @@ use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
 use crate::util::hints::{
-    self, registry_none_fix, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC,
-    CMD_SETUP_NU,
+    self, registry_none_fix, setup_nu_use_existing, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH,
+    CMD_REGISTRY_SYNC, CMD_SETUP_NU,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -121,6 +121,8 @@ pub struct DoctorOptions {
     pub activate_repair: Option<fn(&ActivateArgs, &Path) -> Result<()>>,
     /// Override Nushell bootstrap repair (tests inject fakes; production uses `setup::execute_nu`).
     pub nu_setup_repair: Option<fn(&NuSetupArgs, &Path) -> Result<()>>,
+    /// Override off-PATH Nu discovery (tests inject a known binary path).
+    pub discover_off_path: Option<fn() -> Option<PathBuf>>,
 }
 
 pub fn execute(args: &DoctorArgs, root: &Path) -> Result<i32> {
@@ -128,10 +130,10 @@ pub fn execute(args: &DoctorArgs, root: &Path) -> Result<i32> {
 }
 
 pub fn execute_with_options(args: &DoctorArgs, root: &Path, options: DoctorOptions) -> Result<i32> {
-    let mut report = run_checks(args, root)?;
+    let mut report = run_checks_with_options(args, root, &options)?;
     if args.fix {
         let repairs = apply_repairs(args, root, &report.findings, &options)?;
-        report = run_checks(args, root)?;
+        report = run_checks_with_options(args, root, &options)?;
         report.repairs = Some(repairs);
     }
     print_report(args, root, &report)?;
@@ -171,10 +173,18 @@ fn finding(
 }
 
 pub fn run_checks(args: &DoctorArgs, root: &Path) -> Result<DoctorReport> {
+    run_checks_with_options(args, root, &DoctorOptions::default())
+}
+
+pub fn run_checks_with_options(
+    args: &DoctorArgs,
+    root: &Path,
+    options: &DoctorOptions,
+) -> Result<DoctorReport> {
     let mut findings = Vec::new();
 
     check_root_layout(root, &mut findings);
-    let nu_paths = check_nu_paths(root, &mut findings);
+    let nu_paths = check_nu_paths(root, options, &mut findings);
     check_journals(root, nu_paths.as_ref(), &mut findings);
     let lockfile = check_lockfile(root, nu_paths.as_ref(), &mut findings);
     if let (Some(paths), Some(lf)) = (nu_paths.as_ref(), lockfile.as_ref()) {
@@ -274,16 +284,49 @@ fn check_root_layout(root: &Path, findings: &mut Vec<Finding>) {
     }
 }
 
-fn check_nu_paths(root: &Path, findings: &mut Vec<Finding>) -> Option<NuPaths> {
+fn resolve_off_path(options: &DoctorOptions) -> Option<PathBuf> {
+    if let Some(discover) = options.discover_off_path {
+        discover()
+    } else {
+        discover_nu_off_path()
+    }
+}
+
+fn check_nu_paths(
+    root: &Path,
+    options: &DoctorOptions,
+    findings: &mut Vec<Finding>,
+) -> Option<NuPaths> {
     let nu_available = find_nu_executable_with_root(root).is_ok();
     if !nu_available {
-        findings.push(finding(
-            "nu.binary.missing_on_path",
-            Severity::Error,
-            "Nu not found on PATH or in the Numan tools directory.",
-            Some(CMD_SETUP_NU),
-            RepairTier::Confirm,
-        ));
+        if let Some(off_path) = resolve_off_path(options) {
+            let fix_hint = setup_nu_use_existing(&off_path);
+            findings.push(finding(
+                "nu.binary.found_off_path",
+                Severity::Warn,
+                format!(
+                    "Nushell found at '{}' but not on PATH.",
+                    off_path.display()
+                ),
+                Some(&fix_hint),
+                RepairTier::Confirm,
+            ));
+            findings.push(finding(
+                "nu.binary.missing_on_path",
+                Severity::Ok,
+                "Nushell is installed off PATH (see nu.binary.found_off_path)",
+                None,
+                RepairTier::None,
+            ));
+        } else {
+            findings.push(finding(
+                "nu.binary.missing_on_path",
+                Severity::Error,
+                "Nu not found on PATH or in the Numan tools directory.",
+                Some(CMD_SETUP_NU),
+                RepairTier::Confirm,
+            ));
+        }
     } else {
         findings.push(finding(
             "nu.binary.missing_on_path",
@@ -823,6 +866,47 @@ fn apply_repairs(
     }
 
     if findings.iter().any(|f| {
+        f.id == "nu.binary.found_off_path" && f.severity == Severity::Warn
+    }) {
+        let id = "nu.binary.found_off_path".to_string();
+        if !confirm {
+            records.push(RepairRecord {
+                id,
+                status: RepairStatus::Skipped,
+                reason: Some("not_confirmed".to_string()),
+            });
+        } else if let Some(off_path) = resolve_off_path(options) {
+            let setup_fn = options.nu_setup_repair.unwrap_or(setup::execute_nu);
+            match setup_fn(
+                &NuSetupArgs {
+                    force: false,
+                    skip_path: false,
+                    yes: true,
+                    use_existing: Some(off_path),
+                },
+                root,
+            ) {
+                Ok(()) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Applied,
+                    reason: None,
+                }),
+                Err(e) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Failed,
+                    reason: Some(e.to_string()),
+                }),
+            }
+        } else {
+            records.push(RepairRecord {
+                id,
+                status: RepairStatus::Skipped,
+                reason: Some("off_path_not_found".to_string()),
+            });
+        }
+    }
+
+    if findings.iter().any(|f| {
         f.id == "nu.binary.missing_on_path" && f.severity == Severity::Error
     }) {
         let id = "nu.binary.missing_on_path".to_string();
@@ -845,6 +929,7 @@ fn apply_repairs(
                     force: false,
                     skip_path: false,
                     yes: true,
+                    use_existing: None,
                 },
                 root,
             ) {
@@ -1047,6 +1132,7 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
             "Initialization",
             &[
                 "nu.binary.missing_on_path",
+                "nu.binary.found_off_path",
                 "nu_paths.missing",
                 "nu_paths.drift",
                 "nu_paths.vendor_drift",
@@ -1256,6 +1342,7 @@ mod tests {
                 init_repair: Some(test_init_repair),
                 activate_repair: None,
                 nu_setup_repair: None,
+                discover_off_path: None,
             },
         )
         .unwrap();
@@ -1311,6 +1398,7 @@ mod tests {
                 init_repair: None,
                 activate_repair: None,
                 nu_setup_repair: None,
+                discover_off_path: None,
             },
         )
         .unwrap();

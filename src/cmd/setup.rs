@@ -39,6 +39,10 @@ pub struct NuSetupArgs {
     /// Skip confirmation prompts (required for non-TTY downloads)
     #[arg(long)]
     pub yes: bool,
+
+    /// Use an existing Nushell binary (add its directory to PATH instead of downloading)
+    #[arg(long, value_name = "PATH", conflicts_with = "force")]
+    pub use_existing: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -64,16 +68,18 @@ pub fn execute(cmd: SetupCommands, root: &Path) -> Result<()> {
 }
 
 pub fn execute_nu(args: &NuSetupArgs, root: &Path) -> Result<()> {
+    let options = NuSetupOptions {
+        yes: args.yes,
+        force: args.force,
+        skip_path: args.skip_path,
+    };
+    if let Some(existing) = &args.use_existing {
+        bootstrap::register_existing_nu(existing, &options)?;
+        return Ok(());
+    }
+
     let platform = Platform::detect();
-    bootstrap::execute_nu_setup(
-        root,
-        &platform,
-        &NuSetupOptions {
-            yes: args.yes,
-            force: args.force,
-            skip_path: args.skip_path,
-        },
-    )?;
+    bootstrap::execute_nu_setup(root, &platform, &options)?;
     Ok(())
 }
 
