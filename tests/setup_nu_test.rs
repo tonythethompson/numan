@@ -16,7 +16,6 @@ use zip::ZipWriter;
 fn managed_nu_is_discovered_after_install() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    std::env::set_var("NUMAN_ROOT", root);
     let zip_path = root.join("nu-test.zip");
 
     {
@@ -34,7 +33,6 @@ fn managed_nu_is_discovered_after_install() {
     }
 
     install_from_archive(&zip_path, root, "0.0.0-test").unwrap();
-    bootstrap::prepend_process_path(&bootstrap::managed_nu_dir(root)).unwrap();
 
     let resolved = find_nu_executable_with_root(root).unwrap();
     let expected = bootstrap::managed_nu_binary(root);

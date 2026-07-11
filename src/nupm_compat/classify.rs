@@ -229,10 +229,19 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn create_test_fifo(path: &std::path::Path) {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = CString::new(path.as_os_str().as_bytes()).expect("fifo path contains NUL");
+        let rc = unsafe { libc::mkfifo(path.as_ptr(), 0o644) };
+        assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn special_file_in_module_tree_is_unsafe() {
         use std::fs;
-        use std::process::Command;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("pkg");
         let module_dir = root.join("m");
@@ -243,10 +252,7 @@ mod tests {
         )
         .unwrap();
         fs::write(module_dir.join("mod.nu"), b"").unwrap();
-        Command::new("mkfifo")
-            .arg(module_dir.join("pipe"))
-            .status()
-            .expect("mkfifo");
+        create_test_fifo(&module_dir.join("pipe"));
         let (compat, _) = classify_source_root(&root).unwrap();
         assert_eq!(compat, NupmCompatibility::UnsafeFilesystemLayout);
     }

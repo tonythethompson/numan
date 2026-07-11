@@ -15,6 +15,7 @@ use tempfile::TempDir;
 
 static TEST_OFF_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 static TEST_NU_SETUP_CALLED: Mutex<bool> = Mutex::new(false);
+static TEST_PATH_GUARD: Mutex<()> = Mutex::new(());
 
 fn discover_off_path_test() -> Option<PathBuf> {
     TEST_OFF_PATH.lock().ok()?.clone()
@@ -207,6 +208,7 @@ fn doctor_reports_off_path_nu_without_download() {
 
     *TEST_OFF_PATH.lock().unwrap() = Some(off_path.clone());
 
+    let _path_guard = TEST_PATH_GUARD.lock().unwrap();
     let _cleared_path = ClearedPath::new();
     let args = DoctorArgs {
         fix: false,
@@ -252,6 +254,7 @@ fn doctor_fix_registers_off_path_nu_without_network() {
     *TEST_OFF_PATH.lock().unwrap() = Some(off_path.clone());
     *TEST_NU_SETUP_CALLED.lock().unwrap() = false;
 
+    let _path_guard = TEST_PATH_GUARD.lock().unwrap();
     let _cleared_path = ClearedPath::new();
     let args = DoctorArgs {
         fix: true,

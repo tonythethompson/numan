@@ -576,7 +576,8 @@ pub fn execute_nu_setup_with_installer(
 
         if !std::io::stdin().is_terminal() {
             bail!(
-                "Nushell is already installed at '{}'. Pass --force to reinstall, or --yes in non-TTY sessions.",
+                "Nushell is already installed at '{}'. \
+                 Pass --force to reinstall, or --yes to skip this check and update PATH only.",
                 dest.display()
             );
         }

@@ -119,7 +119,7 @@ pub struct DoctorOptions {
     pub init_repair: Option<fn(&InitArgs, &Path) -> Result<()>>,
     /// Override activate repair (tests inject fakes; production uses `activate::execute`).
     pub activate_repair: Option<fn(&ActivateArgs, &Path) -> Result<()>>,
-    /// Override Nushell bootstrap repair (tests inject fakes; production uses `setup::execute_nu`).
+    /// Override Nushell bootstrap repair (tests inject fakes; production uses `setup::execute_nu_impl`).
     pub nu_setup_repair: Option<fn(&NuSetupArgs, &Path) -> Result<()>>,
     /// Override off-PATH Nu discovery (tests inject a known binary path).
     pub discover_off_path: Option<fn() -> Option<PathBuf>>,
@@ -292,12 +292,25 @@ fn resolve_off_path(options: &DoctorOptions) -> Option<PathBuf> {
     }
 }
 
+fn nu_is_available(root: &Path) -> bool {
+    if find_nu_executable_with_root(root).is_ok() {
+        return true;
+    }
+    if let Ok(paths) = NuPaths::load(root) {
+        let exe = Path::new(&paths.nu_executable);
+        if exe.is_file() && paths.validate_drift().is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
 fn check_nu_paths(
     root: &Path,
     options: &DoctorOptions,
     findings: &mut Vec<Finding>,
 ) -> Option<NuPaths> {
-    let nu_available = find_nu_executable_with_root(root).is_ok();
+    let nu_available = nu_is_available(root);
     if !nu_available {
         if let Some(off_path) = resolve_off_path(options) {
             let fix_hint = setup_nu_use_existing(&off_path);
@@ -874,7 +887,7 @@ fn apply_repairs(
                 reason: Some("not_confirmed".to_string()),
             });
         } else if let Some(off_path) = resolve_off_path(options) {
-            let setup_fn = options.nu_setup_repair.unwrap_or(setup::execute_nu);
+            let setup_fn = options.nu_setup_repair.unwrap_or(setup::execute_nu_impl);
             match setup_fn(
                 &NuSetupArgs {
                     force: false,
@@ -922,7 +935,7 @@ fn apply_repairs(
                 reason: Some("skip_network".to_string()),
             });
         } else {
-            let setup_fn = options.nu_setup_repair.unwrap_or(setup::execute_nu);
+            let setup_fn = options.nu_setup_repair.unwrap_or(setup::execute_nu_impl);
             match setup_fn(
                 &NuSetupArgs {
                     force: false,

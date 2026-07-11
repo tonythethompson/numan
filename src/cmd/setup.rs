@@ -7,7 +7,7 @@ use crate::core::platform::Platform;
 use crate::nu::bootstrap::{self, NuSetupOptions};
 use crate::nu::paths::{find_nu_executable_with_root, probe_nu_config_path};
 use crate::util::atomic::write_bytes_atomic;
-use crate::util::fs_safety::assert_not_symlink;
+use crate::util::fs_safety::{acquire_mutation_lock, assert_not_symlink};
 
 const VENDOR_LOADER: &str = include_str!("../../assets/nushell-loader/loader.nu");
 
@@ -68,6 +68,12 @@ pub fn execute(cmd: SetupCommands, root: &Path) -> Result<()> {
 }
 
 pub fn execute_nu(args: &NuSetupArgs, root: &Path) -> Result<()> {
+    let _lock = acquire_mutation_lock(root)?;
+    execute_nu_impl(args, root)
+}
+
+/// Setup Nu without acquiring the mutation lock (caller must hold it).
+pub(crate) fn execute_nu_impl(args: &NuSetupArgs, root: &Path) -> Result<()> {
     if args.use_existing.is_some() && args.skip_path {
         bail!(
             "numan setup nu --use-existing cannot be combined with --skip-path. \
