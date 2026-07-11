@@ -45,7 +45,7 @@ jobs:
 
       - name: Configure ClinePass
         run: |
-          cline auth --provider clinepass \
+          cline auth --provider cline-pass \
             --apikey "${{ secrets.CLINE_API_KEY }}" \
             --modelid cline-pass/qwen3.7-max
 
