@@ -3,25 +3,19 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -29,19 +23,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Allow bot-authored PRs (e.g. Cursor cloud agents) to be reviewed;
-          # without this the action aborts on non-human actors.
-          allowed_bots: '*'
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          allowed_bots: "*"
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          classify_inline_comments: "false"
+          additional_permissions: |
+            actions: read
+          prompt: |
+            /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
 
+            Review this pull request like GitHub Codex: post inline PR review comments on changed lines.
+
+            Read and follow:
+            - .github/instructions/review.instructions.md (severity P0-P3, architecture invariants)
+            - AGENTS.md (project structure and conventions)
+
+            Format each inline comment like Codex:
+            - Start with a severity badge line: **P0**, **P1**, **P2**, or **P3**
+            - One concrete issue per comment, tied to a specific file and line in the PR diff
+            - Include a short fix suggestion
+
+            Only comment on problems introduced or affected by this PR. Skip pre-existing issues, style nits below P2, and findings linters already catch.
+          claude_args: |
+            --max-turns 30
