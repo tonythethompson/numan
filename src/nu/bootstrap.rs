@@ -394,11 +394,10 @@ fn persist_path_dir_windows(dir: &Path) -> Result<()> {
     let dir_str = dir
         .to_str()
         .with_context(|| format!("PATH entry '{}' is not valid UTF-8", dir.display()))?;
-    let script = format!(
-        r#"$dir = '{dir_str}'; $current = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($null -eq $current) {{ $current = '' }}; if ($current.Split(';') -notcontains $dir) {{ [Environment]::SetEnvironmentVariable('Path', ($dir + ';' + $current), 'User') }}"#
-    );
+    let script = r#"$dir = $env:NUMAN_PATH_ENTRY; $current = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($null -eq $current) { $current = '' }; if ($current.Split(';') -notcontains $dir) { [Environment]::SetEnvironmentVariable('Path', ($dir + ';' + $current), 'User') }"#;
     let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .env("NUMAN_PATH_ENTRY", dir_str)
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
         .context("Failed to invoke PowerShell to update user PATH")?;
     if !output.status.success() {
@@ -706,7 +705,16 @@ mod tests {
         assert!(
             path_list_contains(&path_var, &dir_str),
             "PATH should contain prepended directory; got PATH prefix: {}",
-            path_var.split(';').next().unwrap_or("")
+            {
+                #[cfg(windows)]
+                {
+                    path_var.split(';').next().unwrap_or("")
+                }
+                #[cfg(not(windows))]
+                {
+                    path_var.split(':').next().unwrap_or("")
+                }
+            }
         );
     }
 

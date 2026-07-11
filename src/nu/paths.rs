@@ -250,20 +250,20 @@ pub fn discover_nu_off_path() -> Option<PathBuf> {
     discover_nu_off_path_in(&known_nu_search_paths())
 }
 
-/// Locate the `nu` executable on PATH, then under the Numan-managed tools directory.
+/// Locate the `nu` executable under the Numan-managed tools directory, then on PATH.
 pub fn find_nu_executable() -> Result<String> {
     find_nu_executable_with_root(&Config::resolve_root(&Platform::detect()))
 }
 
-/// Locate `nu` on PATH, then under `<root>/tools/nushell/`.
+/// Locate `nu` under `<root>/tools/nushell/`, then on PATH.
 pub fn find_nu_executable_with_root(root: &Path) -> Result<String> {
-    if let Ok(path) = find_nu_on_path() {
-        return Ok(path);
-    }
-
     let managed = managed_nu_binary(root);
     if managed.is_file() {
         return Ok(managed.to_string_lossy().into_owned());
+    }
+
+    if let Ok(path) = find_nu_on_path() {
+        return Ok(path);
     }
 
     if let Some(off_path) = discover_nu_off_path() {
@@ -491,6 +491,34 @@ mod tests {
 
         let err = result.unwrap_err();
         assert!(err.to_string().contains("numan setup nu"));
+    }
+
+    #[test]
+    fn find_nu_executable_with_root_prefers_managed_over_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("numan-root");
+        let managed = crate::nu::bootstrap::managed_nu_binary(&root);
+        std::fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        std::fs::write(&managed, b"managed nu").unwrap();
+
+        let path_dir = dir.path().join("path-nu");
+        std::fs::create_dir_all(&path_dir).unwrap();
+        let path_nu = path_dir.join(if cfg!(windows) { "nu.exe" } else { "nu" });
+        std::fs::write(&path_nu, b"path nu").unwrap();
+
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", &path_dir);
+
+        let resolved = find_nu_executable_with_root(&root).unwrap();
+        match saved_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        assert_eq!(
+            std::fs::canonicalize(resolved).unwrap(),
+            std::fs::canonicalize(&managed).unwrap()
+        );
     }
 
     #[test]

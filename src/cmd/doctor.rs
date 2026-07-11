@@ -378,7 +378,7 @@ fn check_nu_paths(
     }
 
     if paths.data_dir.is_some() && nu_available {
-        match NuPaths::detect()
+        match NuPaths::detect_with_root(root)
             .and_then(|live| paths.validate_vendor_drift(&live.vendor_autoload_dirs))
         {
             Ok(()) => findings.push(finding(

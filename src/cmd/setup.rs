@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::platform::Platform;
 use crate::nu::bootstrap::{self, NuSetupOptions};
-use crate::nu::paths::{find_nu_executable, probe_nu_config_path};
+use crate::nu::paths::{find_nu_executable_with_root, probe_nu_config_path};
 use crate::util::atomic::write_bytes_atomic;
 use crate::util::fs_safety::assert_not_symlink;
 
@@ -63,7 +63,7 @@ pub struct LoaderArgs {
 pub fn execute(cmd: SetupCommands, root: &Path) -> Result<()> {
     match cmd {
         SetupCommands::Nu(args) => execute_nu(&args, root),
-        SetupCommands::Loader(args) => execute_loader(&args),
+        SetupCommands::Loader(args) => execute_loader(&args, root),
     }
 }
 
@@ -91,9 +91,9 @@ pub fn execute_nu(args: &NuSetupArgs, root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn execute_loader(args: &LoaderArgs) -> Result<()> {
+pub fn execute_loader(args: &LoaderArgs, root: &Path) -> Result<()> {
     execute_loader_with_probe(args, || {
-        let nu_exe = find_nu_executable()?;
+        let nu_exe = find_nu_executable_with_root(root)?;
         probe_nu_config_path(&nu_exe)
     })
 }
