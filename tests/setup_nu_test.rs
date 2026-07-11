@@ -114,4 +114,19 @@ fn setup_nu_use_existing_registers_binary_without_download() {
         !bootstrap::managed_nu_binary(root).is_file(),
         "use-existing should not install a managed copy under NUMAN_ROOT"
     );
+
+    let path_var = std::env::var("PATH").unwrap();
+    let parent = existing
+        .canonicalize()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let parent_str = parent.to_string_lossy().replace("\\\\?\\", "");
+    assert!(
+        path_var
+            .split(';')
+            .any(|part| part.trim().eq_ignore_ascii_case(&parent_str)),
+        "PATH should contain the existing Nu directory after use-existing"
+    );
 }

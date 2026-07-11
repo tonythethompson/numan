@@ -209,6 +209,13 @@ fn doctor_reports_off_path_nu_without_download() {
         .expect("expected nu.binary.found_off_path");
     assert_eq!(finding.severity, Severity::Warn);
     assert!(finding.fix.as_deref().unwrap().contains("--use-existing"));
+
+    let missing = report
+        .findings
+        .iter()
+        .find(|f| f.id == "nu.binary.missing_on_path")
+        .expect("expected nu.binary.missing_on_path");
+    assert_eq!(missing.severity, Severity::Ok);
 }
 
 #[test]

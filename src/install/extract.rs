@@ -105,6 +105,7 @@ fn extract_zip(
     let mut entry_found = false;
     let mut file_count: usize = 0;
     let mut total_bytes: u64 = 0;
+    let max_bytes = max_uncompressed_bytes(config);
     let archive_root = config.archive_root.as_deref();
     let include_checker = build_include_checker(config.include.as_deref())?;
 
@@ -157,11 +158,10 @@ fn extract_zip(
             );
         }
         total_bytes += entry.size();
-        if total_bytes > max_uncompressed_bytes(config) {
+        if total_bytes > max_bytes {
             bail!(
-                "Archive uncompressed size exceeds {} bytes. \
-                 This may be an archive bomb.",
-                max_uncompressed_bytes(config)
+                "Archive uncompressed size exceeds {max_bytes} bytes. \
+                 This may be an archive bomb."
             );
         }
 
@@ -204,6 +204,7 @@ fn extract_tar_inner<R: Read>(
     let mut entry_found = false;
     let mut file_count: usize = 0;
     let mut total_bytes: u64 = 0;
+    let max_bytes = max_uncompressed_bytes(config);
     let archive_root = config.archive_root.as_deref();
     let include_checker = build_include_checker(config.include.as_deref())?;
 
@@ -275,11 +276,10 @@ fn extract_tar_inner<R: Read>(
             );
         }
         total_bytes += entry.header().size().unwrap_or(0);
-        if total_bytes > max_uncompressed_bytes(config) {
+        if total_bytes > max_bytes {
             bail!(
-                "Archive uncompressed size exceeds {} bytes. \
-                 This may be an archive bomb.",
-                max_uncompressed_bytes(config)
+                "Archive uncompressed size exceeds {max_bytes} bytes. \
+                 This may be an archive bomb."
             );
         }
 
