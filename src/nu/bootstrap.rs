@@ -314,6 +314,31 @@ pub fn persist_path_dir(dir: &Path) -> Result<()> {
     }
 }
 
+/// Resolve the directory to prepend/persist for `--use-existing`.
+///
+/// When the user passes a relative path with a parent (including symlinked
+/// Homebrew-style bins), keep that parent. For bare filenames such as `nu`,
+/// `input.parent()` is empty even though `canonicalize()` resolves correctly.
+fn path_parent_for_registration(input: &Path, resolved: &Path) -> Result<PathBuf> {
+    if let Some(parent) = input.parent() {
+        if !parent.as_os_str().is_empty() {
+            return Ok(parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf()));
+        }
+    }
+
+    resolved
+        .parent()
+        .with_context(|| {
+            format!(
+                "Nushell binary '{}' has no parent directory",
+                resolved.display()
+            )
+        })
+        .map(|parent| parent.to_path_buf())
+}
+
 /// Register an existing Nushell binary: prepend its directory to PATH and persist when allowed.
 pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<PathBuf> {
     let input = binary.to_path_buf();
@@ -330,15 +355,7 @@ pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<P
     validate_nushell_binary(&resolved)
         .with_context(|| format!("'{}' is not a runnable Nushell binary", binary.display()))?;
 
-    let parent = input.parent().with_context(|| {
-        format!(
-            "Nushell binary '{}' has no parent directory",
-            binary.display()
-        )
-    })?;
-    let parent = parent
-        .canonicalize()
-        .unwrap_or_else(|_| parent.to_path_buf());
+    let parent = path_parent_for_registration(input.as_path(), &resolved)?;
 
     if !options.yes && !std::io::stdin().is_terminal() {
         bail!(
@@ -653,6 +670,16 @@ mod tests {
         }
         let asset = select_release_asset(&release, &platform).unwrap();
         assert!(asset.name.contains("x86_64-pc-windows-msvc.zip"));
+    }
+
+    #[test]
+    fn path_parent_for_registration_uses_resolved_parent_for_bare_filename() {
+        let dir = TempDir::new().unwrap();
+        let nu_path = dir.path().join("nu");
+        std::fs::write(&nu_path, b"fake").unwrap();
+        let resolved = nu_path.canonicalize().unwrap();
+        let parent = path_parent_for_registration(Path::new("nu"), &resolved).unwrap();
+        assert_eq!(parent, resolved.parent().unwrap());
     }
 
     #[test]
