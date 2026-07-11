@@ -354,6 +354,27 @@ pub fn probe_nu_config_path(nu_exe: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(probe.config_path))
 }
 
+/// Validate that a path is an executable Nushell binary before PATH mutation.
+pub fn validate_nushell_binary(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)
+            .with_context(|| format!("Failed to read metadata for '{}'", path.display()))?
+            .permissions()
+            .mode();
+        if mode & 0o111 == 0 {
+            bail!(
+                "'{}' is not executable. Pass a runnable Nushell binary.",
+                path.display()
+            );
+        }
+    }
+
+    probe_nu(&path.to_string_lossy())?;
+    Ok(())
+}
+
 /// Run a single Nu invocation and parse the resulting JSON probe output.
 ///
 /// The probe emits one JSON object, so no ad-hoc line splitting is needed.

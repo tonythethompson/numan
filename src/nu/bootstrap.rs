@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::core::platform::{Arch, Env, Os, Platform};
 use crate::install::download::download_file;
 use crate::install::extract::{extract_archive, ArchiveFormat, ExtractConfig};
+use crate::nu::paths::validate_nushell_binary;
 #[cfg(unix)]
 use crate::util::atomic::write_bytes_atomic;
 #[cfg(unix)]
@@ -326,6 +327,9 @@ pub fn register_existing_nu(binary: &Path, options: &NuSetupOptions) -> Result<P
         );
     }
 
+    validate_nushell_binary(&resolved)
+        .with_context(|| format!("'{}' is not a runnable Nushell binary", binary.display()))?;
+
     let parent = input.parent().with_context(|| {
         format!(
             "Nushell binary '{}' has no parent directory",
@@ -405,11 +409,29 @@ fn persist_path_dir_windows(dir: &Path) -> Result<()> {
 }
 
 #[cfg(unix)]
+fn shell_escape_for_double_quotes(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' | '"' | '$' | '`' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+#[cfg(unix)]
 fn persist_path_dir_unix(dir: &Path) -> Result<()> {
     let dir_str = dir
         .to_str()
         .with_context(|| format!("PATH entry '{}' is not valid UTF-8", dir.display()))?;
-    let export_line = format!(r#"export PATH="{dir_str}:$PATH""#);
+    let export_line = format!(
+        r#"export PATH="{}:$PATH""#,
+        shell_escape_for_double_quotes(dir_str)
+    );
     append_shell_profile_line(&export_line, |content| content.contains(dir_str))
 }
 
@@ -639,6 +661,15 @@ mod tests {
         const EXPORT_LINE: &str = r##"export PATH="$HOME/.local/bin:$PATH""##;
         assert!(EXPORT_LINE.ends_with('"'));
         assert_eq!(EXPORT_LINE.matches('"').count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_escape_for_double_quotes_escapes_metacharacters() {
+        assert_eq!(
+            shell_escape_for_double_quotes(r#"/opt/$HOME/bin"#),
+            r#"/opt/\$HOME/bin"#
+        );
     }
 
     #[cfg(windows)]

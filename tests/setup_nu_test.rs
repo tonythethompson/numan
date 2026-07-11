@@ -97,7 +97,33 @@ fn setup_nu_use_existing_registers_binary_without_download() {
     let existing_dir = dir.path().join("existing-nu");
     std::fs::create_dir_all(&existing_dir).unwrap();
     let existing = existing_dir.join(if cfg!(windows) { "nu.exe" } else { "nu" });
-    std::fs::write(&existing, b"fake nu").unwrap();
+
+    let nu_source = std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path)
+                .map(|dir| dir.join(if cfg!(windows) { "nu.exe" } else { "nu" }))
+                .find(|p| p.is_file())
+        })
+        .flatten()
+        .or_else(|| {
+            if cfg!(unix) {
+                Some(std::path::PathBuf::from("/usr/local/bin/nu"))
+            } else {
+                None
+            }
+        })
+        .filter(|p| p.is_file());
+    let Some(nu_source) = nu_source else {
+        return;
+    };
+    std::fs::copy(&nu_source, &existing).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&existing).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&existing, perms).unwrap();
+    }
 
     execute_nu(
         &NuSetupArgs {
