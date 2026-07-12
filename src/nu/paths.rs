@@ -240,9 +240,34 @@ pub fn known_nu_search_paths() -> Vec<PathBuf> {
     paths
 }
 
-/// Return the first existing Nushell binary from `candidates`.
+/// Return true when `path` is a regular file that looks runnable, without executing it.
+fn is_executable_candidate(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .map(|meta| meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// Return the first existing off-PATH candidate without executing it.
+///
+/// Report-only commands such as `numan doctor` use this for hints. Callers that
+/// will mutate PATH or register a binary must validate with
+/// [`validate_nushell_binary`] separately (see `register_existing_nu`).
 pub fn discover_nu_off_path_in(candidates: &[PathBuf]) -> Option<PathBuf> {
-    candidates.iter().find(|path| path.is_file()).cloned()
+    candidates
+        .iter()
+        .find(|path| is_executable_candidate(path))
+        .cloned()
 }
 
 /// Probe common install roots when Nushell is installed but not on PATH.
@@ -466,10 +491,17 @@ mod tests {
     }
 
     #[test]
-    fn discover_nu_off_path_in_returns_first_existing_candidate() {
+    fn discover_nu_off_path_in_returns_first_executable_candidate() {
         let dir = tempfile::tempdir().unwrap();
-        let nu_path = dir.path().join("nu.exe");
+        let nu_path = dir.path().join(if cfg!(windows) { "nu.exe" } else { "nu" });
         std::fs::write(&nu_path, b"fake").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&nu_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&nu_path, perms).unwrap();
+        }
         let missing = dir.path().join("missing").join("nu.exe");
         let found = discover_nu_off_path_in(&[missing, nu_path.clone()]);
         assert_eq!(found, Some(nu_path));

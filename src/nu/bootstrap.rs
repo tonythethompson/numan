@@ -176,6 +176,7 @@ pub fn install_from_archive(archive_path: &Path, root: &Path, version: &str) -> 
         std::fs::remove_dir_all(&extract_root)?;
     }
     std::fs::create_dir_all(&extract_root)?;
+    let _extract_cleanup = ExtractCleanup(extract_root.clone());
 
     extract_archive(
         archive_path,
@@ -202,8 +203,15 @@ pub fn install_from_archive(archive_path: &Path, root: &Path, version: &str) -> 
     })?;
     make_executable(&dest)?;
     std::fs::write(dest_dir.join("VERSION"), version.as_bytes())?;
-    let _ = std::fs::remove_dir_all(&extract_root);
     Ok(dest)
+}
+
+struct ExtractCleanup(PathBuf);
+
+impl Drop for ExtractCleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn verify_downloaded_archive(path: &Path, asset: &GitHubAsset) -> Result<()> {
