@@ -9,14 +9,15 @@ use crate::nu::autoload::{
 };
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_journal::{sha256_file, SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION};
-use crate::state::autoload_journal::{
-    AutoloadOperation, AutoloadStage, PendingAutoload, RecoveryAction,
-};
+use crate::state::autoload_journal::{AutoloadOperation, AutoloadStage, PendingAutoload};
+use crate::state::autoload_recovery::reconcile_pending_autoload;
 use crate::state::autoload_state::AutoloadState;
 use crate::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
 use crate::state::lockfile::{Lockfile, ModuleActivation, PluginActivation};
 use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::format_timestamp;
+
+use super::print_autoload_recovery;
 use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
 
@@ -127,9 +128,14 @@ fn execute_with_registrar_and_runner(
     //    is warned before the consent table is printed.
     check_journals_for_stale_identity(root, &nu_paths)?;
 
-    // 5. Resolve plugin and module targets from the current lockfile snapshot
-    //    (pre-lock read — used only for consent table display).
-    let lockfile = Lockfile::load(root)?;
+    // 5. Reconcile interrupted work and resolve consent targets while holding
+    //    the mutation lock. This prevents a journal from being skipped by an
+    //    early no-op return.
+    let planning_lock = acquire_mutation_lock(root)?;
+    let mut lockfile = Lockfile::load(root)?;
+    reconcile_plugin_journal(root, &nu_paths, &mut lockfile)?;
+    print_autoload_recovery(reconcile_pending_autoload(root, &nu_paths, &mut lockfile)?);
+    lockfile = Lockfile::load(root)?;
     let plugin_targets = resolve_plugin_targets(args, &lockfile, &nu_paths, root)?;
     let module_targets = resolve_module_targets(args, &lockfile, &nu_paths)?;
 
@@ -147,6 +153,7 @@ fn execute_with_registrar_and_runner(
     } else {
         None
     };
+    drop(planning_lock);
 
     // 8. Consent table + confirmation
     print_grouped_consent_table(
@@ -173,7 +180,7 @@ fn execute_with_registrar_and_runner(
         }
     }
 
-    // 9. Acquire the root mutation lock before any mutation
+    // 9. Reacquire the root mutation lock after consent.
     let _lock = acquire_mutation_lock(root)?;
 
     // Reload lockfile under the lock to get the latest state
@@ -182,7 +189,7 @@ fn execute_with_registrar_and_runner(
     // 10. Reconcile any interrupted journals under the lock so recovery
     //     mutations are serialized with all other writes.
     reconcile_plugin_journal(root, &nu_paths, &mut lockfile)?;
-    reconcile_autoload_journal(root, &nu_paths, &mut lockfile)?;
+    print_autoload_recovery(reconcile_pending_autoload(root, &nu_paths, &mut lockfile)?);
     // Reload after reconciliation — recovery may have mutated the lockfile.
     lockfile = Lockfile::load(root)?;
 
@@ -195,6 +202,12 @@ fn execute_with_registrar_and_runner(
         println!("Nothing to activate.");
         return Ok(());
     }
+
+    let managed_file_path = if !module_targets.is_empty() {
+        Some(resolve_managed_file_path(&nu_paths)?)
+    } else {
+        None
+    };
 
     // 11. Snapshot current state once before first mutation
     let snapshot = create_snapshot(
@@ -1115,157 +1128,6 @@ fn reconcile_plugin_journal(
     lockfile.save(root)?;
     PendingActivation::delete(root)?;
     eprintln!("   Plugin reconciliation complete.");
-    Ok(())
-}
-
-/// Reconcile any interrupted module-autoload journal.
-fn reconcile_autoload_journal(
-    root: &Path,
-    nu_paths: &NuPaths,
-    lockfile: &mut Lockfile,
-) -> Result<()> {
-    let journal = PendingAutoload::load(root)?;
-    let Some(journal) = journal else {
-        return Ok(());
-    };
-
-    if !journal.matches_nu_identity(&nu_paths.nu_executable_hash, &nu_paths.nu_version) {
-        bail!(
-            "A pending module-autoload journal exists from a different Nu identity.\n\
-             {}\n\
-             Journal: {}",
-            hints::run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
-            root.join("state/pending-autoload.json").display()
-        );
-    }
-
-    eprintln!(
-        "{}  Reconciling interrupted module-autoload journal (stage: {:?})…",
-        console::style("⚠").yellow(),
-        journal.stage
-    );
-
-    match journal.stage {
-        AutoloadStage::Prepared => {
-            match journal.recover_prepared()? {
-                RecoveryAction::AbandonedSafely => {
-                    // No external change occurred — safe to discard journal
-                    PendingAutoload::delete(root)?;
-                    eprintln!("   Module journal cleared (no external change occurred).");
-                }
-                RecoveryAction::DriftDetected { reason } => {
-                    bail!(
-                        "Numan managed-file drift detected during module journal recovery.\n\
-                         {reason}\n\
-                         Resolve the drift manually before proceeding."
-                    );
-                }
-                RecoveryAction::CanComplete => {
-                    // Prepared stage never returns CanComplete
-                    unreachable!()
-                }
-            }
-        }
-        AutoloadStage::Replaced => {
-            match journal.recover_replaced()? {
-                RecoveryAction::CanComplete => {
-                    // Complete the interrupted transaction
-                    let vendor_dir = &journal.vendor_autoload_dir;
-                    let managed_path_str = &journal.managed_file_path;
-                    let managed_path = Path::new(managed_path_str);
-
-                    // Update lockfile activation records for desired IDs
-                    let ts = format_timestamp();
-                    for pkg_id in &journal.desired_active_module_ids {
-                        if let Some(pkg) = lockfile.packages.get_mut(pkg_id) {
-                            if pkg.package_type != "module" {
-                                continue;
-                            }
-                            // Prefer existing entry_path from an already-written activation
-                            // record. If the crash happened before any activation was
-                            // written, reconstruct from install-time payload_path + entry.
-                            let entry_path = if let Some(ma) = &pkg.module_activation {
-                                ma.entry_path.clone()
-                            } else {
-                                let payload = &pkg.payload_path;
-                                let rel = pkg.entry.as_deref().ok_or_else(|| {
-                                    anyhow::anyhow!(
-                                        "Cannot recover module '{}': entry not set in lockfile",
-                                        pkg_id
-                                    )
-                                })?;
-                                if payload.is_empty() {
-                                    bail!(
-                                        "Cannot recover module '{}': payload_path not set in lockfile",
-                                        pkg_id
-                                    );
-                                }
-                                // payload_path is relative to root — join with root
-                                // to get the absolute path that entry_path must hold.
-                                root.join(payload)
-                                    .join(rel)
-                                    .to_str()
-                                    .ok_or_else(|| {
-                                        anyhow::anyhow!(
-                                            "Cannot recover module '{}': entry path is not valid UTF-8",
-                                            pkg_id
-                                        )
-                                    })?
-                                    .to_owned()
-                            };
-                            let import_mode = pkg
-                                .module_import_mode
-                                .clone()
-                                .unwrap_or(crate::core::package::ModuleImportMode::Module);
-                            pkg.module_activation = Some(ModuleActivation {
-                                entry_path,
-                                import_mode,
-                                vendor_autoload_dir: vendor_dir.clone(),
-                                managed_file_path: managed_path_str.clone(),
-                                nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
-                                nu_version: nu_paths.nu_version.clone(),
-                                activated_at: ts.clone(),
-                            });
-                        }
-                    }
-                    lockfile.save(root)?;
-
-                    // Write derived autoload-state
-                    if journal.desired_file_exists && managed_path.exists() {
-                        let file_sha = sha256_file(managed_path)?;
-                        let autoload_state = AutoloadState::new(
-                            vendor_dir.clone(),
-                            managed_path_str.clone(),
-                            nu_paths.nu_executable_hash.clone(),
-                            nu_paths.nu_version.clone(),
-                            file_sha,
-                            journal.desired_active_module_ids.clone(),
-                            format_timestamp(),
-                        );
-                        autoload_state.save(root)?;
-                    } else if !journal.desired_file_exists {
-                        // Full deactivation recovery
-                        AutoloadState::delete(root)?;
-                    }
-
-                    PendingAutoload::delete(root)?;
-                    eprintln!("   Module journal recovery complete.");
-                }
-                RecoveryAction::DriftDetected { reason } => {
-                    bail!(
-                        "Cannot complete module-autoload journal recovery — drift detected.\n\
-                         {reason}\n\
-                         Preserve the journal and investigate manually."
-                    );
-                }
-                RecoveryAction::AbandonedSafely => {
-                    // Replaced stage never returns AbandonedSafely
-                    unreachable!()
-                }
-            }
-        }
-    }
-
     Ok(())
 }
 

@@ -14,3 +14,17 @@ pub mod search;
 pub mod setup;
 pub mod snapshot;
 pub mod update;
+
+use crate::state::autoload_recovery::AutoloadRecoveryOutcome;
+
+fn print_autoload_recovery(outcome: AutoloadRecoveryOutcome) {
+    match outcome {
+        AutoloadRecoveryOutcome::NoJournal => {}
+        AutoloadRecoveryOutcome::PreparedCleared => {
+            eprintln!("   Module journal cleared (no external change occurred).");
+        }
+        AutoloadRecoveryOutcome::ReplacedCompleted => {
+            eprintln!("   Module journal recovery complete.");
+        }
+    }
+}
