@@ -9,9 +9,10 @@ use crate::nu::autoload::{
 };
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_journal::{
-    sha256_file, AutoloadOperation, AutoloadStage, PendingAutoload, RecoveryAction,
+    sha256_file, AutoloadOperation, AutoloadStage, PendingAutoload,
     SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION,
 };
+use crate::state::autoload_recovery::{reconcile_pending_autoload, AutoloadRecoveryOutcome};
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::Lockfile;
 use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
@@ -60,11 +61,15 @@ fn execute_with_runner(
     // 1. Load cached Nu identity
     let nu_paths = NuPaths::load(root)?;
 
-    // 2. Load lockfile
+    // 2. Reconcile interrupted work and classify targets while holding the
+    //    mutation lock. This prevents stale pre-recovery state from causing an
+    //    early error or no-op return.
+    let planning_lock = acquire_mutation_lock(root)?;
+    let mut lockfile = Lockfile::load(root)?;
+    print_autoload_recovery(reconcile_pending_autoload(root, &nu_paths, &mut lockfile)?);
     let lockfile = Lockfile::load(root)?;
 
-    // 3. Classify explicit package IDs (plugin/script/completion errors, module collection)
-    //    This happens before drift check so type errors are reported immediately.
+    // 3. Classify explicit package IDs (plugin/script/completion errors, module collection).
     let targets_requested = classify_and_validate_packages(args, &lockfile)?;
 
     if targets_requested.is_empty() {
@@ -91,6 +96,7 @@ fn execute_with_runner(
     if nu_is_stale && !is_full_deactivation {
         nu_paths.validate_drift()?; // re-call to surface the actual error message
     }
+    drop(planning_lock);
 
     // 5. Show consent table and confirm
     println!();
@@ -117,17 +123,33 @@ fn execute_with_runner(
         }
     }
 
-    // 6. Acquire the root mutation lock before any mutation
+    // 6. Reacquire the root mutation lock after consent.
     let _lock = acquire_mutation_lock(root)?;
 
     // Reload lockfile under the lock
     let mut lockfile = Lockfile::load(root)?;
 
-    // 7. Reconcile any interrupted module-autoload journal
-    reconcile_autoload_journal(root, &nu_paths, &mut lockfile)?;
+    // 7. Reconcile any interrupted module-autoload journal.
+    print_autoload_recovery(reconcile_pending_autoload(root, &nu_paths, &mut lockfile)?);
 
-    // Reload after reconciliation
+    // Reload and reclassify after reconciliation so the new operation is based
+    // on the current authoritative state.
     let mut lockfile = Lockfile::load(root)?;
+    let targets_requested = classify_and_validate_packages(args, &lockfile)?;
+    if targets_requested.is_empty() {
+        println!("Nothing to deactivate.");
+        return Ok(());
+    }
+
+    let total_with_any_activation = lockfile
+        .packages
+        .values()
+        .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
+        .count();
+    let is_full_deactivation = targets_requested.len() == total_with_any_activation;
+    if nu_paths.validate_drift().is_err() && !is_full_deactivation {
+        nu_paths.validate_drift()?;
+    }
 
     // 8. Snapshot current state before any mutation
     let snapshot = create_snapshot(
@@ -654,158 +676,16 @@ fn print_deactivation_success(targets: &[ActiveModule]) {
 
 // ── Journal reconciliation ─────────────────────────────────────────────────────
 
-/// Reconcile any interrupted module-autoload journal before a new deactivation.
-fn reconcile_autoload_journal(
-    root: &Path,
-    nu_paths: &NuPaths,
-    lockfile: &mut Lockfile,
-) -> Result<()> {
-    let journal = PendingAutoload::load(root)?;
-    let Some(journal) = journal else {
-        return Ok(());
-    };
-
-    if !journal.matches_nu_identity(&nu_paths.nu_executable_hash, &nu_paths.nu_version) {
-        bail!(
-            "A pending module-autoload journal exists from a different Nu identity.\n\
-             Run 'numan init --refresh' to clear stale state, then retry.\n\
-             Journal: {}",
-            root.join("state/pending-autoload.json").display()
-        );
-    }
-
-    eprintln!(
-        "{}  Reconciling interrupted module-autoload journal (stage: {:?})…",
-        console::style("⚠").yellow(),
-        journal.stage
-    );
-
-    match journal.stage {
-        AutoloadStage::Prepared => match journal.recover_prepared()? {
-            RecoveryAction::AbandonedSafely => {
-                PendingAutoload::delete(root)?;
-                eprintln!("   Module journal cleared (no external change occurred).");
-            }
-            RecoveryAction::DriftDetected { reason } => {
-                bail!(
-                    "Numan managed-file drift detected during module journal recovery.\n\
-                         {reason}\n\
-                         Resolve the drift manually before proceeding."
-                );
-            }
-            RecoveryAction::CanComplete => {
-                unreachable!()
-            }
-        },
-        AutoloadStage::Replaced => {
-            match journal.recover_replaced()? {
-                RecoveryAction::CanComplete => {
-                    let vendor_dir = &journal.vendor_autoload_dir;
-                    let managed_path_str = &journal.managed_file_path;
-                    let managed_path = Path::new(managed_path_str);
-
-                    if journal.desired_file_exists && managed_path.exists() {
-                        // Update lockfile activation for remaining modules.
-                        let ts = format_timestamp();
-                        for pkg_id in &journal.desired_active_module_ids {
-                            if let Some(pkg) = lockfile.packages.get_mut(pkg_id) {
-                                if pkg.package_type != "module" {
-                                    continue;
-                                }
-                                let entry_path = if let Some(ma) = &pkg.module_activation {
-                                    ma.entry_path.clone()
-                                } else {
-                                    let payload = &pkg.payload_path;
-                                    let rel = pkg.entry.as_deref().ok_or_else(|| {
-                                        anyhow::anyhow!(
-                                            "Cannot recover module '{}': entry not set in lockfile",
-                                            pkg_id
-                                        )
-                                    })?;
-                                    if payload.is_empty() {
-                                        bail!(
-                                            "Cannot recover module '{}': payload_path not set",
-                                            pkg_id
-                                        );
-                                    }
-                                    // payload_path is relative to root — join with root
-                                    // to get the absolute path that entry_path must hold.
-                                    root.join(payload)
-                                        .join(rel)
-                                        .to_str()
-                                        .ok_or_else(|| {
-                                            anyhow::anyhow!(
-                                                "Cannot recover module '{}': entry path is not valid UTF-8",
-                                                pkg_id
-                                            )
-                                        })?
-                                        .to_owned()
-                                };
-                                let import_mode = pkg
-                                    .module_import_mode
-                                    .clone()
-                                    .unwrap_or(crate::core::package::ModuleImportMode::Module);
-                                pkg.module_activation =
-                                    Some(crate::state::lockfile::ModuleActivation {
-                                        entry_path,
-                                        import_mode,
-                                        vendor_autoload_dir: vendor_dir.clone(),
-                                        managed_file_path: managed_path_str.clone(),
-                                        nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
-                                        nu_version: nu_paths.nu_version.clone(),
-                                        activated_at: ts.clone(),
-                                    });
-                            }
-                        }
-                        // Clear activation for targeted (deactivated) modules.
-                        for pkg_id in &journal.targeted_module_ids {
-                            if let Some(pkg) = lockfile.packages.get_mut(pkg_id) {
-                                pkg.module_activation = None;
-                            }
-                        }
-                        lockfile.save(root)?;
-
-                        // Write derived autoload-state.
-                        let file_sha = sha256_file(managed_path)?;
-                        let autoload_state = AutoloadState::new(
-                            vendor_dir.clone(),
-                            managed_path_str.clone(),
-                            nu_paths.nu_executable_hash.clone(),
-                            nu_paths.nu_version.clone(),
-                            file_sha,
-                            journal.desired_active_module_ids.clone(),
-                            format_timestamp(),
-                        );
-                        autoload_state.save(root)?;
-                    } else if !journal.desired_file_exists {
-                        // Full deactivation recovery: clear all targeted activations.
-                        for pkg_id in &journal.targeted_module_ids {
-                            if let Some(pkg) = lockfile.packages.get_mut(pkg_id) {
-                                pkg.module_activation = None;
-                            }
-                        }
-                        lockfile.save(root)?;
-                        AutoloadState::delete(root)?;
-                    }
-
-                    PendingAutoload::delete(root)?;
-                    eprintln!("   Module journal recovery complete.");
-                }
-                RecoveryAction::DriftDetected { reason } => {
-                    bail!(
-                        "Cannot complete module-autoload journal recovery — drift detected.\n\
-                         {reason}\n\
-                         Preserve the journal and investigate manually."
-                    );
-                }
-                RecoveryAction::AbandonedSafely => {
-                    unreachable!()
-                }
-            }
+fn print_autoload_recovery(outcome: AutoloadRecoveryOutcome) {
+    match outcome {
+        AutoloadRecoveryOutcome::NoJournal => {}
+        AutoloadRecoveryOutcome::PreparedCleared => {
+            eprintln!("   Module journal cleared (no external change occurred).");
+        }
+        AutoloadRecoveryOutcome::ReplacedCompleted => {
+            eprintln!("   Module journal recovery complete.");
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

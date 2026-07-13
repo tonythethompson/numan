@@ -30,9 +30,13 @@ use numan_cli::nu::autoload::{
     generate_autoload_content, render_use_statement, FakeCandidateRunner, ResolvedEntry,
 };
 use numan_cli::nu::paths::NuPaths;
-use numan_cli::state::autoload_journal::{AutoloadStage, PendingAutoload};
+use numan_cli::state::autoload_journal::{
+    sha256_file, AutoloadOperation, AutoloadStage, PendingAutoload,
+    SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION,
+};
+use numan_cli::state::autoload_recovery::{reconcile_pending_autoload, AutoloadRecoveryOutcome};
 use numan_cli::state::autoload_state::AutoloadState;
-use numan_cli::state::lockfile::{Lockfile, LockfileEntry};
+use numan_cli::state::lockfile::{Lockfile, LockfileEntry, ModuleActivation};
 use numan_cli::util::fs_safety::{acquire_mutation_lock, OWNERSHIP_MARKER};
 
 use tempfile::TempDir;
@@ -857,6 +861,386 @@ fn recovery_completes_updates_from_replaced_journal() {
     // Note: The reconciliation writes autoload-state when desired_file_exists is true
     // and the managed file is present.
     // (The lockfile update sets module_activation based on existing records.)
+}
+
+#[test]
+fn deactivate_recovers_replaced_activation_before_classifying_targets() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+
+    let (pkg_id, entry) = env.create_module(
+        "owner",
+        "recover-activate",
+        "1.0.0",
+        ModuleImportMode::Module,
+    );
+    let entry_path = env.root().join(&entry.payload_path).join("mod.nu");
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+
+    let managed_content = format!("{}\nuse \"{}\"\n", OWNERSHIP_MARKER, entry_path.display());
+    std::fs::write(env.managed_file_path(), managed_content).unwrap();
+
+    PendingAutoload {
+        schema_version: AUTOLOAD_SCHEMA_VERSION,
+        operation: AutoloadOperation::Activate,
+        stage: AutoloadStage::Replaced,
+        nu_executable_sha256: env.nu_hash.clone(),
+        nu_version: "0.113.1".to_string(),
+        vendor_autoload_dir: env.vendor_dir_str(),
+        managed_file_path: env.managed_file_path_str(),
+        previous_file_exists: false,
+        previous_file_sha256: None,
+        desired_file_exists: true,
+        candidate_sha256: Some(sha256_file(&env.managed_file_path()).unwrap()),
+        previous_active_module_ids: vec![],
+        desired_active_module_ids: vec![pkg_id.clone()],
+        targeted_module_ids: vec![pkg_id.clone()],
+        created_at: "0000000000000001".to_string(),
+        pre_mutation_snapshot_id: None,
+    }
+    .save(env.root())
+    .unwrap();
+
+    let runner = FakeCandidateRunner::success();
+    run_deactivate(&env, &[&pkg_id], &runner).unwrap();
+
+    let recovered = Lockfile::load(env.root()).unwrap();
+    assert!(recovered.packages[&pkg_id].module_activation.is_none());
+    assert!(!env.managed_file_path().exists());
+    assert!(PendingAutoload::load(env.root()).unwrap().is_none());
+}
+
+#[test]
+fn activate_recovers_full_deactivation_without_reactivating_removed_module() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+
+    let (old_id, old_entry) = env.create_module("owner", "old", "1.0.0", ModuleImportMode::Module);
+    let (next_id, next_entry) =
+        env.create_module("owner", "next", "1.0.0", ModuleImportMode::Module);
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(old_id.clone(), old_entry);
+    lockfile.packages.insert(next_id.clone(), next_entry);
+    env.write_lockfile(&lockfile);
+
+    let runner = FakeCandidateRunner::success();
+    run_activate(&env, &[&old_id], &runner).unwrap();
+    let activation = Lockfile::load(env.root()).unwrap().packages[&old_id]
+        .module_activation
+        .clone()
+        .unwrap();
+    let previous_sha = sha256_file(&env.managed_file_path()).unwrap();
+    std::fs::remove_file(env.managed_file_path()).unwrap();
+
+    PendingAutoload {
+        schema_version: AUTOLOAD_SCHEMA_VERSION,
+        operation: AutoloadOperation::Deactivate,
+        stage: AutoloadStage::Replaced,
+        nu_executable_sha256: env.nu_hash.clone(),
+        nu_version: "0.113.1".to_string(),
+        vendor_autoload_dir: activation.vendor_autoload_dir,
+        managed_file_path: activation.managed_file_path,
+        previous_file_exists: true,
+        previous_file_sha256: Some(previous_sha),
+        desired_file_exists: false,
+        candidate_sha256: None,
+        previous_active_module_ids: vec![old_id.clone()],
+        desired_active_module_ids: vec![],
+        targeted_module_ids: vec![old_id.clone()],
+        created_at: "0000000000000002".to_string(),
+        pre_mutation_snapshot_id: None,
+    }
+    .save(env.root())
+    .unwrap();
+
+    run_activate(&env, &[&next_id], &runner).unwrap();
+
+    let recovered = Lockfile::load(env.root()).unwrap();
+    assert!(recovered.packages[&old_id].module_activation.is_none());
+    assert!(recovered.packages[&next_id].module_activation.is_some());
+    assert_eq!(
+        AutoloadState::load(env.root())
+            .unwrap()
+            .unwrap()
+            .active_module_ids,
+        vec![next_id]
+    );
+    assert!(PendingAutoload::load(env.root()).unwrap().is_none());
+}
+
+fn recovery_journal(
+    env: &ModuleTestEnv,
+    operation: AutoloadOperation,
+    stage: AutoloadStage,
+) -> PendingAutoload {
+    PendingAutoload {
+        schema_version: AUTOLOAD_SCHEMA_VERSION,
+        operation,
+        stage,
+        nu_executable_sha256: env.nu_hash.clone(),
+        nu_version: "0.113.1".to_string(),
+        vendor_autoload_dir: env.vendor_dir_str(),
+        managed_file_path: env.managed_file_path_str(),
+        previous_file_exists: false,
+        previous_file_sha256: None,
+        desired_file_exists: false,
+        candidate_sha256: None,
+        previous_active_module_ids: vec![],
+        desired_active_module_ids: vec![],
+        targeted_module_ids: vec![],
+        created_at: "0000000000000010".to_string(),
+        pre_mutation_snapshot_id: None,
+    }
+}
+
+fn run_recovery(env: &ModuleTestEnv) -> anyhow::Result<AutoloadRecoveryOutcome> {
+    let _guard = acquire_mutation_lock(env.root())?;
+    let nu_paths = NuPaths::load(env.root())?;
+    let mut lockfile = Lockfile::load(env.root())?;
+    reconcile_pending_autoload(env.root(), &nu_paths, &mut lockfile)
+}
+
+#[test]
+fn prepared_recovery_clears_unchanged_journal() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    env.write_lockfile(&Lockfile::empty());
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+
+    recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Prepared)
+        .save(env.root())
+        .unwrap();
+
+    assert_eq!(
+        run_recovery(&env).unwrap(),
+        AutoloadRecoveryOutcome::PreparedCleared
+    );
+    assert!(PendingAutoload::load(env.root()).unwrap().is_none());
+}
+
+#[test]
+fn stale_identity_recovery_preserves_journal() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    env.write_lockfile(&Lockfile::empty());
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+
+    let mut journal = recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Prepared);
+    journal.nu_executable_sha256 = "different-hash".to_string();
+    journal.save(env.root()).unwrap();
+
+    let error = run_recovery(&env).unwrap_err();
+    assert!(error.to_string().contains("different Nu identity"));
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn prepared_recovery_preserves_journal_on_file_drift() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    env.write_lockfile(&Lockfile::empty());
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+    std::fs::write(env.managed_file_path(), OWNERSHIP_MARKER).unwrap();
+
+    recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Prepared)
+        .save(env.root())
+        .unwrap();
+
+    let error = run_recovery(&env).unwrap_err();
+    assert!(error.to_string().contains("drift detected"));
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn replaced_recovery_preserves_journal_on_hash_drift() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    env.write_lockfile(&Lockfile::empty());
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+    std::fs::write(env.managed_file_path(), OWNERSHIP_MARKER).unwrap();
+
+    let mut journal = recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Replaced);
+    journal.desired_file_exists = true;
+    journal.candidate_sha256 = Some("wrong-hash".to_string());
+    journal.save(env.root()).unwrap();
+
+    let error = run_recovery(&env).unwrap_err();
+    assert!(error.to_string().contains("drift detected"));
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn replaced_recovery_preserves_retargeted_activation() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, mut entry) =
+        env.create_module("owner", "retargeted", "1.0.0", ModuleImportMode::Module);
+    entry.module_activation = Some(ModuleActivation {
+        entry_path: env
+            .root()
+            .join(&entry.payload_path)
+            .join("mod.nu")
+            .to_string_lossy()
+            .into_owned(),
+        import_mode: ModuleImportMode::Module,
+        vendor_autoload_dir: env.vendor_dir_str(),
+        managed_file_path: env.managed_file_path_str(),
+        nu_executable_sha256: "newer-nu-hash".to_string(),
+        nu_version: "0.114.0".to_string(),
+        activated_at: "0000000000000011".to_string(),
+    });
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+
+    let mut journal =
+        recovery_journal(&env, AutoloadOperation::Deactivate, AutoloadStage::Replaced);
+    journal.previous_file_exists = true;
+    journal.previous_file_sha256 = Some("old-file-hash".to_string());
+    journal.previous_active_module_ids = vec![pkg_id.clone()];
+    journal.targeted_module_ids = vec![pkg_id.clone()];
+    journal.save(env.root()).unwrap();
+
+    assert_eq!(
+        run_recovery(&env).unwrap(),
+        AutoloadRecoveryOutcome::ReplacedCompleted
+    );
+    let persisted = Lockfile::load(env.root()).unwrap();
+    assert_eq!(
+        persisted.packages[&pkg_id]
+            .module_activation
+            .as_ref()
+            .unwrap()
+            .nu_version,
+        "0.114.0"
+    );
+}
+
+#[test]
+fn invalid_deleted_file_journal_preserves_journal() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, entry) = env.create_module("owner", "invalid", "1.0.0", ModuleImportMode::Module);
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+
+    let mut journal =
+        recovery_journal(&env, AutoloadOperation::Deactivate, AutoloadStage::Replaced);
+    journal.desired_active_module_ids = vec![pkg_id];
+    journal.save(env.root()).unwrap();
+
+    let error = run_recovery(&env).unwrap_err();
+    assert!(error.to_string().contains("cannot declare active modules"));
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn missing_entry_metadata_preserves_replaced_journal() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, mut entry) =
+        env.create_module("owner", "missing-entry", "1.0.0", ModuleImportMode::Module);
+    entry.entry = None;
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+    std::fs::write(env.managed_file_path(), OWNERSHIP_MARKER).unwrap();
+
+    let mut journal = recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Replaced);
+    journal.desired_file_exists = true;
+    journal.candidate_sha256 = Some(sha256_file(&env.managed_file_path()).unwrap());
+    journal.desired_active_module_ids = vec![pkg_id.clone()];
+    journal.targeted_module_ids = vec![pkg_id];
+    journal.save(env.root()).unwrap();
+
+    let error = run_recovery(&env).unwrap_err();
+    assert!(error.to_string().contains("entry is not set"));
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn lockfile_save_failure_preserves_replaced_journal() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, entry) = env.create_module(
+        "owner",
+        "lockfile-failure",
+        "1.0.0",
+        ModuleImportMode::Module,
+    );
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+    std::fs::write(env.managed_file_path(), OWNERSHIP_MARKER).unwrap();
+
+    let mut journal = recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Replaced);
+    journal.desired_file_exists = true;
+    journal.candidate_sha256 = Some(sha256_file(&env.managed_file_path()).unwrap());
+    journal.desired_active_module_ids = vec![pkg_id.clone()];
+    journal.targeted_module_ids = vec![pkg_id];
+    journal.save(env.root()).unwrap();
+
+    let nu_paths = NuPaths::load(env.root()).unwrap();
+    let mut loaded = Lockfile::load(env.root()).unwrap();
+    std::fs::remove_file(env.root().join("lockfile")).unwrap();
+    std::fs::create_dir(env.root().join("lockfile")).unwrap();
+    let _guard = acquire_mutation_lock(env.root()).unwrap();
+    assert!(reconcile_pending_autoload(env.root(), &nu_paths, &mut loaded).is_err());
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn derived_state_failure_is_idempotent_on_retry() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, entry) = env.create_module("owner", "retry", "1.0.0", ModuleImportMode::Module);
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+    std::fs::write(env.managed_file_path(), OWNERSHIP_MARKER).unwrap();
+
+    let mut journal = recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Replaced);
+    journal.desired_file_exists = true;
+    journal.candidate_sha256 = Some(sha256_file(&env.managed_file_path()).unwrap());
+    journal.desired_active_module_ids = vec![pkg_id.clone()];
+    journal.targeted_module_ids = vec![pkg_id.clone()];
+    journal.save(env.root()).unwrap();
+
+    let nu_paths = NuPaths::load(env.root()).unwrap();
+    std::fs::remove_dir_all(env.root().join("nu_state")).unwrap();
+    std::fs::write(env.root().join("nu_state"), b"blocked").unwrap();
+
+    {
+        let _guard = acquire_mutation_lock(env.root()).unwrap();
+        let mut loaded = Lockfile::load(env.root()).unwrap();
+        assert!(reconcile_pending_autoload(env.root(), &nu_paths, &mut loaded).is_err());
+    }
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+
+    std::fs::remove_file(env.root().join("nu_state")).unwrap();
+    std::fs::create_dir_all(env.root().join("nu_state")).unwrap();
+    {
+        let _guard = acquire_mutation_lock(env.root()).unwrap();
+        let mut loaded = Lockfile::load(env.root()).unwrap();
+        assert_eq!(
+            reconcile_pending_autoload(env.root(), &nu_paths, &mut loaded).unwrap(),
+            AutoloadRecoveryOutcome::ReplacedCompleted
+        );
+    }
+
+    assert!(PendingAutoload::load(env.root()).unwrap().is_none());
+    assert!(Lockfile::load(env.root()).unwrap().packages[&pkg_id]
+        .module_activation
+        .is_some());
+    assert!(AutoloadState::load(env.root()).unwrap().is_some());
 }
 
 // ── 3g. Concurrent mutation lock prevents two writers ─────────────────────────
