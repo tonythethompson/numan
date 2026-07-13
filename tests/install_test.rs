@@ -11,6 +11,7 @@ use numan_cli::state::snapshot::{list_snapshots, SnapshotTrigger};
 use rand_core::OsRng;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
+use std::process::Command;
 use tempfile::TempDir;
 
 /// Helper: generate a test keypair and store the trusted key.
@@ -198,6 +199,26 @@ fn integration_full_install_from_signed_registry() {
 
 #[test]
 fn integration_install_rejects_unsigned_registry() {
+    const CHILD_MARKER: &str = "NUMAN_UNSIGNED_REJECTION_TEST_CHILD";
+
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("integration_install_rejects_unsigned_registry")
+            .arg("--exact")
+            .arg("--nocapture")
+            .env(CHILD_MARKER, "1")
+            .env_remove("NUMAN_ALLOW_UNSIGNED")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "Unsigned-registry child test failed.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
 
