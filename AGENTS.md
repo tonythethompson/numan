@@ -64,6 +64,7 @@ src/
     lockfile.rs        — Lockfile v2: PluginActivation, ModuleActivation, revision_id, payload_sha256, compute_revision_id()
     journal.rs         — Plugin pending-activation journal for crash recovery
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
+    autoload_recovery.rs — Command-independent PendingAutoload reconciliation into lockfile + derived autoload state
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
     lifecycle_journal.rs — pending-lifecycle.json for update/remove/nupm_import crash recovery (Phase 5–6)
     snapshot.rs        — Immutable activation snapshots (`create_snapshot`, `list_snapshots`, etc.)
