@@ -1003,6 +1003,21 @@ fn run_recovery(env: &ModuleTestEnv) -> anyhow::Result<AutoloadRecoveryOutcome> 
 }
 
 #[test]
+fn no_journal_returns_no_outcome() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    env.write_lockfile(&Lockfile::empty());
+    let state_dir = env.root().join("state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    assert!(!state_dir.join("pending-autoload.json").exists());
+
+    assert_eq!(
+        run_recovery(&env).unwrap(),
+        AutoloadRecoveryOutcome::NoJournal
+    );
+}
+
+#[test]
 fn prepared_recovery_clears_unchanged_journal() {
     let env = ModuleTestEnv::new();
     env.write_nu_paths();
@@ -1120,6 +1135,47 @@ fn replaced_recovery_preserves_retargeted_activation() {
 }
 
 #[test]
+fn replaced_full_deactivation_clears_targeted_stale_identity_activation() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, mut entry) =
+        env.create_module("owner", "stale-target", "1.0.0", ModuleImportMode::Module);
+    entry.module_activation = Some(ModuleActivation {
+        entry_path: env
+            .root()
+            .join(&entry.payload_path)
+            .join("mod.nu")
+            .to_string_lossy()
+            .into_owned(),
+        import_mode: ModuleImportMode::Module,
+        vendor_autoload_dir: env.vendor_dir_str(),
+        managed_file_path: env.managed_file_path_str(),
+        nu_executable_sha256: "stale-nu-hash".to_string(),
+        nu_version: "0.112.0".to_string(),
+        activated_at: "0000000000000011".to_string(),
+    });
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+
+    let mut journal =
+        recovery_journal(&env, AutoloadOperation::Deactivate, AutoloadStage::Replaced);
+    journal.previous_file_exists = true;
+    journal.previous_file_sha256 = Some("old-file-hash".to_string());
+    journal.targeted_module_ids = vec![pkg_id.clone()];
+    journal.save(env.root()).unwrap();
+
+    assert_eq!(
+        run_recovery(&env).unwrap(),
+        AutoloadRecoveryOutcome::ReplacedCompleted
+    );
+    let persisted = Lockfile::load(env.root()).unwrap();
+    assert!(persisted.packages[&pkg_id].module_activation.is_none());
+    assert!(PendingAutoload::load(env.root()).unwrap().is_none());
+}
+
+#[test]
 fn invalid_deleted_file_journal_preserves_journal() {
     let env = ModuleTestEnv::new();
     env.write_nu_paths();
@@ -1136,6 +1192,30 @@ fn invalid_deleted_file_journal_preserves_journal() {
 
     let error = run_recovery(&env).unwrap_err();
     assert!(error.to_string().contains("cannot declare active modules"));
+    assert!(PendingAutoload::load(env.root()).unwrap().is_some());
+}
+
+#[test]
+fn non_module_desired_active_id_preserves_replaced_journal() {
+    let env = ModuleTestEnv::new();
+    env.write_nu_paths();
+    let (pkg_id, mut entry) =
+        env.create_module("owner", "invalid-plugin", "1.0.0", ModuleImportMode::Module);
+    entry.package_type = "plugin".to_string();
+    let mut lockfile = Lockfile::empty();
+    lockfile.packages.insert(pkg_id.clone(), entry);
+    env.write_lockfile(&lockfile);
+    std::fs::create_dir_all(env.root().join("state")).unwrap();
+    std::fs::write(env.managed_file_path(), OWNERSHIP_MARKER).unwrap();
+
+    let mut journal = recovery_journal(&env, AutoloadOperation::Activate, AutoloadStage::Replaced);
+    journal.desired_file_exists = true;
+    journal.candidate_sha256 = Some(sha256_file(&env.managed_file_path()).unwrap());
+    journal.desired_active_module_ids = vec![pkg_id];
+    journal.save(env.root()).unwrap();
+
+    let error = run_recovery(&env).unwrap_err();
+    assert!(error.to_string().contains("lockfile type is 'plugin'"));
     assert!(PendingAutoload::load(env.root()).unwrap().is_some());
 }
 

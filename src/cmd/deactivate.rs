@@ -12,11 +12,13 @@ use crate::state::autoload_journal::{
     sha256_file, AutoloadOperation, AutoloadStage, PendingAutoload,
     SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION,
 };
-use crate::state::autoload_recovery::{reconcile_pending_autoload, AutoloadRecoveryOutcome};
+use crate::state::autoload_recovery::reconcile_pending_autoload;
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::Lockfile;
 use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::{format_timestamp, fs_safety::acquire_mutation_lock};
+
+use super::print_autoload_recovery;
 
 #[derive(Args, Debug)]
 pub struct DeactivateArgs {
@@ -33,7 +35,7 @@ pub struct DeactivateArgs {
 }
 
 /// A module that is currently active and eligible for deactivation.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct ActiveModule {
     package_id: String,
     vendor_autoload_dir: String,
@@ -91,10 +93,9 @@ fn execute_with_runner(
         .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
         .count();
     let is_full_deactivation = targets_requested.len() == total_with_any_activation;
-    let nu_is_stale = nu_paths.validate_drift().is_err();
-
-    if nu_is_stale && !is_full_deactivation {
-        nu_paths.validate_drift()?; // re-call to surface the actual error message
+    let drift_result = nu_paths.validate_drift();
+    if !is_full_deactivation {
+        drift_result?;
     }
     drop(planning_lock);
 
@@ -135,7 +136,7 @@ fn execute_with_runner(
     // Reload and reclassify after reconciliation so the new operation is based
     // on the current authoritative state.
     let mut lockfile = Lockfile::load(root)?;
-    let targets_requested = classify_and_validate_packages(args, &lockfile)?;
+    let targets_requested = reclassify_confirmed_targets(args, &lockfile, &targets_requested)?;
     if targets_requested.is_empty() {
         println!("Nothing to deactivate.");
         return Ok(());
@@ -147,8 +148,9 @@ fn execute_with_runner(
         .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
         .count();
     let is_full_deactivation = targets_requested.len() == total_with_any_activation;
-    if nu_paths.validate_drift().is_err() && !is_full_deactivation {
-        nu_paths.validate_drift()?;
+    let drift_result = nu_paths.validate_drift();
+    if !is_full_deactivation {
+        drift_result?;
     }
 
     // 8. Snapshot current state before any mutation
@@ -342,6 +344,20 @@ fn classify_and_validate_packages(
         }
         Ok(targets)
     }
+}
+
+fn reclassify_confirmed_targets(
+    args: &DeactivateArgs,
+    lockfile: &Lockfile,
+    confirmed_targets: &[ActiveModule],
+) -> Result<Vec<ActiveModule>> {
+    let current_targets = classify_and_validate_packages(args, lockfile)?;
+    if current_targets != confirmed_targets {
+        bail!(
+            "Module activation state changed after confirmation. No modules were deactivated; retry the command to review the current targets."
+        );
+    }
+    Ok(current_targets)
 }
 
 /// Count the number of modules currently active for the given Nu identity.
@@ -674,20 +690,6 @@ fn print_deactivation_success(targets: &[ActiveModule]) {
     }
 }
 
-// ── Journal reconciliation ─────────────────────────────────────────────────────
-
-fn print_autoload_recovery(outcome: AutoloadRecoveryOutcome) {
-    match outcome {
-        AutoloadRecoveryOutcome::NoJournal => {}
-        AutoloadRecoveryOutcome::PreparedCleared => {
-            eprintln!("   Module journal cleared (no external change occurred).");
-        }
-        AutoloadRecoveryOutcome::ReplacedCompleted => {
-            eprintln!("   Module journal recovery complete.");
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -895,6 +897,25 @@ mod tests {
         assert_eq!(targets.len(), 2);
         assert_eq!(targets[0].package_id, "owner/alpha");
         assert_eq!(targets[1].package_id, "owner/beta");
+    }
+
+    #[test]
+    fn reclassification_rejects_expanded_implicit_targets_after_confirmation() {
+        let args = DeactivateArgs {
+            packages: vec![],
+            yes: true,
+            verbose: false,
+        };
+        let confirmed_lockfile = make_lockfile_with_modules(vec![("owner/alpha", "module", true)]);
+        let confirmed_targets = classify_and_validate_packages(&args, &confirmed_lockfile).unwrap();
+        let changed_lockfile = make_lockfile_with_modules(vec![
+            ("owner/alpha", "module", true),
+            ("owner/beta", "module", true),
+        ]);
+
+        let error =
+            reclassify_confirmed_targets(&args, &changed_lockfile, &confirmed_targets).unwrap_err();
+        assert!(error.to_string().contains("changed after confirmation"));
     }
 
     #[test]

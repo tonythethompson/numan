@@ -10,12 +10,14 @@ use crate::nu::autoload::{
 use crate::nu::paths::NuPaths;
 use crate::state::autoload_journal::{sha256_file, SCHEMA_VERSION as AUTOLOAD_SCHEMA_VERSION};
 use crate::state::autoload_journal::{AutoloadOperation, AutoloadStage, PendingAutoload};
-use crate::state::autoload_recovery::{reconcile_pending_autoload, AutoloadRecoveryOutcome};
+use crate::state::autoload_recovery::reconcile_pending_autoload;
 use crate::state::autoload_state::AutoloadState;
 use crate::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
 use crate::state::lockfile::{Lockfile, ModuleActivation, PluginActivation};
 use crate::state::snapshot::{create_snapshot, SnapshotReason, SnapshotTrigger};
 use crate::util::format_timestamp;
+
+use super::print_autoload_recovery;
 use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
 
@@ -1127,18 +1129,6 @@ fn reconcile_plugin_journal(
     PendingActivation::delete(root)?;
     eprintln!("   Plugin reconciliation complete.");
     Ok(())
-}
-
-fn print_autoload_recovery(outcome: AutoloadRecoveryOutcome) {
-    match outcome {
-        AutoloadRecoveryOutcome::NoJournal => {}
-        AutoloadRecoveryOutcome::PreparedCleared => {
-            eprintln!("   Module journal cleared (no external change occurred).");
-        }
-        AutoloadRecoveryOutcome::ReplacedCompleted => {
-            eprintln!("   Module journal recovery complete.");
-        }
-    }
 }
 
 // ── Consent table ──────────────────────────────────────────────────────────────

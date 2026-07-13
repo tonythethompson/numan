@@ -6,7 +6,9 @@ use std::path::Path;
 
 use crate::core::package::ModuleImportMode;
 use crate::nu::paths::NuPaths;
-use crate::state::autoload_journal::{sha256_file, AutoloadStage, PendingAutoload, RecoveryAction};
+use crate::state::autoload_journal::{
+    sha256_file, AutoloadOperation, AutoloadStage, PendingAutoload, RecoveryAction,
+};
 use crate::state::autoload_state::AutoloadState;
 use crate::state::lockfile::{Lockfile, LockfileEntry, ModuleActivation};
 use crate::util::format_timestamp;
@@ -142,6 +144,22 @@ fn apply_replaced_transition(
         }
     }
 
+    if journal.operation == AutoloadOperation::Deactivate {
+        let previous: BTreeSet<&str> = journal
+            .previous_active_module_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
+        for package_id in &journal.targeted_module_ids {
+            if previous.contains(package_id.as_str()) || desired.contains(package_id.as_str()) {
+                continue;
+            }
+            if let Some(entry) = lockfile.packages.get_mut(package_id) {
+                entry.module_activation = None;
+            }
+        }
+    }
+
     lockfile.save(root)?;
 
     if journal.desired_file_exists {
@@ -153,7 +171,7 @@ fn apply_replaced_transition(
             nu_paths.nu_version.clone(),
             sha256_file(managed_path)?,
             journal.desired_active_module_ids.clone(),
-            format_timestamp(),
+            activated_at,
         );
         state.save(root)?;
     } else {
