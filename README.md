@@ -3,7 +3,7 @@
 [![CI](https://github.com/tonythethompson/numan/actions/workflows/ci.yml/badge.svg)](https://github.com/tonythethompson/numan/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Numan** is a cross-platform package manager for [Nushell](https://www.nushell.sh/). It installs plugins, modules, scripts, and completions from signed registries, pins immutable artifacts in a lockfile, and activates them with Nu only when you ask — keeping installs inert until you run `numan activate`.
+**Numan** is a cross-platform package manager for [Nushell](https://www.nushell.sh/). It installs registry plugins, modules, scripts, and completion payloads from signed registries, pins immutable artifacts in a lockfile, and activates plugins and modules with Nu only when you ask — keeping installs inert until you run `numan activate`.
 
 Built in Rust for Linux, macOS, and Windows.
 
@@ -33,7 +33,7 @@ Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, r
 
 - **Registry-backed installs** — search, inspect versions, and install `owner/name` or `owner/name@version`
 - **Official registry** — production trust root built in; `numan init` configures `official` automatically; `numan registry sync` verifies signed indexes
-- **Package types** — plugins, modules, scripts, completions
+- **Package types** — plugins and modules support activation; scripts and completion packages are install-only while their activation contracts are deferred
 - **Verified artifacts** — mandatory SHA256 for plugin binaries; signed registry indexes
 - **Scoped activation** — plugins active only when Nu executable hash, Nu version, and plugin registry path match
 - **Module autoloads** — managed vendor autoload files with ownership markers and candidate validation
@@ -41,6 +41,23 @@ Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, r
 - **nupm interoperability** — `numan nupm status|inspect|import|diff` for migration from [nupm](https://github.com/nushell/nupm)
 - **Health checks** — `numan doctor [--fix]` diagnoses root state and applies safe repairs
 - **Shell completions** — bash, fish, zsh, PowerShell via `numan completions`
+
+---
+
+## Registry package support
+
+| Registry package type | Install, verify, and lock | `numan activate` | Support tier |
+|-----------------------|----------------------------|------------------|--------------|
+| Plugin | Yes | Yes, through Nu's plugin registry | Supported |
+| Module | Yes | Yes, through a Numan-managed vendor autoload file | Supported |
+| Script | Yes | No | Install-only; activation is deferred |
+| Completion package | Yes | No | Install-only; activation is deferred |
+
+Install-only packages remain inert: Numan downloads, verifies, locks, lists,
+removes, and garbage-collects their payloads, but does not execute them or
+modify Nu configuration for them. This is separate from Numan's own shell
+completion generator: `numan completions <shell>` is supported for bash, fish,
+zsh, and PowerShell.
 
 ---
 
@@ -163,9 +180,10 @@ cargo install numan-cli
 
 numan init
 numan registry sync
-numan search hooks
-numan install owner/package-name
-numan activate
+numan search nutest
+numan info vyadh/nutest
+numan install vyadh/nutest
+numan activate vyadh/nutest --yes
 numan doctor
 ```
 
@@ -200,9 +218,9 @@ numan registry sync
 #### 3. Search and install
 
 ```bash
-numan search hooks
-numan info owner/package-name
-numan install owner/package-name
+numan search nutest
+numan info vyadh/nutest
+numan install vyadh/nutest
 numan list
 ```
 
@@ -287,7 +305,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | `numan info <owner/name>` | Show package metadata and available versions |
 | `numan install <owner/name[@version]>` | Download, verify, extract, and lock |
 | `numan list` | List installed packages and activation status |
-| `numan activate [pkg...]` | Register plugins / write module autoloads |
+| `numan activate [pkg...]` | Register plugins / write module autoloads (scripts and completion packages are deferred) |
 | `numan deactivate [pkg...]` | Remove module autoload entries |
 | `numan update [--check] [pkg]` | Upgrade installed packages |
 | `numan remove [--force] <pkg>` | Remove from lockfile and delete payload |
