@@ -88,4 +88,7 @@ jobs:
         with:
           version: "0.113"
       - run: nu --version
-      - run: cargo test --verbose -- --ignored
+      # Stage 1 is a Windows x64 production-registry acceptance test. Its
+      # dedicated, manually dispatched workflow owns that live execution.
+      # Keep this cross-platform matrix focused on the portable ignored tests.
+      - run: cargo test --verbose -- --ignored --skip acceptance_process_helper --skip stage1_official_registry

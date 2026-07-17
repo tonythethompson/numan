@@ -1,0 +1,53 @@
+name: Official Registry Stage 1 Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage1:
+    name: Windows x64 / Nu 0.113.1
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Nushell 0.113.1
+        uses: hustcer/setup-nu@v3
+        with:
+          version: "0.113.1"
+
+      - name: Verify Nushell version
+        shell: pwsh
+        run: |
+          $version = (nu --version).Trim()
+          if ($version -ne "0.113.1") {
+            throw "Expected Nushell 0.113.1, found '$version'"
+          }
+
+      - name: Build locked binary
+        shell: pwsh
+        run: cargo build --locked
+
+      - name: Run official registry Stage 1 acceptance
+        shell: pwsh
+        run: cargo test --locked --test official_registry_stage1 stage1_official_registry -- --ignored --nocapture --test-threads=1
+
+      - name: Upload acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: official-registry-stage1-evidence
+          path: target/acceptance/official-registry-stage1/*/evidence/
+          if-no-files-found: error
+          retention-days: 30
