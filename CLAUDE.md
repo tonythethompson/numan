@@ -57,6 +57,6 @@ Numan is a Rust CLI (`numan-cli` crate, `numan` binary) — a cross-platform pac
 - Phase 4 (activate modules/scripts/completions): complete — `nu/autoload.rs`, `state/autoload_state.rs`, `state/autoload_journal.rs`, `cmd/deactivate.rs`, `util/fs_safety.rs`
 - Phase 5.1/5.4: complete — lockfile v2 (revision_id, payload_sha256, compute_revision_id), `numan update [--check]`, `numan remove [--force]`, `numan gc [--dry-run]`, pending-lifecycle.json journal
 - Phase 5.3 (immutable activation snapshots and rollback): complete — `state/snapshot.rs`, `state/rollback.rs`, `numan snapshot list|inspect|delete|rollback`; see [docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md). Deferred: source builds (5.2), plugin lifecycle gate (5.5, issue #22)
-- Phases 6–7: complete (nupm interop, distribution/polish, official registry cutover v0.1.4). Toward 1.0: winget merge, registry intake, Phase 5.2/5.5 — see README roadmap and [Phase7Plan.md](Phase7Plan.md)
+- Phases 6–7: complete (nupm interop, distribution/polish, official registry cutover v0.1.4). Toward 1.0: winget merge, registry intake, Phase 5.2/5.5 — see README roadmap and [Phase7Plan.md](docs/plans/Phase7Plan.md)
 
 See AGENTS.md for full conventions, git workflow, and dependency notes.

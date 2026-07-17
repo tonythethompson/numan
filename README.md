@@ -393,7 +393,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 | **3–4** | Plugin + module activation, journals, managed autoloads | ✅ |
 | **5** | `update` / `remove` / `gc`, lockfile v2, [snapshots + rollback](docs/snapshots-and-rollback.md) | ✅ (source builds deferred) |
 | **6** | [nupm](docs/nupm-compatibility.md) status, inspect, import, drift | ✅ |
-| **7** | Doctor, completions, onboarding, CI hardening, [Homebrew/winget packaging](docs/PACKAGING.md) | ✅ — [plan](Phase7Plan.md) |
+| **7** | Doctor, completions, onboarding, CI hardening, [Homebrew/winget packaging](docs/PACKAGING.md) | ✅ — [plan](docs/plans/Phase7Plan.md) |
 | **Post-7.6** | Production [official registry](https://tonythethompson.github.io/numan-registry/) cutover; `numan init` and `numan doctor --fix` auto-configure `official` | ✅ (v0.1.4) |
 
 ### Next (toward 1.0)

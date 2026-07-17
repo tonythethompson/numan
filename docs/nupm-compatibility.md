@@ -4,7 +4,7 @@
 
 This document is the **versioned compatibility contract** for Numan's nupm interoperability. Phase 6.1+ implementation must derive metadata grammar, classifier rules, discovery bounds, and test expectations (T01–T15) exclusively from this file and [tests/fixtures/nupm/](tests/fixtures/nupm/).
 
-**Authority:** This document + fixture corpus. [Phase6Plan.md](../Phase6Plan.md) is planning reference only.
+**Authority:** This document + fixture corpus. [Phase6Plan.md](plans/Phase6Plan.md) is planning reference only.
 
 **Phase 6.1 ships:** read-only `numan nupm status` and `numan nupm inspect`. Phase 6.2 adds `numan nupm import`. Phase 6.3 adds drift detection, bulk manifest import, and activation verification.
 

@@ -161,14 +161,14 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 6.3: drift (`numan nupm diff`), status drift count, manifest import, re-import polish, activation tests
 - [x] Phase 6.4: `--exit-on-ineligible`, parser fuzz, Unicode/symlink tests, real-Nu acceptance
 - [x] Phase 6 complete: compatibility matrix (`docs/nupm-compatibility.md`); CI acceptance job for `#[ignore]` real-Nu tests
-- [x] Phase 7.1: Distribution baseline — GitHub Releases, crates.io, `numan init`, real-Nu CI ([Phase7Plan.md](Phase7Plan.md))
+- [x] Phase 7.1: Distribution baseline — GitHub Releases, crates.io, `numan init`, real-Nu CI ([Phase7Plan.md](docs/plans/Phase7Plan.md))
 - [x] Phase 7.2: `numan doctor` ([docs/numan-doctor.md](docs/numan-doctor.md))
-- [x] Phase 7.3: shell completions + error UX hints + README `--help` audit ([Phase7Plan.md](Phase7Plan.md))
-- [x] Phase 7.4: Onboarding path — init checklist, README quick start ([Phase7Plan.md](Phase7Plan.md))
-- [x] Phase 7.5: CI hardening — MSRV, cargo deny/package, release gates ([Phase7Plan.md](Phase7Plan.md))
+- [x] Phase 7.3: shell completions + error UX hints + README `--help` audit ([Phase7Plan.md](docs/plans/Phase7Plan.md))
+- [x] Phase 7.4: Onboarding path — init checklist, README quick start ([Phase7Plan.md](docs/plans/Phase7Plan.md))
+- [x] Phase 7.5: CI hardening — MSRV, cargo deny/package, release gates ([Phase7Plan.md](docs/plans/Phase7Plan.md))
 - [x] Phase 7.6: Wider distribution — Homebrew formula, winget manifests ([docs/PACKAGING.md](docs/PACKAGING.md))
 - [x] Post-7.6: Official registry production cutover + init auto-configures `official` (v0.1.4)
-- [x] Phase 7 complete (polish, CI, distribution) — see [Phase7Plan.md](Phase7Plan.md); toward 1.0: winget merge, registry intake, Phase 5.2/5.5
+- [x] Phase 7 complete (polish, CI, distribution) — see [Phase7Plan.md](docs/plans/Phase7Plan.md); toward 1.0: winget merge, registry intake, Phase 5.2/5.5
 
 ## Testing
 - Unit tests inline with source modules

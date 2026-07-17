@@ -47,4 +47,4 @@ Release archives extract to `numan-<version>-<target>/` containing the `numan` (
 | macOS Intel | `.tar.gz` | yes | — |
 | Windows x86_64 | `.zip` | — | yes |
 
-Scoop is not packaged yet; see [Phase7Plan.md](../Phase7Plan.md).
+Scoop is not packaged yet; see [Phase7Plan.md](plans/Phase7Plan.md).
