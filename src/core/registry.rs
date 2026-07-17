@@ -23,6 +23,14 @@ pub struct VerifiedRegistry {
     pub signing_key_fingerprint: Option<String>,
 }
 
+fn verified_signing_key_fingerprint(
+    trust_root: &RegistryTrustRoot,
+    key_id: &str,
+) -> Result<String> {
+    let key = trust_root.verifying_key(key_id)?;
+    Ok(crate::core::trust::compute_fingerprint(&key.to_bytes()))
+}
+
 impl RegistryManager {
     pub fn new(root: &Path) -> Result<Self> {
         let trust = TrustStore::load(root)?;
@@ -237,6 +245,8 @@ impl RegistryManager {
             index_content,
             signature,
         )?;
+        let signing_key_fingerprint =
+            verified_signing_key_fingerprint(&trust_root, &verified.key_id)?;
 
         let index_path = self.index_path(registry_name);
         let sig_path = self.sig_path(registry_name);
@@ -276,7 +286,7 @@ impl RegistryManager {
             registry_name: verified.registry_name,
             key_id: verified.key_id,
             index_sha256: verified.index_sha256,
-            signing_key_fingerprint: self.signing_key_fingerprint(registry_name),
+            signing_key_fingerprint: Some(signing_key_fingerprint),
         })
     }
 
@@ -300,12 +310,14 @@ impl RegistryManager {
             &index_content,
             &signature,
         )?;
+        let signing_key_fingerprint =
+            verified_signing_key_fingerprint(&trust_root, &verified.key_id)?;
         Ok(VerifiedRegistry {
             index: verified.index,
             registry_name: verified.registry_name,
             key_id: verified.key_id,
             index_sha256: verified.index_sha256,
-            signing_key_fingerprint: self.signing_key_fingerprint(registry_name),
+            signing_key_fingerprint: Some(signing_key_fingerprint),
         })
     }
 
@@ -328,13 +340,13 @@ impl RegistryManager {
                 &signature,
             )?;
 
-            let fingerprint = self.signing_key_fingerprint(registry_name);
+            let fingerprint = verified_signing_key_fingerprint(&trust_root, &verified.key_id)?;
             Ok(VerifiedRegistry {
                 index: verified.index,
                 registry_name: verified.registry_name,
                 key_id: verified.key_id,
                 index_sha256: verified.index_sha256,
-                signing_key_fingerprint: fingerprint,
+                signing_key_fingerprint: Some(fingerprint),
             })
         } else if std::env::var("NUMAN_ALLOW_UNSIGNED").unwrap_or_default() != "1" {
             bail!(
@@ -361,6 +373,7 @@ impl RegistryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::official_registry::OFFICIAL_REGISTRY;
     use crate::core::package::*;
     use ed25519_dalek::Signer;
     use std::collections::{BTreeMap, HashMap};
@@ -414,6 +427,41 @@ mod tests {
         .unwrap();
 
         tmp
+    }
+
+    #[test]
+    fn verified_fingerprint_uses_built_in_official_key() {
+        let trust_root = official_built_in_root();
+        let key = trust_root.verifying_key(OFFICIAL_REGISTRY.key_id).unwrap();
+
+        assert_eq!(
+            verified_signing_key_fingerprint(&trust_root, OFFICIAL_REGISTRY.key_id).unwrap(),
+            crate::core::trust::compute_fingerprint(&key.to_bytes())
+        );
+    }
+
+    #[test]
+    fn verified_fingerprint_uses_exact_successor_key_id() {
+        let initial_key = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
+        let successor_key = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
+        let mut trust_root = RegistryTrustRoot::new("custom");
+        for (key_id, key) in [
+            ("initial", initial_key.verifying_key()),
+            ("successor", successor_key.verifying_key()),
+        ] {
+            let public_key_b64 =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key.to_bytes());
+            trust_root.add_key(key_id, &public_key_b64).unwrap();
+        }
+
+        assert_eq!(
+            verified_signing_key_fingerprint(&trust_root, "successor").unwrap(),
+            crate::core::trust::compute_fingerprint(&successor_key.verifying_key().to_bytes())
+        );
+        assert_ne!(
+            verified_signing_key_fingerprint(&trust_root, "successor").unwrap(),
+            crate::core::trust::compute_fingerprint(&initial_key.verifying_key().to_bytes())
+        );
     }
 
     #[test]
