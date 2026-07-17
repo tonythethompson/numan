@@ -20,7 +20,7 @@ use super::filesystem::{
 };
 use super::model::{
     utc_unix_ms, AcceptanceFailure, ChildEnvironment, CommandOutcome, CommandSpec, RunRecord,
-    RunSummary, Stage1Config, StepSummary, EVIDENCE_SCHEMA_VERSION,
+    RunSummary, Stage1Config, StepName, StepSummary, EVIDENCE_SCHEMA_VERSION,
 };
 use super::process::run_command;
 
@@ -120,10 +120,10 @@ impl AcceptanceRun {
 
         let preflight = self.required_external_step(
             0,
-            "preflight",
+            StepName::Preflight,
             PathBuf::from("nu"),
             vec!["--version".to_string()],
-            Stage1Config::timeout_for("init"),
+            StepName::Preflight.timeout(),
         )?;
         let mut errors = basic_errors(&preflight);
         if std::env::consts::OS != "windows" || std::env::consts::ARCH != "x86_64" {
@@ -155,7 +155,7 @@ impl AcceptanceRun {
         self.record_step(preflight, errors)?;
         let nu_version = nu_version.expect("successful preflight records a parsed Nu version");
 
-        let init = self.required_numan_step(1, "init", vec!["init".to_string()])?;
+        let init = self.required_numan_step(1, StepName::Init)?;
         let mut errors = basic_errors(&init);
         for directory in ["nu_state", "state", "packages", "registries"] {
             if !self.root.join(directory).is_dir() {
@@ -212,11 +212,7 @@ impl AcceptanceRun {
         self.record_step(init, errors)?;
         let nu_paths = nu_paths.expect("successful init records Nu paths");
 
-        let sync = self.required_numan_step(
-            2,
-            "registry-sync",
-            vec!["registry".to_string(), "sync".to_string()],
-        )?;
+        let sync = self.required_numan_step(2, StepName::RegistrySync)?;
         let mut errors = basic_errors(&sync);
         let stderr = String::from_utf8_lossy(&sync.outcome.stderr).to_ascii_lowercase();
         if stderr.contains("using cached") || stderr.contains("last-known-good") {
@@ -325,11 +321,7 @@ impl AcceptanceRun {
         let expected_package_type =
             expected_package_type.expect("successful sync records package type");
 
-        let search = self.required_numan_step(
-            3,
-            "search",
-            vec!["search".to_string(), self.config.query.clone()],
-        )?;
+        let search = self.required_numan_step(3, StepName::Search)?;
         let mut errors = basic_errors(&search);
         let stdout = String::from_utf8_lossy(&search.outcome.stdout);
         if !stdout
@@ -350,11 +342,8 @@ impl AcceptanceRun {
         }
         self.record_step(search, errors)?;
 
-        let info = self.required_numan_step(
-            4,
-            "info",
-            vec!["info".to_string(), self.config.package_id.clone()],
-        )?;
+        let info = self.required_numan_step(4, StepName::Info)?;
+
         let mut errors = basic_errors(&info);
         let stdout = String::from_utf8_lossy(&info.outcome.stdout);
         for expected in [
@@ -368,11 +357,7 @@ impl AcceptanceRun {
         }
         self.record_step(info, errors)?;
 
-        let install = self.required_numan_step(
-            5,
-            "install",
-            vec!["install".to_string(), self.config.package_id.clone()],
-        )?;
+        let install = self.required_numan_step(5, StepName::Install)?;
         let mut errors = basic_errors(&install);
         match Lockfile::load(&self.root) {
             Ok(lockfile) => {
@@ -497,15 +482,7 @@ impl AcceptanceRun {
 
         let plugin_registry = PathBuf::from(&nu_paths.plugin_registry_path);
         let plugin_registry_before = sha256_file(&plugin_registry).ok();
-        let activate = self.required_numan_step(
-            6,
-            "activate",
-            vec![
-                "activate".to_string(),
-                self.config.package_id.clone(),
-                "--yes".to_string(),
-            ],
-        )?;
+        let activate = self.required_numan_step(6, StepName::Activate)?;
         let mut errors = basic_errors(&activate);
         match Lockfile::load(&self.root) {
             Ok(lockfile) => match lockfile.packages.get(&self.config.package_id) {
@@ -533,11 +510,7 @@ impl AcceptanceRun {
         require_clear_journals(&self.root, &mut errors);
         self.record_step(activate, errors)?;
 
-        let doctor = self.required_numan_step(
-            7,
-            "doctor",
-            vec!["doctor".to_string(), "--json".to_string()],
-        )?;
+        let doctor = self.required_numan_step(7, StepName::Doctor)?;
         let mut errors = basic_errors(&doctor);
         match serde_json::from_slice::<serde_json::Value>(&doctor.outcome.stdout) {
             Ok(report) => {
@@ -578,7 +551,7 @@ impl AcceptanceRun {
         }
         self.record_step(doctor, errors)?;
 
-        let list = self.required_numan_step(8, "list", vec!["list".to_string()])?;
+        let list = self.required_numan_step(8, StepName::List)?;
         let mut errors = basic_errors(&list);
         let expected_row = format!(
             "{}  v{}  [{}]  activated",
@@ -592,15 +565,7 @@ impl AcceptanceRun {
         }
         self.record_step(list, errors)?;
 
-        let remove = self.required_numan_step(
-            9,
-            "remove",
-            vec![
-                "remove".to_string(),
-                self.config.package_id.clone(),
-                "--force".to_string(),
-            ],
-        )?;
+        let remove = self.required_numan_step(9, StepName::Remove)?;
         let mut errors = basic_errors(&remove);
         match Lockfile::load(&self.root) {
             Ok(lockfile) if !lockfile.packages.contains_key(&self.config.package_id) => {}
@@ -610,7 +575,7 @@ impl AcceptanceRun {
         require_clear_journals(&self.root, &mut errors);
         self.record_step(remove, errors)?;
 
-        let gc = self.required_numan_step(10, "gc", vec!["gc".to_string()])?;
+        let gc = self.required_numan_step(10, StepName::Gc)?;
         let mut errors = basic_errors(&gc);
         match Lockfile::load(&self.root) {
             Ok(lockfile) if lockfile.packages.is_empty() => {}
@@ -655,32 +620,32 @@ impl AcceptanceRun {
     fn required_numan_step(
         &mut self,
         index: usize,
-        name: &str,
-        tail: Vec<String>,
+        step: StepName,
     ) -> Result<StepArtifacts, AcceptanceFailure> {
         let mut arguments = vec![
             "--root".to_string(),
             self.root.to_string_lossy().into_owned(),
         ];
-        arguments.extend(tail);
+        arguments.extend(step.command_args(&self.config));
         self.required_external_step(
             index,
-            name,
+            step,
             self.numan_binary.clone(),
             arguments,
-            Stage1Config::timeout_for(name),
+            step.timeout(),
         )
     }
 
     fn required_external_step(
         &mut self,
         index: usize,
-        name: &str,
+        step: StepName,
         program: PathBuf,
         arguments: Vec<String>,
         timeout: std::time::Duration,
     ) -> Result<StepArtifacts, AcceptanceFailure> {
-        match self.run_step(index, name, program, arguments.clone(), timeout) {
+        let name = step.as_str();
+        match self.run_step(index, step, program, arguments.clone(), timeout) {
             Ok(step) => Ok(step),
             Err(error) => Err(self.preflight_failure(vec![format!(
                 "could not persist evidence for step '{name}' with args {arguments:?}: {error}"
@@ -691,14 +656,15 @@ impl AcceptanceRun {
     fn run_step(
         &self,
         index: usize,
-        name: &str,
+        step: StepName,
         program: PathBuf,
         arguments: Vec<String>,
         timeout: std::time::Duration,
     ) -> Result<StepArtifacts> {
+        let name = step.as_str();
         let directory = self.evidence.join(format!("{index:02}-{name}"));
         std::fs::create_dir_all(&directory)?;
-        let spec = CommandSpec::new(name, program, arguments, timeout);
+        let spec = CommandSpec::new(step, program, arguments, timeout);
         let (outcome, process_error) = match run_command(&spec, &self.environment) {
             Ok(outcome) => (outcome, None),
             Err(error) => {
@@ -787,7 +753,7 @@ impl AcceptanceRun {
 
     fn preflight_failure(&mut self, assertion_errors: Vec<String>) -> AcceptanceFailure {
         let failure = AcceptanceFailure::new(
-            "preflight".to_string(),
+            StepName::Preflight.as_str().to_string(),
             Vec::new(),
             None,
             false,
@@ -797,7 +763,7 @@ impl AcceptanceRun {
             self.evidence.to_string_lossy().into_owned(),
         );
         self.steps.push(StepSummary {
-            step: "preflight".to_string(),
+            step: StepName::Preflight.as_str().to_string(),
             passed: false,
             exit_code: None,
             timed_out: false,

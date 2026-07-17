@@ -39,13 +39,82 @@ impl Stage1Config {
             query,
         })
     }
+}
 
-    pub fn timeout_for(step: &str) -> Duration {
-        match step {
-            "registry-sync" | "activate" => Duration::from_secs(120),
-            "install" => Duration::from_secs(300),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StepName {
+    Preflight,
+    Init,
+    RegistrySync,
+    Search,
+    Info,
+    Install,
+    Activate,
+    Doctor,
+    List,
+    Remove,
+    Gc,
+}
+
+impl StepName {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight",
+            Self::Init => "init",
+            Self::RegistrySync => "registry-sync",
+            Self::Search => "search",
+            Self::Info => "info",
+            Self::Install => "install",
+            Self::Activate => "activate",
+            Self::Doctor => "doctor",
+            Self::List => "list",
+            Self::Remove => "remove",
+            Self::Gc => "gc",
+        }
+    }
+
+    pub fn timeout(&self) -> Duration {
+        match self {
+            Self::RegistrySync | Self::Activate => Duration::from_secs(120),
+            Self::Install => Duration::from_secs(300),
             _ => Duration::from_secs(60),
         }
+    }
+
+    pub fn command_args(&self, config: &Stage1Config) -> Vec<String> {
+        match self {
+            Self::Init => vec!["init".to_string()],
+            Self::RegistrySync => vec!["registry".to_string(), "sync".to_string()],
+            Self::Search => vec!["search".to_string(), config.query.clone()],
+            Self::Info => vec!["info".to_string(), config.package_id.clone()],
+            Self::Install => vec!["install".to_string(), config.package_id.clone()],
+            Self::Activate => vec![
+                "activate".to_string(),
+                config.package_id.clone(),
+                "--yes".to_string(),
+            ],
+            Self::Doctor => vec!["doctor".to_string(), "--json".to_string()],
+            Self::List => vec!["list".to_string()],
+            Self::Remove => vec![
+                "remove".to_string(),
+                config.package_id.clone(),
+                "--force".to_string(),
+            ],
+            Self::Gc => vec!["gc".to_string()],
+            Self::Preflight => panic!("preflight has no numan command arguments"),
+        }
+    }
+}
+
+impl std::fmt::Display for StepName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<StepName> for String {
+    fn from(step: StepName) -> String {
+        step.as_str().to_string()
     }
 }
 

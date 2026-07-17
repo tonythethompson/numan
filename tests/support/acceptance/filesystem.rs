@@ -65,7 +65,7 @@ pub fn path_is_contained(path: &Path, boundary: &Path) -> Result<bool> {
 }
 
 pub fn classify_package_dirs(root: &Path) -> Result<Vec<PackageDirectoryEvidence>> {
-    let mut references: BTreeMap<String, Vec<PayloadReference>> = BTreeMap::new();
+    let mut references: BTreeMap<PathBuf, Vec<PayloadReference>> = BTreeMap::new();
     collect_lockfile_references(
         root,
         &root.join("lockfile"),
@@ -100,21 +100,30 @@ pub fn classify_package_dirs(root: &Path) -> Result<Vec<PackageDirectoryEvidence
             let mut payloads = Vec::new();
             collect_payload_fields(&value, None, &mut payloads);
             for (package_id, payload) in payloads {
-                references
-                    .entry(normalize_payload(&payload))
-                    .or_default()
-                    .push(PayloadReference {
-                        source: label.clone(),
-                        package_id,
-                    });
+                if let Some(relative) = parse_relative_payload(&payload) {
+                    let candidate = root.join(&relative);
+                    if path_is_contained(&candidate, root).unwrap_or(false) {
+                        references
+                            .entry(relative)
+                            .or_default()
+                            .push(PayloadReference {
+                                source: label.clone(),
+                                package_id,
+                            });
+                    }
+                }
             }
         }
     }
 
     let mut directories = Vec::new();
     for directory in package_version_dirs(&root.join("packages")) {
-        let relative = normalize_relative(root, &directory);
-        let mut labels = references.remove(&relative).unwrap_or_default();
+        let relative_path = directory
+            .strip_prefix(root)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|_| directory.to_path_buf());
+        let relative = normalize_path(&relative_path);
+        let mut labels = references.remove(&relative_path).unwrap_or_default();
         labels.sort_by(|left, right| {
             left.source
                 .cmp(&right.source)
@@ -331,7 +340,7 @@ fn collect_lockfile_references(
     root: &Path,
     path: &Path,
     label: &str,
-    result: &mut BTreeMap<String, Vec<PayloadReference>>,
+    result: &mut BTreeMap<PathBuf, Vec<PayloadReference>>,
 ) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -343,9 +352,8 @@ fn collect_lockfile_references(
                 .get("payload_path")
                 .and_then(serde_json::Value::as_str)
             {
-                let relative = normalize_payload(payload);
-                if !relative.is_empty() {
-                    let candidate = root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+                if let Some(relative) = parse_relative_payload(payload) {
+                    let candidate = root.join(&relative);
                     if path_is_contained(&candidate, root)? {
                         result.entry(relative).or_default().push(PayloadReference {
                             source: label.to_string(),
@@ -469,8 +477,20 @@ fn normalize_relative(root: &Path, path: &Path) -> String {
         .unwrap_or_else(|_| normalize_path(path))
 }
 
-fn normalize_payload(path: &str) -> String {
-    path.replace('\\', "/").trim_start_matches("./").to_string()
+fn parse_relative_payload(path: &str) -> Option<PathBuf> {
+    let mut result = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => result.push(Path::new(part)),
+            Component::CurDir => continue,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    if result.as_os_str().is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 fn normalize_path(path: &Path) -> String {
