@@ -248,6 +248,10 @@ fn isolated_environment_and_failure_summary_are_durable() {
         package_id: "owner/plugin".to_string(),
         query: "plugin".to_string(),
         resolved_version: None,
+        registry_key_id: None,
+        registry_index_sha256: None,
+        signing_key_fingerprint: None,
+        executable_sha256: None,
         doctor_errors: None,
         doctor_warnings: None,
         steps: Vec::new(),
@@ -261,4 +265,23 @@ fn isolated_environment_and_failure_summary_are_durable() {
     assert!(std::fs::read_to_string(run.evidence.join("summary.md"))
         .unwrap()
         .contains("Status: **failed**"));
+}
+
+#[test]
+#[ignore = "live production-registry acceptance; requires Windows x64 and Nu 0.113.x"]
+fn stage1_official_registry() {
+    let config = Stage1Config::from_env().expect("invalid Stage 1 acceptance configuration");
+    let mut run = AcceptanceRun::new(config, PathBuf::from(env!("CARGO_BIN_EXE_numan")))
+        .expect("failed to create isolated Stage 1 acceptance run");
+    match run.execute() {
+        Ok(summary) => {
+            println!(
+                "Stage 1 passed: package={} version={} evidence={}",
+                summary.package_id,
+                summary.resolved_version.as_deref().unwrap_or("unresolved"),
+                summary.evidence_directory
+            );
+        }
+        Err(failure) => panic!("{failure}"),
+    }
 }

@@ -293,6 +293,10 @@ pub struct RunSummary {
     pub package_id: String,
     pub query: String,
     pub resolved_version: Option<String>,
+    pub registry_key_id: Option<String>,
+    pub registry_index_sha256: Option<String>,
+    pub signing_key_fingerprint: Option<String>,
+    pub executable_sha256: Option<String>,
     pub doctor_errors: Option<u64>,
     pub doctor_warnings: Option<u64>,
     pub steps: Vec<StepSummary>,
@@ -317,6 +321,11 @@ pub struct RunRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptanceFailure {
+    pub details: Box<AcceptanceFailureDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptanceFailureDetails {
     pub failed_step: String,
     pub arguments: Vec<String>,
     pub exit_code: Option<i32>,
@@ -327,19 +336,46 @@ pub struct AcceptanceFailure {
     pub evidence_directory: String,
 }
 
+impl AcceptanceFailure {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        failed_step: String,
+        arguments: Vec<String>,
+        exit_code: Option<i32>,
+        timed_out: bool,
+        assertion_errors: Vec<String>,
+        stdout_path: String,
+        stderr_path: String,
+        evidence_directory: String,
+    ) -> Self {
+        Self {
+            details: Box::new(AcceptanceFailureDetails {
+                failed_step,
+                arguments,
+                exit_code,
+                timed_out,
+                assertion_errors,
+                stdout_path,
+                stderr_path,
+                evidence_directory,
+            }),
+        }
+    }
+}
+
 impl std::fmt::Display for AcceptanceFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "stage '{}' failed; args={:?}; exit={:?}; timeout={}; assertions={:?}; stdout={}; stderr={}; evidence={}",
-            self.failed_step,
-            self.arguments,
-            self.exit_code,
-            self.timed_out,
-            self.assertion_errors,
-            self.stdout_path,
-            self.stderr_path,
-            self.evidence_directory
+            self.details.failed_step,
+            self.details.arguments,
+            self.details.exit_code,
+            self.details.timed_out,
+            self.details.assertion_errors,
+            self.details.stdout_path,
+            self.details.stderr_path,
+            self.details.evidence_directory
         )
     }
 }
