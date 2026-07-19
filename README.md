@@ -163,9 +163,18 @@ numan completions zsh > ~/.zfunc/_numan
 # Fish
 numan completions fish > ~/.config/fish/completions/numan.fish
 
-# PowerShell (append to $PROFILE)
-numan completions powershell | Out-File -Encoding utf8 $PROFILE
+# PowerShell (append to $PROFILE; do not use Out-File — that overwrites the profile)
+numan completions powershell | Add-Content -Encoding utf8 $PROFILE
 ```
+
+PowerShell completions are safe to place after other statements in `$PROFILE`. Prefer writing to a dedicated file and dot-sourcing if you want easier updates:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$HOME\.numan" | Out-Null
+numan completions powershell | Out-File -Encoding utf8 "$HOME\.numan\completions.ps1"
+Add-Content -Path $PROFILE -Value '. $HOME\.numan\completions.ps1'
+```
+
 
 ---
 
