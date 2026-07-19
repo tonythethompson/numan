@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 376 tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 419 tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
 
 ---
 
@@ -180,14 +180,20 @@ cargo install numan-cli
 
 numan init
 numan registry sync
+numan try                 # install + activate a starter that fits your Nu
+numan doctor
+```
+
+Or pick a package yourself (`numan search` hides incompatible hits by default; use `--all` to see them):
+
+```bash
 numan search nutest
 numan info vyadh/nutest
 numan install vyadh/nutest
 numan activate vyadh/nutest --yes
-numan doctor
 ```
 
-Install is **inert** — nothing is registered with Nu until you run `numan activate`.
+Install is **inert** — nothing is registered with Nu until you run `numan activate` (or `numan try`, which activates after install). If a package needs an older Nu minor, Numan explains the mismatch and can offer `numan setup nu --version <x.y.z>` (activations are per-Nu; re-activate after switching).
 
 After Nu upgrades, refresh cached paths and activation identity:
 
@@ -215,10 +221,12 @@ numan init
 numan registry sync
 ```
 
-#### 3. Search and install
+#### 3. Prove it works, or search and install
 
 ```bash
-numan search nutest
+numan try                     # curated starter for your Nu + platform
+# or:
+numan search nutest           # hides incompatible hits; use --all to show them
 numan info vyadh/nutest
 numan install vyadh/nutest
 numan list
@@ -232,6 +240,8 @@ numan activate owner/package-name # activate specific packages
 numan activate --list             # show activation status
 numan activate --check            # verify activation integrity (read-only)
 ```
+
+`numan try` already activates unless you pass `--no-activate`.
 
 For modules:
 
@@ -380,7 +390,7 @@ See [AGENTS.md](AGENTS.md) for architecture details aimed at contributors and ag
 
 ```bash
 cargo build
-cargo test                    # unit + integration (376 tests)
+cargo test                    # unit + integration (419 tests)
 cargo clippy -- -D warnings   # lint (CI-enforced)
 cargo fmt                     # format
 

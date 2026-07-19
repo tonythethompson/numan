@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build                        # build
 cargo run -- search <query>        # run
-cargo test                         # all tests (376)
+cargo test                         # all tests (419)
 cargo test core::resolve           # single module (replace with any module path)
 cargo clippy -- -D warnings        # lint (CI enforces -D warnings)
 cargo fmt                          # format

@@ -16,6 +16,7 @@ use crate::util::atomic::write_bytes_atomic;
 use crate::util::fs_safety::assert_not_symlink;
 
 const RELEASES_LATEST: &str = "https://api.github.com/repos/nushell/nushell/releases/latest";
+const RELEASES_TAGS_BASE: &str = "https://api.github.com/repos/nushell/nushell/releases/tags/";
 const USER_AGENT: &str = "numan-cli (https://github.com/tonythethompson/numan)";
 
 #[derive(Debug, Deserialize)]
@@ -88,8 +89,30 @@ fn select_release_asset<'a>(
 }
 
 fn fetch_latest_release(client: &reqwest::blocking::Client) -> Result<GitHubRelease> {
+    fetch_release_url(client, RELEASES_LATEST)
+}
+
+fn normalize_release_tag(version: &str) -> String {
+    version.trim().trim_start_matches('v').to_string()
+}
+
+fn fetch_release_by_tag(
+    client: &reqwest::blocking::Client,
+    version: &str,
+) -> Result<GitHubRelease> {
+    let tag = normalize_release_tag(version);
+    let url = format!("{RELEASES_TAGS_BASE}{tag}");
+    fetch_release_url(client, &url).with_context(|| {
+        format!(
+            "Failed to find Nushell release tag '{tag}'. \
+             Check https://github.com/nushell/nushell/releases for published versions."
+        )
+    })
+}
+
+fn fetch_release_url(client: &reqwest::blocking::Client, url: &str) -> Result<GitHubRelease> {
     let response = client
-        .get(RELEASES_LATEST)
+        .get(url)
         .header(reqwest::header::USER_AGENT, USER_AGENT)
         .send()
         .context("Failed to query Nushell releases on GitHub")?;
@@ -243,11 +266,23 @@ fn verify_downloaded_archive(path: &Path, asset: &GitHubAsset) -> Result<()> {
 }
 
 pub fn install_latest(root: &Path, platform: &Platform) -> Result<PathBuf> {
+    install_release(root, platform, None)
+}
+
+/// Download and install a specific Nushell release tag (e.g. `0.113.1`).
+pub fn install_version(root: &Path, platform: &Platform, version: &str) -> Result<PathBuf> {
+    install_release(root, platform, Some(version))
+}
+
+fn install_release(root: &Path, platform: &Platform, version: Option<&str>) -> Result<PathBuf> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .user_agent(USER_AGENT)
         .build()?;
-    let release = fetch_latest_release(&client)?;
+    let release = match version {
+        Some(v) => fetch_release_by_tag(&client, v)?,
+        None => fetch_latest_release(&client)?,
+    };
     let asset = select_release_asset(&release, platform)?;
 
     let cache_dir = root.join("tools/.cache");
@@ -269,6 +304,10 @@ pub fn install_latest(root: &Path, platform: &Platform) -> Result<PathBuf> {
         "Installed Nushell {} to '{}'.",
         release.tag_name,
         installed.display()
+    );
+    println!(
+        "Next: run '{}' then re-activate packages you still want on this Nu.",
+        crate::util::hints::CMD_INIT_REFRESH
     );
     Ok(installed)
 }
@@ -591,6 +630,8 @@ pub struct NuSetupOptions {
     pub yes: bool,
     pub force: bool,
     pub skip_path: bool,
+    /// When set, download this release tag instead of latest.
+    pub version: Option<String>,
 }
 
 pub fn execute_nu_setup(
@@ -598,16 +639,31 @@ pub fn execute_nu_setup(
     platform: &Platform,
     options: &NuSetupOptions,
 ) -> Result<PathBuf> {
+    if let Some(ref version) = options.version {
+        let version = version.clone();
+        return execute_nu_setup_with_installer(root, platform, options, move |r, p| {
+            install_version(r, p, &version)
+        });
+    }
     execute_nu_setup_with_installer(root, platform, options, install_latest)
 }
 
-pub fn execute_nu_setup_with_installer(
+pub fn execute_nu_setup_with_installer<F>(
     root: &Path,
     platform: &Platform,
     options: &NuSetupOptions,
-    install: fn(&Path, &Platform) -> Result<PathBuf>,
-) -> Result<PathBuf> {
+    install: F,
+) -> Result<PathBuf>
+where
+    F: FnOnce(&Path, &Platform) -> Result<PathBuf>,
+{
     let dest = managed_nu_binary(root);
+    let version_label = options
+        .version
+        .as_deref()
+        .map(normalize_release_tag)
+        .unwrap_or_else(|| "latest".to_string());
+
     if dest.is_file() && !options.force {
         if options.yes {
             let tools_dir = managed_nu_dir(root);
@@ -631,7 +687,7 @@ pub fn execute_nu_setup_with_installer(
         }
 
         print!(
-            "Nushell is already installed at '{}'. Reinstall latest release? [y/N] ",
+            "Nushell is already installed at '{}'. Reinstall {version_label} release? [y/N] ",
             dest.display()
         );
         std::io::stdout().flush()?;
@@ -651,7 +707,7 @@ pub fn execute_nu_setup_with_installer(
 
     if !options.yes && std::io::stdin().is_terminal() {
         println!(
-            "This will download the latest official Nushell release for {} from GitHub.",
+            "This will download the official Nushell {version_label} release for {} from GitHub.",
             platform.triple
         );
         print!("Proceed? [y/N] ");
@@ -687,8 +743,9 @@ pub fn execute_nu_setup_with_installer(
 
     println!();
     println!("Next steps:");
-    println!("  numan init");
+    println!("  {}", crate::util::hints::CMD_INIT_REFRESH);
     println!("  numan doctor");
+    println!("  Re-activate packages you still want: numan activate --yes");
     Ok(installed)
 }
 
@@ -721,6 +778,34 @@ mod tests {
         }
         let asset = select_release_asset(&release, &platform).unwrap();
         assert!(asset.name.contains("x86_64-pc-windows-msvc.zip"));
+    }
+
+    #[test]
+    fn normalize_release_tag_strips_v_prefix() {
+        assert_eq!(normalize_release_tag("v0.113.1"), "0.113.1");
+        assert_eq!(normalize_release_tag("0.113.1"), "0.113.1");
+        assert_eq!(normalize_release_tag(" 0.114.0 "), "0.114.0");
+    }
+
+    #[test]
+    fn select_release_asset_uses_tag_name_in_asset() {
+        let release = GitHubRelease {
+            tag_name: "0.113.1".to_string(),
+            assets: vec![GitHubAsset {
+                name: "nu-0.113.1-x86_64-unknown-linux-gnu.tar.gz".to_string(),
+                browser_download_url: "https://example.invalid/nu.tar.gz".to_string(),
+                size: 0,
+                digest: None,
+            }],
+        };
+        let platform = Platform {
+            os: Os::Linux,
+            arch: Arch::X86_64,
+            env: Env::Gnu,
+            triple: "x86_64-unknown-linux-gnu".to_string(),
+        };
+        let asset = select_release_asset(&release, &platform).unwrap();
+        assert_eq!(asset.name, "nu-0.113.1-x86_64-unknown-linux-gnu.tar.gz");
     }
 
     #[test]

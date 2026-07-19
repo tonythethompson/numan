@@ -12,7 +12,7 @@ use crate::util::format_timestamp;
 use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::fs_safety::assert_managed_file_owned;
 use crate::util::hints::{
-    self, CMD_ACTIVATE, CMD_INIT_REFRESH, CMD_REGISTRY_ADD, CMD_REGISTRY_SYNC,
+    self, CMD_ACTIVATE, CMD_INIT_REFRESH, CMD_REGISTRY_ADD, CMD_REGISTRY_SYNC, CMD_TRY,
 };
 
 #[derive(Debug, Args)]
@@ -132,20 +132,22 @@ fn print_onboarding_next_steps(official_configured: bool) {
     if official_configured {
         println!("  1. Sync the registry index:");
         println!("     {CMD_REGISTRY_SYNC}");
-        println!("  2. Search and install:");
+        println!("  2. Prove it works (installs + activates a package for your Nu):");
+        println!("     {CMD_TRY}");
+        println!("  3. Or search and install manually:");
         println!("     numan search <query>");
         println!("     numan install owner/name");
-        println!("  3. Activate with Nu:");
         println!("     {CMD_ACTIVATE}");
     } else {
         println!("  1. Add a registry:");
         println!("     {CMD_REGISTRY_ADD}");
         println!("  2. Sync the index:");
         println!("     {CMD_REGISTRY_SYNC}");
-        println!("  3. Search and install:");
+        println!("  3. Prove it works:");
+        println!("     {CMD_TRY}");
+        println!("  4. Or search and install manually:");
         println!("     numan search <query>");
         println!("     numan install owner/name");
-        println!("  4. Activate with Nu:");
         println!("     {CMD_ACTIVATE}");
     }
     println!();

@@ -22,10 +22,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Search registry by name/description/tags
-    Search {
-        /// Search query
-        query: String,
-    },
+    Search(cmd::search::SearchArgs),
     /// Show package details, versions, platforms
     Info {
         /// Package ID (owner/name)
@@ -62,4 +59,6 @@ pub enum Commands {
     /// Install optional Nushell integration helpers
     #[command(subcommand)]
     Setup(cmd::setup::SetupCommands),
+    /// Install and activate a starter package that fits your Nu
+    Try(cmd::try_cmd::TryArgs),
 }

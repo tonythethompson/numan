@@ -15,6 +15,7 @@ fn bash_completions_include_core_commands() {
         "init",
         "install",
         "activate",
+        "try",
         "completions",
         "nupm",
     ] {
