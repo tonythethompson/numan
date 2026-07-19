@@ -1,4 +1,5 @@
 use crate::core::nu_version::NuVersion;
+use crate::core::package::Package;
 use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
@@ -13,20 +14,34 @@ pub fn execute(id: &str, root: &Path) -> Result<()> {
 
     let platform = Platform::detect();
     let nu = current_nu(root);
-    let resolver = nu.as_ref().map(|n| Resolver::new(&platform, n));
+    print!("{}", format_info(&pkg, &platform, nu.as_ref()));
+    Ok(())
+}
 
-    println!("Package:    {}/{}", pkg.id.owner, pkg.id.name);
-    println!("Type:       {}", pkg.package_type);
-    println!("Description: {}", pkg.description);
-    println!("Repository: {}", pkg.repo);
+/// Format registry package info for display (testable without I/O).
+///
+/// Registry packages looked up via `numan info` are labeled
+/// `verified upstream artifact` (ADR 0001 class 2). This does not claim
+/// a security audit of upstream source.
+pub fn format_info(pkg: &Package, platform: &Platform, nu: Option<&NuVersion>) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Package:    {}/{}\n", pkg.id.owner, pkg.id.name));
+    out.push_str(&format!("Type:       {}\n", pkg.package_type));
+    out.push_str("Status:     verified upstream artifact\n");
+    out.push_str(&format!("Description: {}\n", pkg.description));
+    out.push_str(&format!("Repository: {}\n", pkg.repo));
     if !pkg.tags.is_empty() {
-        println!("Tags:       {}", pkg.tags.join(", "));
+        out.push_str(&format!("Tags:       {}\n", pkg.tags.join(", ")));
     }
-    if let Some(ref n) = nu {
-        println!("Your Nu:    {} ({})", n.version, platform.triple);
+    if let Some(n) = nu {
+        out.push_str(&format!(
+            "Your Nu:    {} ({})\n",
+            n.version, platform.triple
+        ));
     }
 
-    println!("\nVersions:");
+    out.push_str("\nVersions:\n");
+    let resolver = nu.map(|n| Resolver::new(platform, n));
     for ver in &pkg.versions {
         let status = match resolver.as_ref() {
             Some(r) => match r.classify_version(ver) {
@@ -44,18 +59,35 @@ pub fn execute(id: &str, root: &Path) -> Result<()> {
             }
         };
 
-        println!("  v{}  [nu {}]  ({status})", ver.version, ver.nu_version);
+        out.push_str(&format!(
+            "  v{}  [nu {}]  ({status})\n",
+            ver.version, ver.nu_version
+        ));
 
         if !ver.verified_with.is_empty() {
-            println!("    tested with: {}", ver.verified_with.join(", "));
+            out.push_str(&format!(
+                "    tested with: {}\n",
+                ver.verified_with.join(", ")
+            ));
+        }
+
+        if let Some(ref source) = ver.source {
+            out.push_str(&format!("    source git:  {}\n", source.git));
+            out.push_str(&format!("    source rev:  {}\n", source.rev));
+            out.push_str(&format!("    cargo_name:  {}\n", source.cargo_name));
+            if let Some(ref lock) = source.cargo_lock_sha256 {
+                out.push_str(&format!("    cargo_lock:  {lock}\n"));
+            }
         }
 
         for target in ver.artifact.targets.keys() {
-            println!("    platform: {target}");
+            out.push_str(&format!("    platform: {target}\n"));
         }
     }
 
-    Ok(())
+    out.push_str("\nNote: verified means provenance, integrity, and install/activate\n");
+    out.push_str("checks were recorded. Numan has not security-audited the upstream source.\n");
+    out
 }
 
 fn current_nu(root: &Path) -> Option<NuVersion> {
@@ -65,4 +97,101 @@ fn current_nu(root: &Path) -> Option<NuVersion> {
         }
     }
     NuVersion::detect().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::package::{
+        Artifact, PackageType, ScopedId, SourceInfo, TargetArtifact, VersionEntry,
+    };
+    use crate::core::platform::{Arch, Env, Os};
+    use semver::Version;
+    use std::collections::BTreeMap;
+
+    fn linux_platform() -> Platform {
+        Platform {
+            os: Os::Linux,
+            arch: Arch::X86_64,
+            env: Env::Gnu,
+            triple: "x86_64-unknown-linux-gnu".to_string(),
+        }
+    }
+
+    fn sample_plugin(with_source: bool) -> Package {
+        let mut targets = std::collections::HashMap::new();
+        targets.insert(
+            "x86_64-unknown-linux-gnu".to_string(),
+            TargetArtifact {
+                url: "https://example.com/p.tar.gz".into(),
+                sha256: "abc".into(),
+                executable_path: "nu_plugin_x".into(),
+            },
+        );
+        Package {
+            id: ScopedId {
+                owner: "cptpiepmatz".into(),
+                name: "nu_plugin_highlight".into(),
+            },
+            description: "Syntax highlighting.".into(),
+            repo: "https://github.com/cptpiepmatz/nu-plugin-highlight".into(),
+            package_type: PackageType::Plugin,
+            tags: vec!["plugin".into()],
+            versions: vec![VersionEntry {
+                version: Version::new(1, 4, 15),
+                nu_version: ">=0.113.0 <0.114.0".into(),
+                verified_with: vec!["0.113.1".into()],
+                artifact: Artifact {
+                    kind: "binary".into(),
+                    url: None,
+                    sha256: None,
+                    targets,
+                    archive_root: None,
+                    include: None,
+                    entry: None,
+                },
+                source: with_source.then_some(SourceInfo {
+                    git: "https://github.com/cptpiepmatz/nu-plugin-highlight".into(),
+                    rev: "v1.4.15+0.113.1".into(),
+                    cargo_name: "nu_plugin_highlight".into(),
+                    cargo_lock_sha256: None,
+                }),
+                dependencies: BTreeMap::new(),
+                activation: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn format_info_includes_verified_status_and_disclaimer() {
+        let pkg = sample_plugin(false);
+        let nu = NuVersion::parse("0.113.1").unwrap();
+        let out = format_info(&pkg, &linux_platform(), Some(&nu));
+        assert!(
+            out.contains("Status:     verified upstream artifact"),
+            "{out}"
+        );
+        assert!(out.contains("has not security-audited"), "{out}");
+        assert!(!out.to_lowercase().contains("approved"), "{out}");
+    }
+
+    #[test]
+    fn format_info_prints_source_when_present() {
+        let pkg = sample_plugin(true);
+        let out = format_info(&pkg, &linux_platform(), None);
+        assert!(
+            out.contains("source git:  https://github.com/cptpiepmatz/nu-plugin-highlight"),
+            "{out}"
+        );
+        assert!(out.contains("source rev:  v1.4.15+0.113.1"), "{out}");
+        assert!(out.contains("cargo_name:  nu_plugin_highlight"), "{out}");
+    }
+
+    #[test]
+    fn format_info_omits_source_lines_when_absent() {
+        let pkg = sample_plugin(false);
+        let out = format_info(&pkg, &linux_platform(), None);
+        assert!(!out.contains("source git:"), "{out}");
+        assert!(!out.contains("cargo_name:"), "{out}");
+    }
 }
