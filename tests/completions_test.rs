@@ -49,3 +49,17 @@ fn powershell_completions_can_append_to_existing_profile() {
     assert!(script.contains("[System.Management.Automation.CompletionResult]::"));
     assert!(script.contains("numan"));
 }
+
+#[test]
+fn powershell_install_hint_is_ready_to_copy() {
+    use numan_cli::cmd::completions::install_hint;
+
+    let hint = install_hint(CompletionShell::PowerShell);
+    assert!(hint.contains("Add-Content -Encoding utf8 $PROFILE"));
+    assert!(
+        !generate_script(CompletionShell::PowerShell)
+            .expect("generate")
+            .contains("Add-Content"),
+        "hint must stay on stderr / separate from script stdout"
+    );
+}

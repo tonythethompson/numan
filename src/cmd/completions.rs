@@ -35,7 +35,38 @@ impl CompletionShell {
 pub fn execute(args: &CompletionsArgs) -> Result<()> {
     let script = generate_script(args.shell)?;
     print!("{script}");
+    // stderr so `numan completions … | Add-Content` / redirects stay script-only
+    eprint!("{}", install_hint(args.shell));
     Ok(())
+}
+
+/// Copy-ready install instructions for the generated completion script.
+///
+/// Written to stderr after the script so stdout remains safe to pipe into a
+/// profile or completions file.
+pub fn install_hint(shell: CompletionShell) -> String {
+    match shell {
+        CompletionShell::Bash => "\
+# Install:
+numan completions bash > ~/.local/share/bash-completion/completions/numan
+"
+        .to_string(),
+        CompletionShell::Zsh => "\
+# Install:
+numan completions zsh > ~/.zfunc/_numan
+"
+        .to_string(),
+        CompletionShell::Fish => "\
+# Install:
+numan completions fish > ~/.config/fish/completions/numan.fish
+"
+        .to_string(),
+        CompletionShell::PowerShell => "\
+# Install (append to your PowerShell profile):
+numan completions powershell | Add-Content -Encoding utf8 $PROFILE
+"
+        .to_string(),
+    }
 }
 
 /// Generate a completion script for `shell`.
@@ -119,6 +150,20 @@ mod tests {
         assert!(!script.contains("[StringConstantType]"));
         assert!(!script.contains("[CompletionResult]::"));
         assert!(!script.contains("[CompletionResultType]"));
+    }
+
+    #[test]
+    fn install_hint_is_copy_ready_and_not_part_of_script() {
+        let script = generate_script(CompletionShell::PowerShell).expect("generate");
+        let hint = install_hint(CompletionShell::PowerShell);
+        assert!(
+            !script.contains("Add-Content"),
+            "install hint must not be mixed into the completion script"
+        );
+        assert!(hint.contains("numan completions powershell | Add-Content -Encoding utf8 $PROFILE"));
+        assert!(install_hint(CompletionShell::Bash).contains("bash-completion/completions/numan"));
+        assert!(install_hint(CompletionShell::Zsh).contains("~/.zfunc/_numan"));
+        assert!(install_hint(CompletionShell::Fish).contains("numan.fish"));
     }
 
     #[test]

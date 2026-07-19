@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PowerShell completions no longer emit top-of-script `using namespace` directives, so `numan completions powershell` can be appended to an existing `$PROFILE` without a ParserError
 - README PowerShell install used `Out-File` (overwrites `$PROFILE`); docs now use `Add-Content` or a dedicated completions file
 
+### Changed
+
+- `numan completions` prints a copy-ready install command on stderr after the script (stdout stays pipe-safe)
+
 ## [0.1.4] - 2026-07-05
 
 ### Added

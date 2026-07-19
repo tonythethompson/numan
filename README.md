@@ -153,6 +153,8 @@ Requires [Rust](https://rustup.rs/) (stable). The installed binary is named `num
 
 ### Shell completions
 
+`numan completions <shell>` prints the script on stdout and a copy-ready install command on stderr.
+
 ```bash
 # Bash
 numan completions bash > ~/.local/share/bash-completion/completions/numan
