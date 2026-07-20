@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{CommandFactory, ValueEnum};
 use clap_complete::{generate, Shell};
+use clap_complete_nushell::Nushell;
 
 use crate::cli::Cli;
 
@@ -19,17 +20,9 @@ pub enum CompletionShell {
     Zsh,
     #[value(name = "powershell")]
     PowerShell,
-}
-
-impl CompletionShell {
-    fn to_clap_shell(self) -> Shell {
-        match self {
-            Self::Bash => Shell::Bash,
-            Self::Fish => Shell::Fish,
-            Self::Zsh => Shell::Zsh,
-            Self::PowerShell => Shell::PowerShell,
-        }
-    }
+    /// Nushell (`nu` is accepted as an alias)
+    #[value(name = "nushell", alias = "nu")]
+    Nushell,
 }
 
 pub fn execute(args: &CompletionsArgs) -> Result<()> {
@@ -66,6 +59,12 @@ numan completions fish > ~/.config/fish/completions/numan.fish
 numan completions powershell | Add-Content -Encoding utf8 $PROFILE
 "
         .to_string(),
+        CompletionShell::Nushell => "\
+# Install (Nushell vendor autoload; restart nu or open a new session):
+mkdir --all ($nu.data-dir | path join vendor/autoload)
+numan completions nushell | save -f ($nu.data-dir | path join vendor/autoload/numan-completions.nu)
+"
+        .to_string(),
     }
 }
 
@@ -77,7 +76,13 @@ numan completions powershell | Add-Content -Encoding utf8 $PROFILE
 pub fn generate_script(shell: CompletionShell) -> Result<String> {
     let mut cmd = Cli::command();
     let mut buf = Vec::new();
-    generate(shell.to_clap_shell(), &mut cmd, "numan", &mut buf);
+    match shell {
+        CompletionShell::Bash => generate(Shell::Bash, &mut cmd, "numan", &mut buf),
+        CompletionShell::Fish => generate(Shell::Fish, &mut cmd, "numan", &mut buf),
+        CompletionShell::Zsh => generate(Shell::Zsh, &mut cmd, "numan", &mut buf),
+        CompletionShell::PowerShell => generate(Shell::PowerShell, &mut cmd, "numan", &mut buf),
+        CompletionShell::Nushell => generate(Nushell, &mut cmd, "numan", &mut buf),
+    }
     let script = String::from_utf8(buf).context("completion script was not valid UTF-8")?;
     Ok(match shell {
         CompletionShell::PowerShell => make_powershell_profile_safe(&script),
@@ -164,6 +169,22 @@ mod tests {
         assert!(install_hint(CompletionShell::Bash).contains("bash-completion/completions/numan"));
         assert!(install_hint(CompletionShell::Zsh).contains("~/.zfunc/_numan"));
         assert!(install_hint(CompletionShell::Fish).contains("numan.fish"));
+        assert!(
+            install_hint(CompletionShell::Nushell).contains("vendor/autoload/numan-completions.nu")
+        );
+    }
+
+    #[test]
+    fn nushell_completions_export_extern_commands() {
+        let script = generate_script(CompletionShell::Nushell).expect("generate nushell");
+        assert!(script.contains("module completions"));
+        assert!(script.contains("export extern numan"));
+        assert!(script.contains("export extern \"numan install\""));
+        assert!(script.contains("export use completions *"));
+        assert!(
+            !script.contains("vendor/autoload"),
+            "hint must not be in script"
+        );
     }
 
     #[test]
