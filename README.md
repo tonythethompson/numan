@@ -40,7 +40,7 @@ Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, r
 - **Lifecycle management** — `update`, `remove`, and `gc` with pending-lifecycle journal recovery
 - **nupm interoperability** — `numan nupm status|inspect|import|diff` for migration from [nupm](https://github.com/nushell/nupm)
 - **Health checks** — `numan doctor [--fix]` diagnoses root state and applies safe repairs
-- **Shell completions** — bash, fish, zsh, PowerShell via `numan completions`
+- **Shell completions** — bash, fish, zsh, PowerShell, and Nushell via `numan completions`
 
 ---
 
@@ -57,7 +57,7 @@ Install-only packages remain inert: Numan downloads, verifies, locks, lists,
 removes, and garbage-collects their payloads, but does not execute them or
 modify Nu configuration for them. This is separate from Numan's own shell
 completion generator: `numan completions <shell>` is supported for bash, fish,
-zsh, and PowerShell.
+zsh, PowerShell, and Nushell (`nu`).
 
 ---
 
@@ -167,6 +167,10 @@ numan completions fish > ~/.config/fish/completions/numan.fish
 
 # PowerShell (append to $PROFILE; do not use Out-File — that overwrites the profile)
 numan completions powershell | Add-Content -Encoding utf8 $PROFILE
+
+# Nushell (vendor autoload; `nu` is accepted as an alias for `nushell`)
+mkdir ($nu.data-dir | path join vendor/autoload)
+numan completions nushell | save -f ($nu.data-dir | path join vendor/autoload/numan-completions.nu)
 ```
 
 PowerShell completions are safe to place after other statements in `$PROFILE`. Prefer writing to a dedicated file and dot-sourcing if you want easier updates:
@@ -331,7 +335,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | `numan nupm import [--as owner/name] [path]` | One-way import into Numan |
 | `numan nupm import --manifest file.toml` | Batch import from manifest |
 | `numan nupm diff <owner/name>` | Compare imported payload vs nupm source |
-| `numan completions <shell>` | Generate bash, fish, zsh, or powershell completions |
+| `numan completions <shell>` | Generate bash, fish, zsh, powershell, or nushell completions |
 | `numan doctor [--fix] [--yes] [--json]` | Diagnose root health; optional safe repairs |
 
 ### Common flags (by command)
