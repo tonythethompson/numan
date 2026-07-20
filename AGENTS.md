@@ -55,7 +55,7 @@ src/
     remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
-    completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell scripts (Phase 7.3)
+    completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell/nushell scripts (Phase 7.3)
     setup.rs           — `numan setup nu|loader`: Nushell bootstrap + nushell-loader install
   install/
     download.rs        — HTTP download with progress
@@ -144,7 +144,7 @@ tests/
 Automated and human PR reviewers should follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md) for review checklists, severity expectations, and architecture invariants to flag. Keep that file updated when review conventions change; link here rather than duplicating review rules in this doc.
 
 ## Dependencies
-- clap (CLI), clap_complete (shell completions), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
+- clap (CLI), clap_complete + clap_complete_nushell (shell completions), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
 - sha2/hex (integrity), ed25519-dalek/base64 (signatures), semver (versioning)
 - dirs (platform paths), git2 (source builds), tempfile (safe extraction)
 
