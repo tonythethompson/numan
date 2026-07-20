@@ -28,11 +28,31 @@ fn all_completion_shells_generate_non_empty_output() {
         CompletionShell::Fish,
         CompletionShell::Zsh,
         CompletionShell::PowerShell,
+        CompletionShell::Nushell,
     ] {
         let script = generate_script(shell).expect("generate");
         assert!(
             !script.is_empty(),
             "{shell:?} completion script should not be empty"
+        );
+    }
+}
+
+#[test]
+fn nushell_completions_include_core_commands() {
+    let script = generate_script(CompletionShell::Nushell).expect("generate nushell");
+    for needle in [
+        "numan",
+        "init",
+        "install",
+        "activate",
+        "completions",
+        "nupm",
+        "module completions",
+    ] {
+        assert!(
+            script.contains(needle),
+            "nushell completion script missing '{needle}'"
         );
     }
 }
