@@ -61,7 +61,7 @@ numan completions powershell | Add-Content -Encoding utf8 $PROFILE
         .to_string(),
         CompletionShell::Nushell => "\
 # Install (Nushell vendor autoload; restart nu or open a new session):
-mkdir ($nu.data-dir | path join vendor/autoload)
+mkdir --all ($nu.data-dir | path join vendor/autoload)
 numan completions nushell | save -f ($nu.data-dir | path join vendor/autoload/numan-completions.nu)
 "
         .to_string(),
