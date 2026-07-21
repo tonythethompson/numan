@@ -202,11 +202,13 @@ Standard build/test/lint/run commands live in "Build & Test" above and in the RE
 - **Isolated runs**: pass `--root <tmpdir>` (or set `NUMAN_ROOT`) to keep experiments out of the real Numan root. `registry sync` and `install` require network access to `https://tonythethompson.github.io/numan-registry/`. The official registry currently ships two packages; only `vyadh/nutest` (module) installs on Linux — `abusch/nu_plugin_semver` is Windows-only.
 
 ## Learned User Preferences
+
 - Prefers streamlining Nu-compat onboarding as honest search/install UX, a one-shot starter, and an offer-based managed Nu pin (never silent auto-switch of Nu).
 - Prefers the command name `numan try` for the prove-it-works starter (not `setup demo` / `setup starter`).
 - Product north star for Numan: make the Nushell package ecosystem more inviting for less experienced users.
 
 ## Learned Workspace Facts
+
 - Plugin ABI is Nu-minor-scoped: mixed plugin ABIs cannot run inside one Nu process; side-by-side Nu profiles would be a separate future product shape, not a near-term substitute for compat UX.
 - PATH Nu can be newer than official-registry Windows plugin Nu constraints, so `search` can look fine while `install` fails; use compat-filtered search / `numan try` / `setup nu --version`.
 - `numan setup nu --version <x.y.z>` pins a managed Nu release; default without `--version` still installs latest.

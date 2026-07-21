@@ -326,6 +326,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | Command | Description |
 |---------|-------------|
 | `numan init [--refresh]` | Probe Nu and cache paths for activation |
+| `numan try [--yes] [--no-activate]` | Install and activate a curated starter package for your Nu + platform |
 | `numan search <query>` | Search registry by name, description, or tags |
 | `numan info <owner/name>` | Show package metadata and available versions |
 | `numan install <owner/name[@version]>` | Download, verify, extract, and lock |
@@ -340,6 +341,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | `numan snapshot delete <id> [--yes]` | Delete a snapshot |
 | `numan snapshot rollback <id> [--yes]` | Restore exactly a stored snapshot |
 | `numan registry list\|sync\|add\|remove\|packages` | Registry management |
+| `numan setup nu [--version <x.y.z>]` | Download and install official Nushell under Numan root (optionally pinned) |
 | `numan nupm status` | Summarize nupm home and import eligibility |
 | `numan nupm inspect [--all] [path]` | Classify nupm packages at a path |
 | `numan nupm import [--as owner/name] [path]` | One-way import into Numan |

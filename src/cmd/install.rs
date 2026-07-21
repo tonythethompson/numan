@@ -38,9 +38,9 @@ pub fn execute(args: &InstallArgs, root: &Path) -> Result<()> {
     match install_once(args, root, &platform, &nu_version) {
         Ok(()) => Ok(()),
         Err(first_err) => {
-            let Some(diagnosis) = diagnose_target(root, &args.package, &platform, &nu_version)?
-            else {
-                return Err(first_err);
+            let diagnosis = match diagnose_target(root, &args.package, &platform, &nu_version) {
+                Ok(Some(d)) => d,
+                Ok(None) | Err(_) => return Err(first_err),
             };
             if !nu_pin_offer::is_nu_mismatch(&diagnosis) || diagnosis.suggested_pin.is_none() {
                 return Err(first_err);
@@ -143,12 +143,7 @@ fn diagnose_target(
 }
 
 fn detect_nu(root: &Path) -> NuVersion {
-    if let Ok(paths) = NuPaths::load(root) {
-        if let Ok(nu) = NuVersion::parse(&paths.nu_version) {
-            return nu;
-        }
-    }
-    NuVersion::detect().unwrap_or_else(|e| {
+    NuVersion::from_paths_or_detect(root).unwrap_or_else(|e| {
         eprintln!("Warning: Could not detect Nu version: {e}");
         NuVersion {
             version: "unknown".to_string(),

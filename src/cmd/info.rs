@@ -3,7 +3,6 @@ use crate::core::package::Package;
 use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
-use crate::nu::paths::NuPaths;
 use anyhow::Result;
 use std::path::Path;
 
@@ -91,12 +90,7 @@ pub fn format_info(pkg: &Package, platform: &Platform, nu: Option<&NuVersion>) -
 }
 
 fn current_nu(root: &Path) -> Option<NuVersion> {
-    if let Ok(paths) = NuPaths::load(root) {
-        if let Ok(nu) = NuVersion::parse(&paths.nu_version) {
-            return Some(nu);
-        }
-    }
-    NuVersion::detect().ok()
+    NuVersion::from_paths_or_detect(root).ok()
 }
 
 #[cfg(test)]

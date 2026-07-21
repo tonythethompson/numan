@@ -2,7 +2,6 @@ use crate::core::nu_version::NuVersion;
 use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
-use crate::nu::paths::NuPaths;
 use anyhow::Result;
 use clap::Parser;
 use std::path::Path;
@@ -52,14 +51,19 @@ pub fn execute(args: &SearchArgs, root: &Path) -> Result<()> {
         }
 
         shown += 1;
+
+        // Find newest version by semver (for display and classification)
+        let newest_version = pkg
+            .versions
+            .iter()
+            .max_by(|a, b| a.version.cmp(&b.version));
+
         let version_label = match resolver.as_ref() {
             Some(r) if compatible => r
                 .latest_compatible(pkg)
                 .map(|v| v.version.to_string())
                 .unwrap_or_else(|| "n/a".to_string()),
-            _ => pkg
-                .versions
-                .last()
+            _ => newest_version
                 .map(|v| v.version.to_string())
                 .unwrap_or_else(|| "n/a".to_string()),
         };
@@ -68,7 +72,7 @@ pub fn execute(args: &SearchArgs, root: &Path) -> Result<()> {
             Some(r) if args.all || !compatible => {
                 if compatible {
                     " [compatible]".to_string()
-                } else if let Some(entry) = pkg.versions.last() {
+                } else if let Some(entry) = newest_version {
                     match r.classify_version(entry) {
                         Some(issue) => format!(" [{}]", issue.short_label()),
                         None => " [incompatible]".to_string(),
@@ -103,12 +107,7 @@ pub fn execute(args: &SearchArgs, root: &Path) -> Result<()> {
 }
 
 fn current_nu(root: &Path) -> Option<NuVersion> {
-    if let Ok(paths) = NuPaths::load(root) {
-        if let Ok(nu) = NuVersion::parse(&paths.nu_version) {
-            return Some(nu);
-        }
-    }
-    NuVersion::detect().ok()
+    NuVersion::from_paths_or_detect(root).ok()
 }
 
 #[cfg(test)]

@@ -206,16 +206,7 @@ fn select_starter(
         }
     }
 
-    // 3. First compatible package in the index (deterministic by owner/name).
-    let mut ids: Vec<&Package> = packages.iter().collect();
-    ids.sort_by(|a, b| (&a.id.owner, &a.id.name).cmp(&(&b.id.owner, &b.id.name)));
-    for pkg in ids {
-        if resolver.has_compatible_version(pkg) {
-            return StarterSelection::Compatible(pkg.id.to_string());
-        }
-    }
-
-    // 4. Curated starter with a suggested Nu pin (prefer Windows semver, else nutest).
+    // 3. Curated starter with a suggested Nu pin (prefer Windows semver, else nutest).
     for spec in STARTERS {
         if let Some(os) = spec.os {
             if platform.os != os {
@@ -261,12 +252,8 @@ fn print_usage_hint(package_id: &str, packages: &[Package]) {
 }
 
 fn detect_nu(root: &Path) -> Result<NuVersion> {
-    if let Ok(paths) = NuPaths::load(root) {
-        if let Ok(nu) = NuVersion::parse(&paths.nu_version) {
-            return Ok(nu);
-        }
-    }
-    NuVersion::detect().context("Could not detect Nu version. Run `numan init` first.")
+    NuVersion::from_paths_or_detect(root)
+        .context("Could not detect Nu version. Run `numan init` first.")
 }
 
 #[cfg(test)]
