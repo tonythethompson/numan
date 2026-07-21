@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use std::path::Path;
 use std::process::Command;
 
 #[derive(Debug, Clone)]
@@ -52,6 +53,19 @@ impl NuVersion {
             minor,
             patch,
         })
+    }
+
+    /// Load Nu version from cached paths (if present) or detect from PATH.
+    /// This is the canonical helper for commands that need Nu version detection.
+    pub fn from_paths_or_detect(root: &Path) -> Result<Self> {
+        use crate::nu::paths::NuPaths;
+
+        if let Ok(paths) = NuPaths::load(root) {
+            if let Ok(nu) = Self::parse(&paths.nu_version) {
+                return Ok(nu);
+            }
+        }
+        Self::detect()
     }
 
     pub fn matches_constraint(&self, constraint: &str) -> bool {

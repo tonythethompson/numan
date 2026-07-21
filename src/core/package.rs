@@ -266,6 +266,40 @@ mod tests {
             .artifact
             .targets
             .contains_key("x86_64-pc-windows-msvc"));
+        assert!(entry.source.is_none());
+    }
+
+    #[test]
+    fn parse_version_entry_with_source() {
+        let json = r#"{
+            "version": "1.4.15",
+            "nu_version": ">=0.113.0 <0.114.0",
+            "verified_with": ["0.113.1"],
+            "source": {
+                "git": "https://github.com/cptpiepmatz/nu-plugin-highlight",
+                "rev": "v1.4.15+0.113.1",
+                "cargo_name": "nu_plugin_highlight"
+            },
+            "artifact": {
+                "kind": "binary",
+                "targets": {
+                    "x86_64-unknown-linux-gnu": {
+                        "url": "https://example.com/p.tar.gz",
+                        "sha256": "abc123",
+                        "executable_path": "nu_plugin_highlight"
+                    }
+                }
+            }
+        }"#;
+        let entry: VersionEntry = serde_json::from_str(json).unwrap();
+        let source = entry.source.expect("source present");
+        assert_eq!(
+            source.git,
+            "https://github.com/cptpiepmatz/nu-plugin-highlight"
+        );
+        assert_eq!(source.rev, "v1.4.15+0.113.1");
+        assert_eq!(source.cargo_name, "nu_plugin_highlight");
+        assert!(source.cargo_lock_sha256.is_none());
     }
 
     #[test]

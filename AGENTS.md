@@ -15,7 +15,7 @@ cargo run -- list
 cargo run -- nupm status --nupm-home <path>
 cargo run -- nupm inspect <package-path>
 
-# Test (376 tests)
+# Test (419 tests)
 cargo test
 
 # Test single module
@@ -42,8 +42,8 @@ src/
     resolve.rs         — Version resolution with strict plugin constraints
   cli.rs               — Root `Cli` / `Commands` (clap derive; used by main + completions)
   cmd/
-    search.rs          — Search subcommand
-    info.rs            — Info subcommand
+    search.rs          — Search subcommand (`--all` shows incompatible packages)
+    info.rs            — Info subcommand (per-version compatibility markers)
     list.rs            — List subcommand
     registry.rs        — Registry management subcommands
     activate.rs        — Plugin + module activation (Phase 3 & 4); public entry: execute_with_candidate_runner
@@ -56,7 +56,9 @@ src/
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
     completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell/nushell scripts (Phase 7.3)
-    setup.rs           — `numan setup nu|loader`: Nushell bootstrap + nushell-loader install
+    setup.rs           — `numan setup nu [--version]|loader`: Nushell bootstrap (pinned or latest) + nushell-loader install
+    try_cmd.rs         — `numan try [--yes] [--no-activate]`: curated starter install + activate for current Nu
+    nu_pin_offer.rs    — Shared TTY offer to `setup nu --version` + `init --refresh` on Nu mismatch
   install/
     download.rs        — HTTP download with progress
     transaction.rs     — Full install flow (resolve→download→verify→extract→lockfile)
@@ -135,7 +137,7 @@ tests/
 ## Development Workflow
 1. Create feature branch from `master`
 2. Implement with tests
-3. `cargo test` — all 376 tests must pass
+3. `cargo test` — all 419 tests must pass
 4. Update AGENTS.md if structure/conventions change
 5. Open PR with description
 
@@ -198,3 +200,15 @@ Standard build/test/lint/run commands live in "Build & Test" above and in the RE
 - **Nushell for activation/acceptance**: `numan init`, `numan activate`, `numan deactivate`, and the `#[ignore]` real-Nu acceptance tests require a `nu` binary on `PATH`. Nushell `0.113` (matching the CI acceptance job) is installed at `/usr/local/bin/nu`. Run the acceptance suite with `cargo test -- --ignored`. **Always run `nu --version` first** — the ignored real-Nu tests silently `return` (and report `ok`) when no `nu` is on `PATH`, so a "passing" `--ignored` run means nothing unless `nu` is confirmed present. The Nu binary lives in the VM snapshot, not the update script; if it is missing on a fresh image, reinstall it (see PR #28 for the exact steps) before trusting the acceptance suite.
 - **`numan activate` needs Nu's config dir to exist**: activation resolves the plugin registry under `~/.config/nushell` and the vendor autoload dir under `~/.local/share/nushell/vendor/autoload`. On a fresh box these may not exist until Nu has run once; if `activate` errors with "Plugin registry parent directory does not exist", create the dirs (or run `nu -c 'version'`) then `numan init --refresh`.
 - **Isolated runs**: pass `--root <tmpdir>` (or set `NUMAN_ROOT`) to keep experiments out of the real Numan root. `registry sync` and `install` require network access to `https://tonythethompson.github.io/numan-registry/`. The official registry currently ships two packages; only `vyadh/nutest` (module) installs on Linux — `abusch/nu_plugin_semver` is Windows-only.
+
+## Learned User Preferences
+
+- Prefers streamlining Nu-compat onboarding as honest search/install UX, a one-shot starter, and an offer-based managed Nu pin (never silent auto-switch of Nu).
+- Prefers the command name `numan try` for the prove-it-works starter (not `setup demo` / `setup starter`).
+- Product north star for Numan: make the Nushell package ecosystem more inviting for less experienced users.
+
+## Learned Workspace Facts
+
+- Plugin ABI is Nu-minor-scoped: mixed plugin ABIs cannot run inside one Nu process; side-by-side Nu profiles would be a separate future product shape, not a near-term substitute for compat UX.
+- PATH Nu can be newer than official-registry Windows plugin Nu constraints, so `search` can look fine while `install` fails; use compat-filtered search / `numan try` / `setup nu --version`.
+- `numan setup nu --version <x.y.z>` pins a managed Nu release; default without `--version` still installs latest.
