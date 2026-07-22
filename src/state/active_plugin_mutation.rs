@@ -7,6 +7,7 @@
 //! Active-plugin **remove** is always refused regardless of this flag; deactivate
 //! first, then remove.
 
+#[cfg(test)]
 use std::sync::Mutex;
 
 /// Env: set `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION` to `1`, `true`, `TRUE`, or `yes`
