@@ -14,6 +14,10 @@ use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::hints::{self, CMD_REGISTRY_SYNC};
 
 /// Install and activate a starter package that fits your current Nu.
+///
+/// Tries curated starters (e.g., idanarye/nu_plugin_skim for Nu 0.114) matched to
+/// your Nu version and platform. If no compatible starter exists, suggests installing
+/// a matching managed Nu version or searching for another package with `numan search`.
 #[derive(Parser, Debug)]
 pub struct TryArgs {
     /// Skip confirmation prompts (still will not silent-switch Nu)
@@ -116,12 +120,10 @@ pub fn execute(args: &TryArgs, root: &Path) -> Result<()> {
             }
             id
         }
-        StarterSelection::None => {
-            let resolver = Resolver::new(&platform, &nu);
-            let pin = suggested_pin_from_starters(packages, &resolver, &platform);
+        StarterSelection::None { suggested_pin } => {
             bail!(
                 "{}",
-                format_no_compatible_starter(&nu.version, &platform.triple, pin.as_deref())
+                format_no_compatible_starter(&nu.version, &platform.triple, suggested_pin.as_deref())
             );
         }
     };
@@ -172,7 +174,10 @@ enum StarterSelection {
         id: String,
         diagnosis: crate::core::resolve::PackageIncompatibility,
     },
-    None,
+    None {
+        /// Optional suggested Nu pin discovered among starters.
+        suggested_pin: Option<String>,
+    },
 }
 
 fn select_starter(
@@ -215,6 +220,7 @@ fn select_starter(
     }
 
     // 3. Curated starter with a suggested Nu pin (prefer skim / Windows semver / nutest).
+    let mut suggested_pin = None;
     for spec in STARTERS {
         if let Some(os) = spec.os {
             if platform.os != os {
@@ -229,34 +235,14 @@ fn select_starter(
                     diagnosis,
                 };
             }
-        }
-    }
-
-    StarterSelection::None
-}
-
-/// First suggested managed-Nu pin among curated starters (OS-filtered), if any.
-fn suggested_pin_from_starters(
-    packages: &[Package],
-    resolver: &Resolver<'_>,
-    platform: &Platform,
-) -> Option<String> {
-    for spec in STARTERS {
-        if let Some(os) = spec.os {
-            if platform.os != os {
-                continue;
-            }
-        }
-        if let Some(pkg) = packages.iter().find(|p| p.id.to_string() == spec.id) {
-            let diagnosis = resolver.diagnose_package(pkg);
-            if nu_pin_offer::is_nu_mismatch(&diagnosis) {
-                if let Some(pin) = diagnosis.suggested_pin {
-                    return Some(pin);
-                }
+            // Remember first pin discovered for None fallback.
+            if suggested_pin.is_none() && nu_pin_offer::is_nu_mismatch(&diagnosis) {
+                suggested_pin = diagnosis.suggested_pin;
             }
         }
     }
-    None
+
+    StarterSelection::None { suggested_pin }
 }
 
 /// Failure copy when no starter can install against the current Nu/platform.
@@ -465,5 +451,42 @@ mod tests {
             !accepted,
             "--yes must not silent-switch / auto-install managed Nu"
         );
+    }
+
+    #[test]
+    fn select_starter_none_carries_suggested_pin() {
+        let platform = windows_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        // No curated starter present at all, so no pin can be suggested.
+        let packages_no_pin = vec![pkg("foo/bar", ">=0.100.0 <0.101.0", true)];
+        match select_starter(&packages_no_pin, &resolver, &platform, &nu) {
+            StarterSelection::None { suggested_pin } => {
+                assert!(suggested_pin.is_none(), "no pin available for unrelated package");
+            }
+            other => panic!("expected None, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_starter_none_path_produces_expected_message() {
+        let platform = windows_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        // Starter that's too old, no pin suggestion available.
+        let packages = vec![pkg("old/starter", ">=0.100.0 <0.101.0", true)];
+
+        match select_starter(&packages, &resolver, &platform, &nu) {
+            StarterSelection::None { suggested_pin } => {
+                let msg = format_no_compatible_starter(
+                    &nu.version.to_string(),
+                    &platform.triple,
+                    suggested_pin.as_deref(),
+                );
+                assert!(msg.contains("No compatible starter"), "message: {msg}");
+                assert!(msg.contains("numan search <query>"), "message: {msg}");
+            }
+            other => panic!("expected None, got {other:?}"),
+        }
     }
 }

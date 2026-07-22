@@ -195,7 +195,7 @@ cargo install numan-cli
 
 numan init
 numan registry sync
-numan try                 # install + activate a starter that fits your Nu
+numan try                 # install + activate a starter that fits your Nu (e.g., skim for Nu 0.114)
 numan doctor
 ```
 
@@ -208,7 +208,7 @@ numan install vyadh/nutest
 numan activate vyadh/nutest --yes
 ```
 
-Install is **inert** — nothing is registered with Nu until you run `numan activate` (or `numan try`, which activates after install). If a package needs an older Nu minor, Numan explains the mismatch and can offer `numan setup nu --version <x.y.z>` (activations are per-Nu; re-activate after switching).
+Install is **inert** — nothing is registered with Nu until you run `numan activate` (or `numan try`, which activates after install). If a package needs a different Nu minor, Numan explains the mismatch and can offer `numan setup nu --version <x.y.z>` (activations are per-Nu; re-activate after switching). When no compatible starter exists, `numan try` suggests installing a matching managed Nu version or searching for another package with `numan search`.
 
 After Nu upgrades, refresh cached paths and activation identity:
 
@@ -239,7 +239,7 @@ numan registry sync
 #### 3. Prove it works, or search and install
 
 ```bash
-numan try                     # curated starter for your Nu + platform
+numan try                     # curated starter for your Nu + platform (e.g., skim for Nu 0.114)
 # or:
 numan search nutest           # hides incompatible hits; use --all to show them
 numan info vyadh/nutest
@@ -326,7 +326,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | Command | Description |
 |---------|-------------|
 | `numan init [--refresh]` | Probe Nu and cache paths for activation |
-| `numan try [--yes] [--no-activate]` | Install and activate a curated starter package for your Nu + platform |
+| `numan try [--yes] [--no-activate]` | Install and activate a curated starter package for your Nu + platform (prefers Nu 0.114 starters; suggests managed Nu pin or search if no compatible starter) |
 | `numan search <query>` | Search registry by name, description, or tags |
 | `numan info <owner/name>` | Show package metadata and available versions |
 | `numan install <owner/name[@version]>` | Download, verify, extract, and lock |
