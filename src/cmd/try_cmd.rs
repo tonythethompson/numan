@@ -14,6 +14,10 @@ use crate::util::fs_safety::acquire_mutation_lock;
 use crate::util::hints::{self, CMD_REGISTRY_SYNC};
 
 /// Install and activate a starter package that fits your current Nu.
+///
+/// Tries curated starters (e.g., idanarye/nu_plugin_skim for Nu 0.114) matched to
+/// your Nu version and platform. If no compatible starter exists, suggests installing
+/// a matching managed Nu version or searching for another package with `numan search`.
 #[derive(Parser, Debug)]
 pub struct TryArgs {
     /// Skip confirmation prompts (still will not silent-switch Nu)
@@ -36,6 +40,11 @@ struct StarterSpec {
 
 /// Curated starters preferred before falling back to the first compatible registry package.
 const STARTERS: &[StarterSpec] = &[
+    StarterSpec {
+        id: "idanarye/nu_plugin_skim",
+        nu_minor: Some((0, 114)),
+        os: None,
+    },
     StarterSpec {
         id: "abusch/nu_plugin_semver",
         nu_minor: Some((0, 113)),
@@ -88,8 +97,12 @@ pub fn execute(args: &TryArgs, root: &Path) -> Result<()> {
                 nu_pin_offer::offer_managed_nu_pin(root, &nu.version, &diagnosis, args.yes)?;
             if !accepted {
                 bail!(
-                    "No compatible starter for Nu {}. Try `numan search <query>` or switch Nu.",
-                    nu.version
+                    "{}",
+                    format_no_compatible_starter(
+                        &nu.version,
+                        &platform.triple,
+                        diagnosis.suggested_pin.as_deref(),
+                    )
                 );
             }
             nu = detect_nu(root)?;
@@ -107,12 +120,14 @@ pub fn execute(args: &TryArgs, root: &Path) -> Result<()> {
             }
             id
         }
-        StarterSelection::None => {
+        StarterSelection::None { suggested_pin } => {
             bail!(
-                "No compatible starter package for Nu {} on {}. \
-                 Sync the registry and try again, or `numan search --all`.",
-                nu.version,
-                platform.triple
+                "{}",
+                format_no_compatible_starter(
+                    &nu.version,
+                    &platform.triple,
+                    suggested_pin.as_deref()
+                )
             );
         }
     };
@@ -163,7 +178,10 @@ enum StarterSelection {
         id: String,
         diagnosis: crate::core::resolve::PackageIncompatibility,
     },
-    None,
+    None {
+        /// Optional suggested Nu pin discovered among starters.
+        suggested_pin: Option<String>,
+    },
 }
 
 fn select_starter(
@@ -205,7 +223,8 @@ fn select_starter(
         }
     }
 
-    // 3. Curated starter with a suggested Nu pin (prefer Windows semver, else nutest).
+    // 3. Curated starter with a suggested Nu pin (prefer skim / Windows semver / nutest).
+    let mut suggested_pin = None;
     for spec in STARTERS {
         if let Some(os) = spec.os {
             if platform.os != os {
@@ -220,10 +239,30 @@ fn select_starter(
                     diagnosis,
                 };
             }
+            // Remember first pin discovered for None fallback.
+            if suggested_pin.is_none() && nu_pin_offer::is_nu_mismatch(&diagnosis) {
+                suggested_pin = diagnosis.suggested_pin;
+            }
         }
     }
 
-    StarterSelection::None
+    StarterSelection::None { suggested_pin }
+}
+
+/// Failure copy when no starter can install against the current Nu/platform.
+///
+/// Never pitches `registry sync` as the Nu/ABI fix (empty-index sync stays
+/// on the early bail in `execute`).
+fn format_no_compatible_starter(nu: &str, triple: &str, pin: Option<&str>) -> String {
+    let mut msg = format!("No compatible starter package for Nu {nu} on {triple}.");
+    if let Some(pin) = pin {
+        msg.push_str(&format!(
+            "\nInstall a matching managed Nu: {} (PATH Nu is not touched), then retry `numan try`.",
+            hints::setup_nu_version(pin)
+        ));
+    }
+    msg.push_str("\nOr pick a package with `numan search <query>`.");
+    msg
 }
 
 fn print_usage_hint(package_id: &str, packages: &[Package]) {
@@ -259,6 +298,7 @@ fn detect_nu(root: &Path) -> Result<NuVersion> {
 mod tests {
     use super::*;
     use crate::core::package::*;
+    use crate::core::resolve::{Incompatibility, PackageIncompatibility};
     use std::collections::{BTreeMap, HashMap};
 
     fn pkg(id: &str, constraint: &str, plugin: bool) -> Package {
@@ -322,14 +362,34 @@ mod tests {
         }
     }
 
-    #[test]
-    fn select_starter_prefers_nutest_on_114() {
-        let platform = Platform {
+    fn windows_platform() -> Platform {
+        Platform {
             os: Os::Windows,
             arch: crate::core::platform::Arch::X86_64,
             env: crate::core::platform::Env::Msvc,
             triple: "x86_64-pc-windows-msvc".to_string(),
-        };
+        }
+    }
+
+    #[test]
+    fn select_starter_prefers_skim_on_114_when_present() {
+        let platform = windows_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let packages = vec![
+            pkg("idanarye/nu_plugin_skim", ">=0.114.0 <0.115.0", true),
+            pkg("vyadh/nutest", ">=0.103.0", false),
+            pkg("abusch/nu_plugin_semver", ">=0.113.0 <0.114.0", true),
+        ];
+        match select_starter(&packages, &resolver, &platform, &nu) {
+            StarterSelection::Compatible(id) => assert_eq!(id, "idanarye/nu_plugin_skim"),
+            other => panic!("unexpected selection: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_starter_prefers_nutest_on_114_without_skim() {
+        let platform = windows_platform();
         let nu = NuVersion::parse("0.114.1").unwrap();
         let resolver = Resolver::new(&platform, &nu);
         let packages = vec![
@@ -344,12 +404,7 @@ mod tests {
 
     #[test]
     fn select_starter_offers_pin_when_only_113_plugin() {
-        let platform = Platform {
-            os: Os::Windows,
-            arch: crate::core::platform::Arch::X86_64,
-            env: crate::core::platform::Env::Msvc,
-            triple: "x86_64-pc-windows-msvc".to_string(),
-        };
+        let platform = windows_platform();
         let nu = NuVersion::parse("0.114.1").unwrap();
         let resolver = Resolver::new(&platform, &nu);
         let packages = vec![pkg("abusch/nu_plugin_semver", ">=0.113.0 <0.114.0", true)];
@@ -359,6 +414,86 @@ mod tests {
                 assert_eq!(diagnosis.suggested_pin.as_deref(), Some("0.113.1"));
             }
             other => panic!("unexpected selection: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn format_no_compatible_starter_with_pin_is_honest() {
+        let msg =
+            format_no_compatible_starter("0.114.1", "x86_64-pc-windows-msvc", Some("0.113.1"));
+        assert!(msg.contains("0.114.1"), "{msg}");
+        assert!(msg.contains("x86_64-pc-windows-msvc"), "{msg}");
+        assert!(msg.contains("setup nu --version 0.113.1"), "{msg}");
+        assert!(msg.contains("numan search <query>"), "{msg}");
+        assert!(
+            !msg.contains("registry sync"),
+            "must not pitch registry sync as ABI fix: {msg}"
+        );
+    }
+
+    #[test]
+    fn format_no_compatible_starter_without_pin_points_at_search() {
+        let msg = format_no_compatible_starter("0.115.0", "x86_64-unknown-linux-gnu", None);
+        assert!(msg.contains("numan search <query>"), "{msg}");
+        assert!(!msg.contains("setup nu --version"), "{msg}");
+        assert!(!msg.contains("registry sync"), "{msg}");
+    }
+
+    #[test]
+    fn offer_managed_nu_pin_yes_refuses_silent_switch() {
+        let diagnosis = PackageIncompatibility {
+            suggested_pin: Some("0.113.1".to_string()),
+            issue: Incompatibility::NuTooNew {
+                constraint: ">=0.113.0 <0.114.0".to_string(),
+            },
+            available_versions: vec!["1.0.0".to_string()],
+        };
+        let root = tempfile::tempdir().unwrap();
+        let accepted =
+            nu_pin_offer::offer_managed_nu_pin(root.path(), "0.114.1", &diagnosis, true).unwrap();
+        assert!(
+            !accepted,
+            "--yes must not silent-switch / auto-install managed Nu"
+        );
+    }
+
+    #[test]
+    fn select_starter_none_carries_suggested_pin() {
+        let platform = windows_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        // No curated starter present at all, so no pin can be suggested.
+        let packages_no_pin = vec![pkg("foo/bar", ">=0.100.0 <0.101.0", true)];
+        match select_starter(&packages_no_pin, &resolver, &platform, &nu) {
+            StarterSelection::None { suggested_pin } => {
+                assert!(
+                    suggested_pin.is_none(),
+                    "no pin available for unrelated package"
+                );
+            }
+            other => panic!("expected None, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_starter_none_path_produces_expected_message() {
+        let platform = windows_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        // Starter that's too old, no pin suggestion available.
+        let packages = vec![pkg("old/starter", ">=0.100.0 <0.101.0", true)];
+
+        match select_starter(&packages, &resolver, &platform, &nu) {
+            StarterSelection::None { suggested_pin } => {
+                let msg = format_no_compatible_starter(
+                    &nu.version.to_string(),
+                    &platform.triple,
+                    suggested_pin.as_deref(),
+                );
+                assert!(msg.contains("No compatible starter"), "message: {msg}");
+                assert!(msg.contains("numan search <query>"), "message: {msg}");
+            }
+            other => panic!("expected None, got {other:?}"),
         }
     }
 }
