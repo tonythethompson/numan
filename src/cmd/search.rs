@@ -82,9 +82,7 @@ pub fn execute(args: &SearchArgs, root: &Path) -> Result<()> {
 
         // Status when Nu is known and the row needs a verdict: incompatibles,
         // --all listings, and all non-plugin compatible rows (asymmetric label).
-        let status = if resolver.is_some()
-            && (!compatible || args.all || !matches!(pkg.package_type, PackageType::Plugin))
-        {
+        let status = if resolver.is_some() {
             format_row_status(
                 &pkg.package_type,
                 compatible,
