@@ -54,11 +54,13 @@ Canonical remove hint: `util::hints::active_plugin_mutation_gated`. Update disab
 |---|---|
 | Remove while active (incl. `--force`) | Unit tests (`cmd::remove`); Stage 1 asserts activation still present after list |
 | Deactivate → remove → gc | [Stage 1 acceptance](acceptance/official-registry-stage1.md) on Windows x86_64 |
-| Active update orchestration | Unit tests with injectable unregister/register/install hooks (`cmd::update`); **not** yet a real-Nu multi-OS e2e |
-| Fault injection (unregister failure / failed upgrade restore) | Unit tests leave journals / attempt reactivation; full fault-injection matrix still required before default-on |
+| Active update orchestration | Unit fake hooks (`cmd::update`); real-Nu happy path in [active-plugin-update-real-nu](acceptance/active-plugin-update-real-nu.md) (fixture dual-version registry; `workflow_dispatch` 3-OS job) |
+| Fault injection (unregister / reactivate failure) | Unit journal/restore tests; real-Nu Nu-shim approximations in the same suite (`FAIL_PLUGIN_RM` / `FAIL_PLUGIN_ADD`) |
+| Gate refusals (flag off, stale/missing NuPaths) | Unit + real-Nu suite |
+| Resume `LockfileUpdated` + `needs_reactivate` | Unit + real-Nu suite |
 | Ownership / name targeting | Lockfile `is_active_for` + binary file existence + unregister via absolute payload path (no msgpackz parse) |
-| Real-Nu smoke marker | `tests/plugin_lifecycle_real_nu.rs` (ignored; lists required scenarios as TODO) |
+| Real-Nu smoke marker | `tests/plugin_lifecycle_real_nu.rs` (points at Stage 1 + update suite) |
 
-**Stage 1 covers deactivate→remove on Windows x86_64.** Active **update** real-Nu e2e and the full fault-injection matrix remain **required before flipping default on**. Unit tests cover fake-hook orchestration only. Stale or missing Nu identity refuses active-plugin update (fail closed) instead of rewriting the activation record.
+**Stage 1 covers deactivate→remove on Windows x86_64.** Active **update** real-Nu evidence lives in the fixture suite; treat 3-OS green on the manual workflow as the bar before flipping `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION` default-on. Official multi-version update e2e remains blocked until the production index publishes a second plugin version.
 
-See also: [docs/acceptance/official-registry-stage1.md](acceptance/official-registry-stage1.md).
+See also: [docs/acceptance/official-registry-stage1.md](acceptance/official-registry-stage1.md), [docs/acceptance/active-plugin-update-real-nu.md](acceptance/active-plugin-update-real-nu.md).
