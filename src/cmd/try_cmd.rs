@@ -123,7 +123,11 @@ pub fn execute(args: &TryArgs, root: &Path) -> Result<()> {
         StarterSelection::None { suggested_pin } => {
             bail!(
                 "{}",
-                format_no_compatible_starter(&nu.version, &platform.triple, suggested_pin.as_deref())
+                format_no_compatible_starter(
+                    &nu.version,
+                    &platform.triple,
+                    suggested_pin.as_deref()
+                )
             );
         }
     };
@@ -462,7 +466,10 @@ mod tests {
         let packages_no_pin = vec![pkg("foo/bar", ">=0.100.0 <0.101.0", true)];
         match select_starter(&packages_no_pin, &resolver, &platform, &nu) {
             StarterSelection::None { suggested_pin } => {
-                assert!(suggested_pin.is_none(), "no pin available for unrelated package");
+                assert!(
+                    suggested_pin.is_none(),
+                    "no pin available for unrelated package"
+                );
             }
             other => panic!("expected None, got {other:?}"),
         }
