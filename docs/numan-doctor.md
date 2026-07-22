@@ -128,7 +128,7 @@ Checks run in order below. Implementation should call existing validators (`NuPa
 |----|----------|-----------|
 | `lockfile.missing` | `info` | No lockfile or empty → nothing installed |
 | `lockfile.parse` | `error` | Lockfile unreadable or invalid JSON |
-| `activation.plugin_mutation_gated` | `info` | Plugin has `activation.is_some()` (lockfile-only; reported even when `NuPaths` is missing). Remove/update/deactivate stay gated pending [Issue #22](https://github.com/tonythethompson/numan/issues/22). **Repair:** none (info). Fix hint: wait for plugin deactivate / install without activating. See [docs/active-plugin-gate.md](active-plugin-gate.md). |
+| `activation.plugin_mutation_gated` | `info` | Plugin has `activation.is_some()` (lockfile-only; reported even when `NuPaths` is missing). Remove/update/deactivate stay gated pending [Issue #22](https://github.com/tonythethompson/numan/issues/22). **Repair:** none (info). Fix hint: plugin deactivation is not available yet; keep the package installed, or install without activating, until deactivate ships. See [docs/active-plugin-gate.md](active-plugin-gate.md). |
 | `activation.plugin_stale` | `warn` | Plugin has `activation` but `is_active_for` false for current `NuPaths` |
 | `activation.module_stale` | `warn` | Module has `module_activation` but `is_module_active_for` false |
 | `autoload.projection` | `error` | `AutoloadState::validate_against_lockfile` fails |
