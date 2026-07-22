@@ -93,7 +93,7 @@ pub fn deactivate_pkg(package_id: &str) -> String {
     format!("numan deactivate {package_id}")
 }
 
-/// Hint when an active plugin cannot be mutated (Issue #22 gate).
+/// Hint when an active plugin cannot be removed/updated (Issue #22 gate).
 pub fn active_plugin_mutation_gated(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record. \
