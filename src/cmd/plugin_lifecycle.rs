@@ -65,6 +65,15 @@ pub fn deactivate_one_plugin(
     // work before overwriting (mirror of activate_one_plugin).
     reconcile_or_refuse_pending_deactivate(root, &nu_paths, &mut lockfile, pkg_id)?;
 
+    // Same-package Unregistered commit: Nu already unregistered; do not retry.
+    if lockfile
+        .packages
+        .get(pkg_id)
+        .is_none_or(|e| e.activation.is_none())
+    {
+        return Ok(());
+    }
+
     let mut journal = PendingPluginDeactivate {
         nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
         nu_version: nu_paths.nu_version.clone(),
@@ -172,6 +181,18 @@ pub fn activate_one_plugin(
     // Singleton journal: commit Registered entries / refuse unfinished foreign
     // work before overwriting (Codex: do not clobber a Registered journal).
     reconcile_or_refuse_pending_activation(root, &nu_paths, &mut lockfile, pkg_id)?;
+
+    // Same-package Registered commit: Nu already registered; do not call
+    // registrar again (would risk a false failure after successful recovery).
+    if lockfile.packages.get(pkg_id).is_some_and(|e| {
+        e.is_active_for(
+            &nu_paths.nu_executable_hash,
+            &nu_paths.nu_version,
+            &nu_paths.plugin_registry_path,
+        )
+    }) {
+        return Ok(());
+    }
 
     let mut journal = PendingActivation {
         nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
@@ -401,6 +422,7 @@ mod tests {
     use crate::core::integrity;
     use crate::state::lockfile::LockfileEntry;
     use crate::util::format_timestamp;
+    use std::cell::Cell;
     use std::collections::BTreeMap;
     use tempfile::TempDir;
 
@@ -635,5 +657,93 @@ mod tests {
         assert!(Lockfile::load(root).unwrap().packages[&pkg_b]
             .activation
             .is_some());
+    }
+
+    #[test]
+    fn activate_returns_after_committing_same_package_registered_journal() {
+        let (dir, pkg_a, _pkg_b) = fixture();
+        let root = dir.path();
+        let paths = NuPaths::load(root).unwrap();
+        clear_activation(root, &pkg_a);
+
+        PendingActivation {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: format_timestamp(),
+            entries: vec![PendingActivationEntry {
+                package_id: pkg_a.clone(),
+                payload_path: "packages/plugins/owner/a/1.0.0-abc".to_string(),
+                executable_path: "nu_plugin_x".to_string(),
+                absolute_binary_path: root
+                    .join("packages/plugins/owner/a/1.0.0-abc/nu_plugin_x")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PendingStatus::Registered,
+                error: None,
+            }],
+        }
+        .save(root)
+        .unwrap();
+
+        let registrar_calls = Cell::new(0usize);
+        activate_one_plugin(root, &pkg_a, &|_nu, _bin, _cfg| {
+            registrar_calls.set(registrar_calls.get() + 1);
+            bail!("registrar must not run after Registered reconcile")
+        })
+        .unwrap();
+
+        assert_eq!(
+            registrar_calls.get(),
+            0,
+            "must not re-register after reconcile"
+        );
+        assert!(Lockfile::load(root).unwrap().packages[&pkg_a]
+            .activation
+            .is_some());
+        assert!(PendingActivation::load(root).unwrap().is_none());
+    }
+
+    #[test]
+    fn deactivate_returns_after_committing_same_package_unregistered_journal() {
+        let (dir, pkg_a, _pkg_b) = fixture();
+        let root = dir.path();
+        let paths = NuPaths::load(root).unwrap();
+
+        PendingPluginDeactivate {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: format_timestamp(),
+            entries: vec![PendingPluginDeactivateEntry {
+                package_id: pkg_a.clone(),
+                plugin_name: "nu_plugin_x".to_string(),
+                absolute_binary_path: root
+                    .join("packages/plugins/owner/a/1.0.0-abc/nu_plugin_x")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PluginDeactivateStatus::Unregistered,
+                error: None,
+            }],
+        }
+        .save(root)
+        .unwrap();
+
+        let unregistrar_calls = Cell::new(0usize);
+        deactivate_one_plugin(root, &pkg_a, &|_nu, _name, _cfg| {
+            unregistrar_calls.set(unregistrar_calls.get() + 1);
+            bail!("unregistrar must not run after Unregistered reconcile")
+        })
+        .unwrap();
+
+        assert_eq!(
+            unregistrar_calls.get(),
+            0,
+            "must not re-unregister after reconcile"
+        );
+        assert!(Lockfile::load(root).unwrap().packages[&pkg_a]
+            .activation
+            .is_none());
+        assert!(PendingPluginDeactivate::load(root).unwrap().is_none());
     }
 }
