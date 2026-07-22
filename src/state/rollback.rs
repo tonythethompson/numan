@@ -147,6 +147,7 @@ pub fn rollback_to_snapshot(
         batch_staging_dirs: Vec::new(),
         target_snapshot_id: Some(id.to_string()),
         pre_rollback_snapshot_id: None,
+        needs_reactivate: false,
     };
     journal.save(root)?;
 
@@ -472,6 +473,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate: false,
         };
         journal.save(root).unwrap();
 
@@ -516,6 +518,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: Some(snap.id.clone()),
             pre_rollback_snapshot_id: None,
+            needs_reactivate: false,
         };
         journal.save(root).unwrap();
 

@@ -623,10 +623,11 @@ fn check_plugin_mutation_gates(lockfile: &Lockfile, findings: &mut Vec<Finding>)
                 "activation.plugin_mutation_gated",
                 Severity::Info,
                 format!(
-                    "Plugin '{id}' has an activation record; active-plugin remove/update \
-                     stay gated pending Issue #22 \
-                     (https://github.com/tonythethompson/numan/issues/22). \
-                     Run `numan deactivate {id}` before remove."
+                    "Plugin '{id}' has an activation record (Issue #22). Deactivate is available; \
+                     active remove stays gated (deactivate first). Active update is \
+                     opt-in via NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 \
+                     (default off): deactivate→upgrade→activate \
+                     (https://github.com/tonythethompson/numan/issues/22)."
                 ),
                 Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX),
                 RepairTier::None,
@@ -1735,7 +1736,20 @@ mod tests {
         assert_eq!(gated.severity, Severity::Info);
         assert_eq!(gated.repair, RepairTier::None);
         assert!(gated.message.contains("Issue #22"));
+        assert!(gated.message.contains("Deactivate is available"));
+        assert!(gated.message.contains("remove stays gated"));
+        assert!(gated
+            .message
+            .contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
+        assert!(gated.message.contains("default off"));
+        assert!(gated.message.contains("deactivate→upgrade→activate"));
         assert_eq!(gated.fix.as_deref(), Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX));
+        assert!(gated
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
+        assert!(gated.fix.as_deref().unwrap().contains("default off"));
         assert!(report
             .findings
             .iter()

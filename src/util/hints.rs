@@ -93,9 +93,10 @@ pub fn deactivate_pkg(package_id: &str) -> String {
     format!("numan deactivate {package_id}")
 }
 
-/// Hint when an active plugin cannot be **removed** (Issue #22 gate).
+/// Hint when an active plugin cannot be removed (Issue #22 gate).
 ///
-/// Remove is always refused while `activation` is set. Deactivate first, then remove.
+/// Remove is always refused while `activation` is set, even when active-plugin
+/// update orchestration is enabled. Deactivate first, then remove.
 pub fn active_plugin_mutation_gated(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record. \
@@ -106,25 +107,35 @@ Active-plugin remove stays gated (Issue #22); \
     )
 }
 
-/// Hint when an active plugin cannot be **updated** (Issue #22 gate / PR2).
-///
-/// Update stays refused while `activation` is set. Deactivate first, then update
-/// while inactive (active-update orchestration lands in a later PR).
-pub fn active_plugin_update_gated(package_id: &str) -> String {
+/// Hint when active-plugin update orchestration is disabled (default off / opt-in).
+pub fn active_plugin_update_disabled(package_id: &str) -> String {
     format!(
-        "Package '{package_id}' has a plugin activation record. \
-Run `numan deactivate {package_id}`, then `numan update {package_id}`. \
-Active-plugin update remains gated until Issue #22's safety matrix is green \
+        "Package '{package_id}' has a plugin activation record and active-plugin \
+update orchestration is disabled (default off). \
+Set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable \
+deactivate→update→activate, or run `numan deactivate {package_id}` first \
+then `numan update {package_id}` while inactive \
 (https://github.com/tonythethompson/numan/issues/22)."
     )
 }
 
+/// Compact `activate --list` note for active-plugin update availability.
+pub fn active_plugin_update_list_note(permitted: bool) -> &'static str {
+    if permitted {
+        "update: permitted (deactivate→upgrade→activate)"
+    } else {
+        "update: gated (set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable, or deactivate first)"
+    }
+}
+
 /// Doctor `fix` field for `activation.plugin_mutation_gated`.
 ///
-/// Aligned with [`active_plugin_mutation_gated`] (remove path) and
-/// `docs/active-plugin-gate.md` / `docs/numan-doctor.md`.
+/// Aligned with [`active_plugin_mutation_gated`], [`active_plugin_update_disabled`],
+/// and `docs/active-plugin-gate.md` / `docs/numan-doctor.md`.
 pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
-    "Run `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+    "Remove: `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+Update: set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 (default off) then \
+`numan update <pkg>` (or deactivate first). \
 See docs/active-plugin-gate.md.";
 
 #[cfg(test)]
@@ -153,15 +164,20 @@ mod tests {
     }
 
     #[test]
-    fn active_plugin_update_gated_points_at_update_not_remove() {
-        let hint = active_plugin_update_gated("owner/plugin");
+    fn active_plugin_update_disabled_mentions_env_kill_switch() {
+        let hint = active_plugin_update_disabled("owner/plugin");
         assert!(hint.contains("owner/plugin"));
-        assert!(hint.contains("deactivate"));
+        assert!(hint.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION"));
+        assert!(hint.contains("default off"));
+        assert!(hint.contains("numan deactivate owner/plugin"));
         assert!(hint.contains("numan update owner/plugin"));
         assert!(
             !hint.contains("numan remove"),
             "update gate must not suggest remove"
         );
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("default off"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("numan update"));
     }
 
     #[test]
