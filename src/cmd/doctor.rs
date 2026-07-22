@@ -25,8 +25,8 @@ use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
 use crate::util::hints::{
-    self, registry_none_fix, setup_nu_use_existing, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH,
-    CMD_REGISTRY_SYNC, CMD_SETUP_NU,
+    self, registry_none_fix, setup_nu_use_existing, ACTIVE_PLUGIN_MUTATION_GATED_FIX, CMD_ACTIVATE,
+    CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC, CMD_SETUP_NU,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -187,6 +187,10 @@ pub fn run_checks_with_options(
     let nu_paths = check_nu_paths(root, options, &mut findings);
     check_journals(root, nu_paths.as_ref(), &mut findings);
     let lockfile = check_lockfile(root, nu_paths.as_ref(), &mut findings);
+    if let Some(lf) = lockfile.as_ref() {
+        // Lockfile-only: explain remove/update refusals even when NuPaths is missing.
+        check_plugin_mutation_gates(lf, &mut findings);
+    }
     if let (Some(paths), Some(lf)) = (nu_paths.as_ref(), lockfile.as_ref()) {
         check_activation(root, paths, lf, &mut findings);
     }
@@ -572,6 +576,24 @@ fn check_lockfile(
     }
 
     Some(lockfile)
+}
+
+fn check_plugin_mutation_gates(lockfile: &Lockfile, findings: &mut Vec<Finding>) {
+    for (id, entry) in &lockfile.packages {
+        if entry.package_type == "plugin" && entry.activation.is_some() {
+            findings.push(finding(
+                "activation.plugin_mutation_gated",
+                Severity::Info,
+                format!(
+                    "Plugin '{id}' has an activation record; active-plugin remove/update/deactivate \
+                     stay gated pending Issue #22 \
+                     (https://github.com/tonythethompson/numan/issues/22)"
+                ),
+                Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX),
+                RepairTier::None,
+            ));
+        }
+    }
 }
 
 fn check_activation(
@@ -1169,6 +1191,7 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
             &[
                 "lockfile.missing",
                 "lockfile.parse",
+                "activation.plugin_mutation_gated",
                 "activation.plugin_stale",
                 "activation.module_stale",
                 "autoload.projection",
@@ -1534,5 +1557,154 @@ mod tests {
             .findings
             .iter()
             .any(|f| f.id == "activation.plugin_stale"));
+        assert!(report.findings.iter().any(|f| {
+            f.id == "activation.plugin_mutation_gated" && f.severity == Severity::Info
+        }));
+    }
+
+    #[test]
+    fn doctor_reports_active_plugin_mutation_gate() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let nu_exe = root.join("nu");
+        std::fs::write(&nu_exe, b"v1").unwrap();
+        let paths = fake_paths(root, &nu_exe);
+        paths.save(root).unwrap();
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
+            "owner/plugin".to_string(),
+            LockfileEntry {
+                version: "1.0.0".to_string(),
+                package_type: "plugin".to_string(),
+                source: "binary".to_string(),
+                target: None,
+                artifact_url: None,
+                artifact_sha256: None,
+                executable_path: Some("nu_plugin_test".to_string()),
+                archive_root: None,
+                include: None,
+                entry: None,
+                installed_at: "now".to_string(),
+                nu_version_at_install: None,
+                activation: Some(PluginActivation {
+                    plugin_registry_path: paths.plugin_registry_path.clone(),
+                    nu_executable_sha256: paths.nu_executable_hash.clone(),
+                    nu_version: paths.nu_version.clone(),
+                    activated_at: "now".to_string(),
+                }),
+                registry_url: None,
+                registry_revision: None,
+                index_sha256: None,
+                signing_key_fingerprint: None,
+                git_url: None,
+                git_rev: None,
+                cargo_name: None,
+                cargo_lock_sha256: None,
+                built_sha256: None,
+                payload_path: "packages/plugins/owner/plugin/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
+                module_activation: None,
+                module_import_mode: None,
+                locked_dependencies: BTreeMap::new(),
+            },
+        );
+        lockfile.save(root).unwrap();
+        std::fs::create_dir_all(root.join("packages/plugins/owner/plugin/1.0.0-abc")).unwrap();
+
+        let args = DoctorArgs {
+            fix: false,
+            yes: false,
+            json: false,
+            nupm_home: None,
+        };
+        let report = run_checks(&args, root).unwrap();
+        let gated = report
+            .findings
+            .iter()
+            .find(|f| f.id == "activation.plugin_mutation_gated")
+            .expect("activation.plugin_mutation_gated finding");
+        assert_eq!(gated.severity, Severity::Info);
+        assert_eq!(gated.repair, RepairTier::None);
+        assert!(gated.message.contains("Issue #22"));
+        assert_eq!(gated.fix.as_deref(), Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX));
+        assert!(report
+            .findings
+            .iter()
+            .all(|f| f.id != "activation.plugin_stale"));
+    }
+
+    #[test]
+    fn doctor_reports_plugin_mutation_gate_without_nu_paths() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("state")).unwrap();
+        std::fs::create_dir_all(root.join("packages/plugins/owner/plugin/1.0.0-abc")).unwrap();
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
+            "owner/plugin".to_string(),
+            LockfileEntry {
+                version: "1.0.0".to_string(),
+                package_type: "plugin".to_string(),
+                source: "binary".to_string(),
+                target: None,
+                artifact_url: None,
+                artifact_sha256: None,
+                executable_path: Some("nu_plugin_test".to_string()),
+                archive_root: None,
+                include: None,
+                entry: None,
+                installed_at: "now".to_string(),
+                nu_version_at_install: None,
+                activation: Some(PluginActivation {
+                    plugin_registry_path: "/missing/plugins.msgpackz".to_string(),
+                    nu_executable_sha256: "deadbeef".to_string(),
+                    nu_version: "0.113.1".to_string(),
+                    activated_at: "now".to_string(),
+                }),
+                registry_url: None,
+                registry_revision: None,
+                index_sha256: None,
+                signing_key_fingerprint: None,
+                git_url: None,
+                git_rev: None,
+                cargo_name: None,
+                cargo_lock_sha256: None,
+                built_sha256: None,
+                payload_path: "packages/plugins/owner/plugin/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
+                module_activation: None,
+                module_import_mode: None,
+                locked_dependencies: BTreeMap::new(),
+            },
+        );
+        lockfile.save(root).unwrap();
+
+        let args = DoctorArgs {
+            fix: false,
+            yes: false,
+            json: false,
+            nupm_home: None,
+        };
+        let report = run_checks(&args, root).unwrap();
+        assert!(
+            report.findings.iter().any(|f| {
+                f.id == "activation.plugin_mutation_gated" && f.severity == Severity::Info
+            }),
+            "gate finding must not require NuPaths"
+        );
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.id == "nu_paths.missing" || f.id == "nu.binary.missing_on_path"));
     }
 }

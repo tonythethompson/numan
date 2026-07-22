@@ -3,16 +3,18 @@
 The Stage 1 acceptance harness is a manual, production-registry integration test for the Windows x64 Numan release path. It spawns the built `numan` executable directly and exercises this lifecycle:
 
 ```text
-init → registry sync → search → info → install → activate → doctor → list → remove --force → gc
+init → registry sync → search → info → install → activate → doctor → list
 ```
+
+Stage 1 ends after `list` with the plugin still installed and activated. Active-plugin `remove` (including `--force`) is gated until Issue #22's safety matrix is green; remove/gc return to the harness after plugin deactivate exists. See [docs/active-plugin-gate.md](../active-plugin-gate.md).
 
 The default subject is the official-registry package `fdncred/nu_plugin_file`, queried as `nu_plugin_file`. The production resolver chooses the compatible version for Windows x64 and Nu 0.113.x; the harness does not duplicate version-selection logic or hard-code a package version.
 
 ## Scope and non-goals
 
-Stage 1 proves that a clean Numan root can consume the signed production official registry, install and activate a compatible plugin, report healthy state, remove it, and account for every payload directory after garbage collection. It also records the signing key ID, index digest, lockfile provenance, executable digest, Nu plugin-registry changes, lifecycle journals, snapshots, and final payload references.
+Stage 1 proves that a clean Numan root can consume the signed production official registry, install and activate a compatible plugin, and report healthy state through `doctor` and `list`. It also records the signing key ID, index digest, lockfile provenance, executable digest, Nu plugin-registry changes, lifecycle journals, and snapshots.
 
-The harness does not change CLI behavior, registry trust policy, unsigned-registry fallback, retry failed commands, install Nushell, test non-Windows targets, test other Nu minor versions, or call production command handlers in-process. It is not a replacement for ordinary unit and integration tests.
+The harness does not change CLI behavior, registry trust policy, unsigned-registry fallback, retry failed commands, install Nushell, test non-Windows targets, test other Nu minor versions, or call production command handlers in-process. It is not a replacement for ordinary unit and integration tests. It does not currently remove or garbage-collect the activated plugin (Issue #22 PR1 gate).
 
 ## Prerequisites
 
@@ -93,12 +95,10 @@ The workflow uploads only `evidence/`; it does not upload the isolated home or i
 
 The test writes current-step evidence before evaluating assertions. On failure, later lifecycle steps do not run. The final panic reports the failed step, arguments, exit code or timeout, all current-step assertion errors, stdout/stderr paths, and the evidence directory.
 
-Start with `summary.md`, then inspect that step's `command.json`, streams, inventory, and state capture. A timeout means the process was killed and reaped; Stage 1 never retries. Registry-sync evidence distinguishes a fresh signed index from cached or last-known-good fallback. Doctor uses its JSON schema and accepts no warning IDs in Stage 1.
+Start with `summary.md`, then inspect that step's `command.json`, streams, inventory, and state capture. A timeout means the process was killed and reaped; Stage 1 never retries. Registry-sync evidence distinguishes a fresh signed index from cached or last-known-good fallback. Doctor uses its JSON schema and accepts no warning IDs in Stage 1 (info findings such as `activation.plugin_mutation_gated` are allowed).
 
-## Removal, snapshots, and payload classification
+## Remaining payloads after Stage 1
 
-The lifecycle intentionally uses `remove --force` because the test removes a currently activated plugin. Removal must produce a valid lockfile without the package and clear the lifecycle journal, but the harness records payload presence rather than assuming immediate deletion.
-
-After `gc`, every remaining version directory is classified against the current lockfile, committed snapshot lockfiles, and current journals. One directory may carry multiple reference labels. Snapshots are allowed to reference payloads that removal has already deleted; classification applies only to directories that still exist. A remaining directory with no authoritative reference is an orphan and fails the run.
+Because Stage 1 ends with an activated plugin still present, the final summary may list package directories that are referenced by the current lockfile (and possibly snapshots). Those are not orphans. Full remove → gc payload accounting returns when plugin deactivation clears the activation record and Stage 1 regain remove/gc steps.
 
 The live test is ignored by default because it depends on production network state, an exact platform/Nu compatibility window, and activation of a real plugin. Keeping it manual prevents ordinary `cargo test` runs from silently becoming networked or host-mutating tests while retaining an explicit, reproducible release gate.

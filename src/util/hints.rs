@@ -85,9 +85,43 @@ pub fn run_then(first: &str, second: &str) -> String {
     format!("Run '{first}', then '{second}'.")
 }
 
+/// Hint when an active plugin cannot be mutated (Issue #22 gate / PR1).
+///
+/// Plugin deactivation is not available in this release slice, so there is no
+/// Numan command that clears `activation` yet. Users must keep the package
+/// installed (or install without activating) until deactivate ships.
+pub fn active_plugin_mutation_gated(package_id: &str) -> String {
+    format!(
+        "Package '{package_id}' has a plugin activation record. \
+Active-plugin remove/update/deactivate stay gated until Issue #22's safety matrix is green \
+(https://github.com/tonythethompson/numan/issues/22). \
+Plugin deactivation is not available yet; keep the package installed, or install without \
+activating, until `numan deactivate` for plugins ships. See docs/active-plugin-gate.md."
+    )
+}
+
+/// Doctor `fix` field for `activation.plugin_mutation_gated`.
+///
+/// Aligned with [`active_plugin_mutation_gated`] and `docs/active-plugin-gate.md` /
+/// `docs/numan-doctor.md`.
+pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
+    "Plugin deactivation is not available yet; keep the package installed, or install \
+without activating, until Issue #22 deactivate ships. See docs/active-plugin-gate.md.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_plugin_mutation_gated_mentions_package_and_issue() {
+        let hint = active_plugin_mutation_gated("owner/plugin");
+        assert!(hint.contains("owner/plugin"));
+        assert!(hint.contains("Issue #22"));
+        assert!(hint.contains("activation record"));
+        assert!(hint.contains("not available yet"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("docs/active-plugin-gate.md"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("not available yet"));
+    }
 
     #[test]
     fn run_formats_single_command() {
