@@ -25,7 +25,7 @@ pub enum LifecycleOp {
 /// - [`LockfileUpdated`]: install upgraded the lockfile/payload; reactivate may
 ///   be in progress (also see `pending-activation.json`). Cleared only after
 ///   successful reactivate (or plain upgrade with no activation).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleStage {
     /// Journal written; no mutations have been applied yet.

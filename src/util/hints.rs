@@ -114,8 +114,18 @@ pub fn active_plugin_update_disabled(package_id: &str) -> String {
 update orchestration is disabled (default off). \
 Set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable \
 deactivate→update→activate, or run `numan deactivate {package_id}` first \
-and update while inactive (https://github.com/tonythethompson/numan/issues/22)."
+then `numan update {package_id}` while inactive \
+(https://github.com/tonythethompson/numan/issues/22)."
     )
+}
+
+/// Compact `activate --list` note for active-plugin update availability.
+pub fn active_plugin_update_list_note(permitted: bool) -> &'static str {
+    if permitted {
+        "update: permitted (deactivate→upgrade→activate)"
+    } else {
+        "update: gated (set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable, or deactivate first)"
+    }
 }
 
 /// Doctor `fix` field for `activation.plugin_mutation_gated`.
@@ -124,7 +134,7 @@ and update while inactive (https://github.com/tonythethompson/numan/issues/22)."
 /// and `docs/active-plugin-gate.md` / `docs/numan-doctor.md`.
 pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
     "Remove: `numan deactivate <pkg>`, then `numan remove <pkg>`. \
-Update: set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 then \
+Update: set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 (default off) then \
 `numan update <pkg>` (or deactivate first). \
 See docs/active-plugin-gate.md.";
 
@@ -158,7 +168,12 @@ mod tests {
         let hint = active_plugin_update_disabled("owner/plugin");
         assert!(hint.contains("owner/plugin"));
         assert!(hint.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION"));
-        assert!(hint.contains("deactivate"));
+        assert!(hint.contains("default off"));
+        assert!(hint.contains("numan deactivate owner/plugin"));
+        assert!(hint.contains("numan update owner/plugin"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("default off"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("numan update"));
     }
 
     #[test]

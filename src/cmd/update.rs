@@ -110,6 +110,13 @@ pub fn execute_with_hooks(
             patch: 0,
         }
     });
+    // Prefer cached Nu identity for discovery when present so active-plugin
+    // updates resolve against the same Nu that owns the activation record.
+    let cached_nu_paths = NuPaths::load(root).ok();
+    let resolve_nu_version = cached_nu_paths
+        .as_ref()
+        .and_then(|paths| NuVersion::parse(&paths.nu_version).ok())
+        .unwrap_or_else(|| path_nu_version.clone());
 
     if args.check {
         let lockfile = Lockfile::load(root)?;
@@ -120,7 +127,7 @@ pub fn execute_with_hooks(
 
         let registry = RegistryManager::new(root)?;
         let default_reg = registry.default_registry_name();
-        let resolver = Resolver::new(&platform, &path_nu_version);
+        let resolver = Resolver::new(&platform, &resolve_nu_version);
         let packages_to_check = packages_to_check(args, &lockfile)?;
         let mut index_cache = HashMap::new();
         let updates = discover_pending_updates(
@@ -158,7 +165,7 @@ pub fn execute_with_hooks(
 
     let registry = RegistryManager::new(root)?;
     let default_reg = registry.default_registry_name();
-    let resolver = Resolver::new(&platform, &path_nu_version);
+    let resolver = Resolver::new(&platform, &resolve_nu_version);
     let packages_to_check = packages_to_check(args, &lockfile)?;
     let mut index_cache = HashMap::new();
     let updates = discover_pending_updates(
@@ -179,7 +186,6 @@ pub fn execute_with_hooks(
     println!("Updating {} package(s)...", updates.len());
 
     let mut failures: Vec<String> = Vec::new();
-    let cached_nu_paths = NuPaths::load(root).ok();
 
     for update in &updates {
         let current = match lockfile.packages.get(update.package_id.as_str()) {
@@ -200,13 +206,29 @@ pub fn execute_with_hooks(
                 }
             },
             None => {
-                // No cached NuPaths: treat as plain upgrade (cannot verify identity).
+                // Fail closed: without cached NuPaths we cannot verify activation
+                // identity, so refuse active plugins/modules instead of Plain.
                 if current.module_activation.is_some() {
                     let e = anyhow::anyhow!(
                         "Package '{}' is currently active as a module. \
                          Run `numan deactivate {}` first, then run update again.",
                         update.package_id,
                         update.package_id
+                    );
+                    if args.package.is_some() {
+                        return Err(e);
+                    }
+                    eprintln!("  {e}");
+                    failures.push(update.package_id.clone());
+                    continue;
+                }
+                if current.activation.is_some() {
+                    let e = anyhow::anyhow!(
+                        "Package '{}' has a plugin activation record, but Nu paths \
+                         are not cached (cannot verify identity). {}\n{}",
+                        update.package_id,
+                        hints::run(hints::CMD_INIT_REFRESH),
+                        hints::active_plugin_update_disabled(&update.package_id)
                     );
                     if args.package.is_some() {
                         return Err(e);
@@ -473,7 +495,7 @@ fn is_upgrade_available(current: &str, resolved: &semver::Version) -> bool {
 /// - Active **module**: always refuse (deactivate first).
 /// - Active **plugin** matching current Nu identity with mutation enabled: orchestrate.
 /// - Active **plugin** matching identity with mutation disabled: refuse (opt-in kill switch).
-/// - Active **plugin** with stale/mismatched Nu identity: Plain (install rewrites entry).
+/// - Active **plugin** with stale/mismatched Nu identity: refuse (preserve activation record).
 fn plan_active_update(
     entry: &LockfileEntry,
     pkg_id: &str,
@@ -499,8 +521,15 @@ fn plan_active_update(
             }
             return Ok(ActiveUpdatePlan::OrchestrateActivePlugin);
         }
-        // Stale activation for a different Nu identity: plain upgrade rewrites the entry.
-        return Ok(ActiveUpdatePlan::Plain);
+        // Fail closed: keep the activation record until Nu identity is aligned
+        // and the plugin is deactivated against the registry that owns it.
+        bail!(
+            "Package '{}' has a plugin activation record that does not match \
+             the current Nu identity. {}\nThen run `numan deactivate {}` before updating.",
+            pkg_id,
+            hints::run(hints::CMD_INIT_REFRESH),
+            pkg_id
+        );
     }
     Ok(ActiveUpdatePlan::Plain)
 }
@@ -630,7 +659,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_active_update_plain_when_activation_stale() {
+    fn plan_active_update_refuses_when_activation_stale() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", "1");
         let entry = LockfileEntry {
@@ -639,10 +668,10 @@ mod tests {
         };
         let mut stale_paths = matching_nu_paths();
         stale_paths.nu_executable_hash = "different".to_string();
-        assert_eq!(
-            plan_active_update(&entry, "owner/pkg", &stale_paths).unwrap(),
-            ActiveUpdatePlan::Plain
-        );
+        let err = plan_active_update(&entry, "owner/pkg", &stale_paths).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("does not match"));
+        assert!(msg.contains("init --refresh") || msg.contains("deactivate"));
         std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
     }
 
@@ -858,8 +887,12 @@ mod tests {
 
         run_orchestrated_update_with_hooks(
             &env,
-            &|_nu, name, _cfg| {
-                assert_eq!(name, "highlight");
+            &|_nu, identity, _cfg| {
+                let normalized = identity.replace('\\', "/");
+                assert!(
+                    normalized.ends_with("nu_plugin_highlight"),
+                    "expected absolute plugin path, got {identity}"
+                );
                 Ok(())
             },
             &|_nu, bin, _cfg| {
@@ -875,6 +908,190 @@ mod tests {
         assert_eq!(entry.version, "2.0.0");
         assert!(entry.activation.is_some());
         assert!(PendingLifecycle::load(&root).unwrap().is_none());
+        std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+    }
+
+    #[test]
+    fn install_failure_after_deactivate_attempts_restore() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", "1");
+
+        let env = ActiveUpdateEnv::new();
+        let _lock = acquire_mutation_lock(env.root()).unwrap();
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        let entry = lockfile.packages.get(&env.pkg_id).unwrap();
+        let nu_paths = NuPaths::load(env.root()).unwrap();
+        assert_eq!(
+            plan_active_update(entry, &env.pkg_id, &nu_paths).unwrap(),
+            ActiveUpdatePlan::OrchestrateActivePlugin
+        );
+
+        let journal = PendingLifecycle {
+            op: LifecycleOp::Update,
+            package_id: env.pkg_id.clone(),
+            stage: LifecycleStage::Prepared,
+            orphan_payload_path: Some(entry.payload_path.clone()),
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+            nupm_source_path: None,
+            nupm_metadata_sha256: None,
+            staging_dir: None,
+            promoted_payload_path: None,
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
+            target_snapshot_id: None,
+            pre_rollback_snapshot_id: None,
+        };
+        journal.save(env.root()).unwrap();
+        create_snapshot(
+            env.root(),
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Update,
+            None,
+            None,
+        )
+        .unwrap();
+
+        deactivate_one_plugin(env.root(), &env.pkg_id, &|_nu, _id, _cfg| Ok(())).unwrap();
+        assert!(Lockfile::load(env.root())
+            .unwrap()
+            .packages
+            .get(&env.pkg_id)
+            .unwrap()
+            .activation
+            .is_none());
+
+        // Simulate install failure after successful deactivate: restore prior activation.
+        activate_one_plugin(env.root(), &env.pkg_id, &|_nu, _bin, _cfg| Ok(())).unwrap();
+        assert!(Lockfile::load(env.root())
+            .unwrap()
+            .packages
+            .get(&env.pkg_id)
+            .unwrap()
+            .activation
+            .is_some());
+        assert!(PendingPluginDeactivate::load(env.root()).unwrap().is_none());
+        // Lifecycle journal remains Prepared until the outer update command clears it.
+        assert_eq!(
+            PendingLifecycle::load(env.root()).unwrap().unwrap().stage,
+            LifecycleStage::Prepared
+        );
+        std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+    }
+
+    #[test]
+    fn registrar_failure_after_install_leaves_recovery_journals() {
+        use crate::state::journal::PendingActivation;
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", "1");
+
+        let env = ActiveUpdateEnv::new();
+        let pkg_id = env.pkg_id.clone();
+
+        let install = move |id: &str,
+                            ver: Option<&str>,
+                            opts: &InstallOptions<'_>|
+              -> Result<InstallResult> {
+            assert_eq!(id, pkg_id);
+            assert_eq!(ver, Some("2.0.0"));
+            let mut lockfile = Lockfile::load(opts.root)?;
+            let entry = lockfile.packages.get_mut(id).unwrap();
+            assert!(entry.activation.is_none());
+            let new_payload = "packages/plugins/owner/highlight/2.0.0-def";
+            let new_dir = opts.root.join(new_payload);
+            std::fs::create_dir_all(&new_dir)?;
+            std::fs::write(new_dir.join("nu_plugin_highlight"), b"fake v2")?;
+            entry.version = "2.0.0".to_string();
+            entry.payload_path = new_payload.to_string();
+            lockfile.save(opts.root)?;
+            Ok(InstallResult {
+                installed: true,
+                package: id.to_string(),
+                version: "2.0.0".to_string(),
+                path: new_dir,
+                already_existed: false,
+            })
+        };
+
+        let _lock = acquire_mutation_lock(env.root()).unwrap();
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        let entry = lockfile.packages.get(&env.pkg_id).unwrap();
+        let nu_paths = NuPaths::load(env.root()).unwrap();
+        assert_eq!(
+            plan_active_update(entry, &env.pkg_id, &nu_paths).unwrap(),
+            ActiveUpdatePlan::OrchestrateActivePlugin
+        );
+
+        let journal = PendingLifecycle {
+            op: LifecycleOp::Update,
+            package_id: env.pkg_id.clone(),
+            stage: LifecycleStage::Prepared,
+            orphan_payload_path: Some(entry.payload_path.clone()),
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+            nupm_source_path: None,
+            nupm_metadata_sha256: None,
+            staging_dir: None,
+            promoted_payload_path: None,
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
+            target_snapshot_id: None,
+            pre_rollback_snapshot_id: None,
+        };
+        journal.save(env.root()).unwrap();
+        create_snapshot(
+            env.root(),
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Update,
+            None,
+            None,
+        )
+        .unwrap();
+        deactivate_one_plugin(env.root(), &env.pkg_id, &|_nu, _id, _cfg| Ok(())).unwrap();
+
+        let platform = Platform::detect();
+        let nu_version = NuVersion::parse(&nu_paths.nu_version).unwrap();
+        let options = InstallOptions {
+            root: env.root(),
+            platform: &platform,
+            nu_version: &nu_version,
+            force: false,
+            verbose: false,
+            registry_name: Some("official"),
+            snapshot_trigger: SnapshotTrigger::Update,
+        };
+        install(&env.pkg_id, Some("2.0.0"), &options).unwrap();
+        PendingLifecycle {
+            stage: LifecycleStage::LockfileUpdated,
+            ..journal.clone()
+        }
+        .save(env.root())
+        .unwrap();
+
+        let err = activate_one_plugin(env.root(), &env.pkg_id, &|_nu, _bin, _cfg| {
+            bail!("injected reactivate failure")
+        })
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("injected reactivate failure"),
+            "unexpected error: {msg}"
+        );
+
+        let lifecycle = PendingLifecycle::load(env.root()).unwrap().unwrap();
+        assert_eq!(lifecycle.stage, LifecycleStage::LockfileUpdated);
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        assert_eq!(lockfile.packages.get(&env.pkg_id).unwrap().version, "2.0.0");
+        assert!(lockfile
+            .packages
+            .get(&env.pkg_id)
+            .unwrap()
+            .activation
+            .is_none());
+        let pending_act = PendingActivation::load(env.root()).unwrap().unwrap();
+        assert_eq!(pending_act.entries.len(), 1);
+        assert!(pending_act.entries[0].error.is_some());
         std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
     }
 

@@ -4,7 +4,7 @@
 
 While a package has a lockfile `activation` record (plugin activation), Numan must not **remove** that package until the activation record is cleared. Plugin deactivate clears the record via a journaled `plugin rm` flow. `--force` on `numan remove` does **not** bypass active plugin activation. It only bypasses active *module* activation (`module_activation`).
 
-**Update** of an active plugin is orchestrated only when the mutation flag is **enabled** (default **off**, opt-in until the Issue #22 evidence matrix is green): deactivate → upgrade → reactivate. Set `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1` (or `true` / `TRUE` / `yes`) to allow active updates. Otherwise update refuses while a matching activation is set and requires manual deactivate first.
+**Update** of an active plugin is orchestrated only when the mutation flag is **enabled** (default **off**, opt-in until the Issue #22 evidence matrix is green): deactivate → upgrade → reactivate. Set `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1` (or `true` / `TRUE` / `yes`) to allow active updates. Otherwise update refuses while a matching activation is set and requires manual deactivate first. Missing Nu path cache or a stale/mismatched activation identity also refuses update (fail closed) so the activation record is not rewritten without a verified unregister.
 
 ## Current behavior
 
@@ -26,7 +26,7 @@ Unset or any value other than `1` / `true` / `TRUE` / `yes` keeps orchestration 
 
 `numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()` (even when `nu_state/paths.json` is missing). A pending deactivate journal surfaces as `journal.plugin_deactivate_pending` (warn); `--fix` runs deactivate reconcile.
 
-Canonical hint text lives in `util::hints::active_plugin_mutation_gated` / `ACTIVE_PLUGIN_MUTATION_GATED_FIX` (and `active_plugin_update_disabled` for the update opt-in path).
+Canonical hint text lives in `util::hints::active_plugin_mutation_gated` / `ACTIVE_PLUGIN_MUTATION_GATED_FIX` (and `active_plugin_update_disabled` / `active_plugin_update_list_note` for the update opt-in path).
 
 ### Lifecycle journal (active update)
 
@@ -53,12 +53,12 @@ Canonical remove hint: `util::hints::active_plugin_mutation_gated`. Update disab
 | Scenario | Evidence |
 |---|---|
 | Remove while active (incl. `--force`) | Unit tests (`cmd::remove`); Stage 1 asserts activation still present after list |
-| Deactivate → remove → gc | [Stage 1 acceptance](acceptance/official-registry-stage1.md) on Linux/macOS/Windows CI |
+| Deactivate → remove → gc | [Stage 1 acceptance](acceptance/official-registry-stage1.md) on Windows x86_64 |
 | Active update orchestration | Unit tests with injectable unregister/register/install hooks (`cmd::update`); **not** yet a real-Nu multi-OS e2e |
 | Fault injection (unregister failure / failed upgrade restore) | Unit tests leave journals / attempt reactivation; full fault-injection matrix still required before default-on |
-| Ownership / name targeting | Lockfile `is_active_for` + binary file existence + unregister name from `executable_path` (no msgpackz parse) |
+| Ownership / name targeting | Lockfile `is_active_for` + binary file existence + unregister via absolute payload path (no msgpackz parse) |
 | Real-Nu smoke marker | `tests/plugin_lifecycle_real_nu.rs` (ignored; lists required scenarios as TODO) |
 
-**Stage 1 covers deactivate→remove on 3 OS.** Active **update** real-Nu e2e and the full fault-injection matrix remain **required before flipping default on**. Unit tests cover fake-hook orchestration only.
+**Stage 1 covers deactivate→remove on Windows x86_64.** Active **update** real-Nu e2e and the full fault-injection matrix remain **required before flipping default on**. Unit tests cover fake-hook orchestration only. Stale or missing Nu identity refuses active-plugin update (fail closed) instead of rewriting the activation record.
 
 See also: [docs/acceptance/official-registry-stage1.md](acceptance/official-registry-stage1.md).

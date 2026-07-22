@@ -95,9 +95,10 @@ pub fn deactivate_one_plugin(
         return Err(err);
     }
 
+    let rm_identity = absolute_binary_path.to_string_lossy();
     match unregistrar(
         &nu_paths.nu_executable,
-        &plugin_name,
+        &rm_identity,
         &nu_paths.plugin_registry_path,
     ) {
         Ok(()) => {

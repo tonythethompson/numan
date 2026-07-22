@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::Args;
+use std::collections::BTreeSet;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
@@ -139,16 +140,10 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     if !targets_requested.plugins.is_empty() {
         nu_paths.validate_drift()?;
     }
-    if !targets_requested.modules.is_empty() {
-        let total_with_any_activation = lockfile
-            .packages
-            .values()
-            .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
-            .count();
-        let is_full_deactivation = targets_requested.modules.len() == total_with_any_activation;
-        if !is_full_deactivation {
-            nu_paths.validate_drift()?;
-        }
+    if !targets_requested.modules.is_empty()
+        && !is_full_module_deactivation(&lockfile, &targets_requested.modules)
+    {
+        nu_paths.validate_drift()?;
     }
     drop(planning_lock);
 
@@ -196,16 +191,10 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     if !targets_requested.plugins.is_empty() {
         nu_paths.validate_drift()?;
     }
-    if !targets_requested.modules.is_empty() {
-        let total_with_any_activation = lockfile
-            .packages
-            .values()
-            .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
-            .count();
-        let is_full_deactivation = targets_requested.modules.len() == total_with_any_activation;
-        if !is_full_deactivation {
-            nu_paths.validate_drift()?;
-        }
+    if !targets_requested.modules.is_empty()
+        && !is_full_module_deactivation(&lockfile, &targets_requested.modules)
+    {
+        nu_paths.validate_drift()?;
     }
 
     // 8. Snapshot current state before any mutation
@@ -254,6 +243,19 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     }
 
     Ok(())
+}
+
+/// Full module deactivation compares unique IDs so duplicate CLI args cannot
+/// skip Nu drift validation for a partial target set.
+fn is_full_module_deactivation(lockfile: &Lockfile, requested: &[ActiveModule]) -> bool {
+    let requested_ids: BTreeSet<&str> = requested.iter().map(|m| m.package_id.as_str()).collect();
+    let active_ids: BTreeSet<&str> = lockfile
+        .packages
+        .iter()
+        .filter(|(_, pkg)| pkg.package_type == "module" && pkg.module_activation.is_some())
+        .map(|(id, _)| id.as_str())
+        .collect();
+    !active_ids.is_empty() && requested_ids == active_ids
 }
 
 fn print_consent_table(targets: &ClassifiedTargets, registry_path: &str) {
@@ -1493,6 +1495,44 @@ mod tests {
         assert_eq!(targets.modules.len(), 1);
         assert_eq!(targets.modules[0].package_id, "owner/mymod");
         assert!(targets.plugins.is_empty());
+    }
+
+    #[test]
+    fn full_module_deactivation_ignores_duplicate_requested_ids() {
+        let lockfile = make_lockfile_with_modules(vec![
+            ("owner/alpha", "module", true),
+            ("owner/beta", "module", true),
+        ]);
+        let duplicate_partial = vec![
+            ActiveModule {
+                package_id: "owner/alpha".to_string(),
+                vendor_autoload_dir: "/nu/vendor/autoload".to_string(),
+                managed_file_path: "/nu/vendor/autoload/numan.nu".to_string(),
+            },
+            ActiveModule {
+                package_id: "owner/alpha".to_string(),
+                vendor_autoload_dir: "/nu/vendor/autoload".to_string(),
+                managed_file_path: "/nu/vendor/autoload/numan.nu".to_string(),
+            },
+        ];
+        assert!(
+            !is_full_module_deactivation(&lockfile, &duplicate_partial),
+            "duplicate args must not count as full deactivation"
+        );
+
+        let full = vec![
+            ActiveModule {
+                package_id: "owner/alpha".to_string(),
+                vendor_autoload_dir: "/nu/vendor/autoload".to_string(),
+                managed_file_path: "/nu/vendor/autoload/numan.nu".to_string(),
+            },
+            ActiveModule {
+                package_id: "owner/beta".to_string(),
+                vendor_autoload_dir: "/nu/vendor/autoload".to_string(),
+                managed_file_path: "/nu/vendor/autoload/numan.nu".to_string(),
+            },
+        ];
+        assert!(is_full_module_deactivation(&lockfile, &full));
     }
 
     #[test]

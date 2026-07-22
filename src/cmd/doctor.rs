@@ -1721,7 +1721,18 @@ mod tests {
         assert!(gated.message.contains("Issue #22"));
         assert!(gated.message.contains("Deactivate is available"));
         assert!(gated.message.contains("remove stays gated"));
+        assert!(gated
+            .message
+            .contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
+        assert!(gated.message.contains("default off"));
+        assert!(gated.message.contains("deactivate→upgrade→activate"));
         assert_eq!(gated.fix.as_deref(), Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX));
+        assert!(gated
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
+        assert!(gated.fix.as_deref().unwrap().contains("default off"));
         assert!(report
             .findings
             .iter()

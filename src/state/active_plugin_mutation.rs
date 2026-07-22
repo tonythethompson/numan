@@ -8,7 +8,7 @@
 //! first, then remove.
 
 #[cfg(test)]
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 /// Env: set `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION` to `1`, `true`, `TRUE`, or `yes`
 /// to enable active update orchestration. Any other value (or unset) keeps it off.
@@ -23,29 +23,66 @@ pub fn is_enabled() -> bool {
 #[cfg(test)]
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// RAII helper: holds [`ENV_LOCK`], saves prior env, restores on drop.
+#[cfg(test)]
+pub(crate) struct EnvOptInGuard {
+    _lock: MutexGuard<'static, ()>,
+    previous: Option<String>,
+}
+
+#[cfg(test)]
+impl EnvOptInGuard {
+    pub(crate) fn acquire() -> Self {
+        let lock = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION").ok();
+        Self {
+            _lock: lock,
+            previous,
+        }
+    }
+
+    pub(crate) fn set(&self, value: &str) {
+        std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", value);
+    }
+
+    pub(crate) fn clear(&self) {
+        std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+    }
+}
+
+#[cfg(test)]
+impl Drop for EnvOptInGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", value),
+            None => std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn default_disabled_when_unset() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+        let guard = EnvOptInGuard::acquire();
+        guard.clear();
         assert!(!is_enabled());
     }
 
     #[test]
     fn enabled_only_for_explicit_opt_in_values() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let guard = EnvOptInGuard::acquire();
         for v in ["1", "true", "TRUE", "yes"] {
-            std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", v);
+            guard.set(v);
             assert!(is_enabled(), "expected enabled for {v}");
         }
         for v in ["0", "false", "FALSE", "no", "", "on", "TRUE "] {
-            std::env::set_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION", v);
+            guard.set(v);
             assert!(!is_enabled(), "expected disabled for {v:?}");
         }
-        std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+        guard.clear();
         assert!(!is_enabled());
     }
 }

@@ -657,11 +657,9 @@ fn execute_list(lockfile: &Lockfile, nu_paths: &NuPaths) -> Result<()> {
         );
 
         if entry.package_type == "plugin" && entry.activation.is_some() {
-            let update_note = if crate::state::active_plugin_mutation::is_enabled() {
-                "update: permitted (deactivate→upgrade→activate)"
-            } else {
-                "update: gated (set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable, or deactivate first)"
-            };
+            let update_permitted =
+                status == "active" && crate::state::active_plugin_mutation::is_enabled();
+            let update_note = hints::active_plugin_update_list_note(update_permitted);
             println!("  └─ active plugin: remove gated (deactivate first); {update_note}");
         }
     }

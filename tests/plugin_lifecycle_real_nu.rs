@@ -4,11 +4,11 @@
 //!
 //! | Scenario | Where it runs today |
 //! |---|---|
-//! | Deactivate → remove → gc | Stage 1 official-registry acceptance (Linux/macOS/Windows) |
+//! | Deactivate → remove → gc | Stage 1 official-registry acceptance (Windows x86_64) |
 //! | Remove while active (incl. `--force`) | Unit tests in `cmd::remove` + Stage 1 post-list assertions |
 //! | Active update (deactivate→upgrade→reactivate) | Unit tests with fake hooks in `cmd::update` only |
 //! | Unregister failure / journal left | Unit tests in `cmd::deactivate` / `cmd::update` |
-//! | Ownership (name from lockfile path only) | Deactivate/update fake hooks assert plugin name |
+//! | Ownership (path + lockfile identity) | Deactivate/update fake hooks assert absolute binary path |
 //!
 //! ## TODO: required before default-on (not green yet)
 //!
@@ -16,11 +16,11 @@
 //! - [ ] Failed upgrade after deactivate restores previous activation (real Nu)
 //! - [ ] Unregister failure leaves activation + journals (real Nu)
 //! - [ ] Reactivate failure after successful upgrade leaves recovery guidance (real Nu)
-//! - [ ] Stale/mismatched Nu identity takes Plain update path (real Nu)
+//! - [ ] Stale/mismatched Nu identity refuses update (preserves activation; real Nu)
 //! - [ ] Full fault-injection matrix documented and green on 3 OS
 //!
 //! This ignored test is a real-Nu smoke marker only. It does **not** claim the
-//! matrix above is green. Full Stage 1 remains the multi-OS evidence gate for
+//! matrix above is green. Stage 1 remains the Windows/x86_64 evidence gate for
 //! deactivate→remove; active update stays opt-in until the TODO list closes.
 //!
 //! Run with:
@@ -52,6 +52,6 @@ fn real_nu_active_plugin_lifecycle_matrix_marker() {
     .to_string();
     eprintln!("real-Nu lifecycle marker: nu {version}");
     eprintln!(
-        "matrix status: Stage 1 deactivate→remove (3-OS) green; active update real-Nu e2e + fault matrix still TODO (opt-in)"
+        "matrix status: Stage 1 deactivate→remove (Windows x86_64) green; active update real-Nu e2e + fault matrix still TODO (opt-in)"
     );
 }
