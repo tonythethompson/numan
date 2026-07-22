@@ -14,10 +14,9 @@ While a package has a lockfile `activation` record (plugin activation), Numan mu
 | `numan update` | Refused (Issue #22 hint) | Refused (use `deactivate` first) |
 | `numan deactivate` | Deferred (plugin deactivate lands in a later PR) | Supported today |
 
-`numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()`.
+`numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()` (even when `nu_state/paths.json` is missing). Remediation in this slice: keep the package installed or install without activating; plugin deactivate is deferred to PR2+.
 
-Canonical hint text lives in `util::hints::active_plugin_mutation_gated`.
-
+Canonical hint text lives in `util::hints::active_plugin_mutation_gated` / `ACTIVE_PLUGIN_MUTATION_GATED_FIX`.
 ## Deferred (PR2+)
 
 - Plugin deactivation that clears the activation record safely
