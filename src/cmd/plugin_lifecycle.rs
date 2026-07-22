@@ -18,6 +18,7 @@ use crate::state::plugin_deactivate_journal::{
     PendingPluginDeactivate, PendingPluginDeactivateEntry, PluginDeactivateStatus,
 };
 use crate::util::format_timestamp;
+use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
 
 /// Unregister one active plugin and clear its lockfile `activation` record.
 ///
@@ -163,6 +164,10 @@ pub fn activate_one_plugin(
     let absolute_binary_path = validate_payload_path(root, &payload_path, &executable_path)?;
     let binary_str = absolute_binary_path.to_string_lossy().into_owned();
 
+    // Singleton journal: commit Registered entries / refuse unfinished foreign
+    // work before overwriting (Codex: do not clobber a Registered journal).
+    reconcile_or_refuse_pending_activation(root, &nu_paths, &mut lockfile, pkg_id)?;
+
     let mut journal = PendingActivation {
         nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
         nu_version: nu_paths.nu_version.clone(),
@@ -209,6 +214,78 @@ pub fn activate_one_plugin(
     }
 }
 
+/// Commit `Registered` pending-activation entries, then clear the journal so a
+/// new singleton write is safe.
+///
+/// Unfinished (`Prepared` / `Failed`) entries for **other** packages refuse so
+/// we do not discard their recovery path. Same-package unfinished entries are
+/// dropped: this helper is about to retry activation for `pkg_id`.
+fn reconcile_or_refuse_pending_activation(
+    root: &Path,
+    nu_paths: &NuPaths,
+    lockfile: &mut Lockfile,
+    pkg_id: &str,
+) -> Result<()> {
+    let Some(existing) = PendingActivation::load(root)? else {
+        return Ok(());
+    };
+
+    if !existing.matches_nu_identity(
+        &nu_paths.nu_executable_hash,
+        &nu_paths.nu_version,
+        &nu_paths.plugin_registry_path,
+    ) {
+        bail!(
+            "A pending plugin activation journal exists from a different Nu identity.\n\
+             {}\n\
+             Journal: {}",
+            hints::run_then(CMD_INIT_REFRESH, CMD_ACTIVATE),
+            root.join("state/pending-activation.json").display()
+        );
+    }
+
+    let unfinished_other: Vec<&str> = existing
+        .entries
+        .iter()
+        .filter(|e| {
+            e.package_id != pkg_id
+                && matches!(e.status, PendingStatus::Prepared | PendingStatus::Failed)
+        })
+        .map(|e| e.package_id.as_str())
+        .collect();
+    if !unfinished_other.is_empty() {
+        bail!(
+            "A pending plugin activation journal still has unfinished entries for: {}.\n\
+             {}\n\
+             Journal: {}",
+            unfinished_other.join(", "),
+            hints::run(CMD_ACTIVATE),
+            root.join("state/pending-activation.json").display()
+        );
+    }
+
+    let mut committed = false;
+    for entry in &existing.entries {
+        if entry.status != PendingStatus::Registered {
+            continue;
+        }
+        if let Some(pkg) = lockfile.packages.get_mut(&entry.package_id) {
+            pkg.activation = Some(PluginActivation {
+                plugin_registry_path: nu_paths.plugin_registry_path.clone(),
+                nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
+                nu_version: nu_paths.nu_version.clone(),
+                activated_at: format_timestamp(),
+            });
+            committed = true;
+        }
+    }
+    if committed {
+        lockfile.save(root)?;
+    }
+    PendingActivation::delete(root)?;
+    Ok(())
+}
+
 /// Production Nu `plugin rm` seam (name/config via env only).
 pub fn run_plugin_rm(nu_executable: &str, plugin_name: &str, plugin_config: &str) -> Result<()> {
     crate::cmd::deactivate::run_plugin_rm(nu_executable, plugin_name, plugin_config)
@@ -217,4 +294,161 @@ pub fn run_plugin_rm(nu_executable: &str, plugin_name: &str, plugin_config: &str
 /// Production Nu `plugin add` seam (binary/config via env only).
 pub fn run_plugin_add(nu_executable: &str, plugin_binary: &str, plugin_config: &str) -> Result<()> {
     crate::cmd::activate::run_plugin_add(nu_executable, plugin_binary, plugin_config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::integrity;
+    use crate::state::lockfile::LockfileEntry;
+    use crate::util::format_timestamp;
+    use std::collections::BTreeMap;
+    use tempfile::TempDir;
+
+    fn fixture() -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("state")).unwrap();
+
+        let nu_exe = root.join("fake_nu");
+        std::fs::write(&nu_exe, b"fake nu binary").unwrap();
+        let nu_hash = integrity::compute_sha256(b"fake nu binary");
+        let registry = root.join("plugin-registry.msgpack.z");
+        std::fs::write(&registry, b"reg").unwrap();
+
+        let paths = NuPaths {
+            nu_executable: nu_exe.to_string_lossy().into_owned(),
+            nu_version: "0.95.0".to_string(),
+            plugin_registry_path: registry.to_string_lossy().into_owned(),
+            nu_executable_hash: nu_hash,
+            platform: "x86_64-pc-windows-msvc".to_string(),
+            data_dir: None,
+            vendor_autoload_dirs: vec![],
+            vendor_autoload_dir: None,
+        };
+        paths.save(root).unwrap();
+
+        let pkg_a = "owner/a".to_string();
+        let pkg_b = "owner/b".to_string();
+        for (id, payload) in [
+            (&pkg_a, "packages/plugins/owner/a/1.0.0-abc"),
+            (&pkg_b, "packages/plugins/owner/b/1.0.0-abc"),
+        ] {
+            let payload_dir = root.join(payload);
+            std::fs::create_dir_all(&payload_dir).unwrap();
+            std::fs::write(payload_dir.join("nu_plugin_x"), b"fake").unwrap();
+            let mut lockfile = Lockfile::load(root).unwrap_or_else(|_| Lockfile::empty());
+            lockfile.packages.insert(
+                id.clone(),
+                LockfileEntry {
+                    version: "1.0.0".to_string(),
+                    package_type: "plugin".to_string(),
+                    source: "binary".to_string(),
+                    target: None,
+                    artifact_url: None,
+                    artifact_sha256: None,
+                    executable_path: Some("nu_plugin_x".to_string()),
+                    archive_root: None,
+                    include: None,
+                    entry: None,
+                    installed_at: "0".to_string(),
+                    nu_version_at_install: None,
+                    activation: None,
+                    registry_url: None,
+                    registry_revision: None,
+                    index_sha256: None,
+                    signing_key_fingerprint: None,
+                    git_url: None,
+                    git_rev: None,
+                    cargo_name: None,
+                    cargo_lock_sha256: None,
+                    built_sha256: None,
+                    payload_path: payload.to_string(),
+                    revision_id: None,
+                    payload_sha256: None,
+                    executable_sha256: None,
+                    selection_reason: None,
+                    origin: None,
+                    module_activation: None,
+                    module_import_mode: None,
+                    locked_dependencies: BTreeMap::new(),
+                },
+            );
+            lockfile.save(root).unwrap();
+        }
+
+        (dir, pkg_a, pkg_b)
+    }
+
+    #[test]
+    fn activate_commits_registered_journal_before_overwrite() {
+        let (dir, pkg_a, pkg_b) = fixture();
+        let root = dir.path();
+        let paths = NuPaths::load(root).unwrap();
+
+        PendingActivation {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: format_timestamp(),
+            entries: vec![PendingActivationEntry {
+                package_id: pkg_a.clone(),
+                payload_path: "packages/plugins/owner/a/1.0.0-abc".to_string(),
+                executable_path: "nu_plugin_x".to_string(),
+                absolute_binary_path: root
+                    .join("packages/plugins/owner/a/1.0.0-abc/nu_plugin_x")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PendingStatus::Registered,
+                error: None,
+            }],
+        }
+        .save(root)
+        .unwrap();
+
+        activate_one_plugin(root, &pkg_b, &|_nu, _bin, _cfg| Ok(())).unwrap();
+
+        let lockfile = Lockfile::load(root).unwrap();
+        assert!(
+            lockfile.packages[&pkg_a].activation.is_some(),
+            "Registered journal entry must commit activation before overwrite"
+        );
+        assert!(lockfile.packages[&pkg_b].activation.is_some());
+        assert!(PendingActivation::load(root).unwrap().is_none());
+    }
+
+    #[test]
+    fn activate_refuses_unfinished_foreign_journal_entries() {
+        let (dir, pkg_a, pkg_b) = fixture();
+        let root = dir.path();
+        let paths = NuPaths::load(root).unwrap();
+
+        PendingActivation {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: format_timestamp(),
+            entries: vec![PendingActivationEntry {
+                package_id: pkg_a.clone(),
+                payload_path: "packages/plugins/owner/a/1.0.0-abc".to_string(),
+                executable_path: "nu_plugin_x".to_string(),
+                absolute_binary_path: root
+                    .join("packages/plugins/owner/a/1.0.0-abc/nu_plugin_x")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PendingStatus::Prepared,
+                error: None,
+            }],
+        }
+        .save(root)
+        .unwrap();
+
+        let err = activate_one_plugin(root, &pkg_b, &|_nu, _bin, _cfg| Ok(())).unwrap_err();
+        assert!(err.to_string().contains("unfinished entries"));
+        assert!(err.to_string().contains(&pkg_a));
+        assert!(PendingActivation::load(root).unwrap().is_some());
+        assert!(Lockfile::load(root).unwrap().packages[&pkg_b]
+            .activation
+            .is_none());
+    }
 }
