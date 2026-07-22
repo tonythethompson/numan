@@ -85,9 +85,28 @@ pub fn run_then(first: &str, second: &str) -> String {
     format!("Run '{first}', then '{second}'.")
 }
 
+/// Hint when an active plugin cannot be mutated (Issue #22 gate).
+pub fn active_plugin_mutation_gated(package_id: &str) -> String {
+    format!(
+        "Package '{package_id}' has a plugin activation record. \
+Active-plugin remove/update/deactivate stay gated until Issue #22's safety matrix is green \
+(https://github.com/tonythethompson/numan/issues/22). \
+Remove the package only after plugin deactivation clears the activation record \
+(or install without activating)."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_plugin_mutation_gated_mentions_package_and_issue() {
+        let hint = active_plugin_mutation_gated("owner/plugin");
+        assert!(hint.contains("owner/plugin"));
+        assert!(hint.contains("Issue #22"));
+        assert!(hint.contains("activation record"));
+    }
 
     #[test]
     fn run_formats_single_command() {

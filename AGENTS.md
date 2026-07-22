@@ -52,7 +52,7 @@ src/
     snapshot.rs        — `numan snapshot list|inspect|delete|rollback` (Phase 5.3)
     deactivate.rs      — Module deactivation: full (delete managed file) and partial (regenerate) (Phase 4)
     update.rs          — `numan update [--check] [pkg]`: detect and apply registry version upgrades (Phase 5)
-    remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5)
+    remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5); `--force` bypasses module activation only (active plugins gated, Issue #22)
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
     completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell/nushell scripts (Phase 7.3)
@@ -155,8 +155,8 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
 - [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
 - [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock)
-- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md))
-- [ ] Phase 5 (deferred): Source builds (5.2), plugin gate (5.5)
+- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md)); active-plugin mutation gate PR1 ([docs/active-plugin-gate.md](docs/active-plugin-gate.md), Issue #22)
+- [ ] Phase 5 (deferred): Source builds (5.2), plugin deactivate + full gate (5.5 remainder)
 - [x] Phase 6.0: nupm compatibility audit + fixture corpus (`docs/nupm-compatibility.md`)
 - [x] Phase 6.1: read-only `numan nupm status|inspect` (no import, no nupm mutation, no Nu)
 - [x] Phase 6.2: one-way `numan nupm import` (staging, provenance, lifecycle journal; no activation)
@@ -216,6 +216,7 @@ Standard build/test/lint/run commands live in "Build & Test" above and in the RE
 - Near-term adoption bottleneck is thin catalog depth; release handoff is numan-plugins → numan-registry → numan client.
 - `numan registry sync` only refreshes the local catalog; it does not install packages (`list` stays empty until `install`).
 - Supported install archives include `.zip`, `.tar.gz`/`.tgz`, `.tar.xz`/`.txz`, and plain `.tar`.
+- Active-plugin remove/update stay gated until Issue #22's safety matrix is green; `remove --force` does not bypass plugin activation (module only). See [docs/active-plugin-gate.md](docs/active-plugin-gate.md).
 - Prefers streamlining Nu-compat onboarding as honest search/install UX, a one-shot starter, and an offer-based managed Nu pin (never silent auto-switch of Nu).
 - Prefers the command name `numan try` for the prove-it-works starter (not `setup demo` / `setup starter`).
 - Product north star for Numan: make the Nushell package ecosystem more inviting for less experienced users.

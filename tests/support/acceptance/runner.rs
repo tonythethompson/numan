@@ -563,40 +563,19 @@ impl AcceptanceRun {
         {
             errors.push(format!("list output has no exact row '{expected_row}'"));
         }
+        // Active-plugin remove is gated (Issue #22 PR1): Stage 1 ends with the
+        // package still installed and activated. Remove/gc return when deactivate exists.
+        match Lockfile::load(&self.root) {
+            Ok(lockfile) => match lockfile.packages.get(&self.config.package_id) {
+                Some(entry) if entry.activation.is_some() => {}
+                Some(_) => errors.push(
+                    "activated package lost its plugin activation record after list".to_string(),
+                ),
+                None => errors.push("activated package disappeared from lockfile after list".to_string()),
+            },
+            Err(error) => errors.push(format!("failed to parse lockfile after list: {error}")),
+        }
         self.record_step(list, errors)?;
-
-        let remove = self.required_numan_step(9, StepName::Remove)?;
-        let mut errors = basic_errors(&remove);
-        match Lockfile::load(&self.root) {
-            Ok(lockfile) if !lockfile.packages.contains_key(&self.config.package_id) => {}
-            Ok(_) => errors.push("removed package remains in lockfile".to_string()),
-            Err(error) => errors.push(format!("lockfile is invalid after remove: {error}")),
-        }
-        require_clear_journals(&self.root, &mut errors);
-        self.record_step(remove, errors)?;
-
-        let gc = self.required_numan_step(10, StepName::Gc)?;
-        let mut errors = basic_errors(&gc);
-        match Lockfile::load(&self.root) {
-            Ok(lockfile) if lockfile.packages.is_empty() => {}
-            Ok(_) => errors.push("current lockfile is not empty after GC".to_string()),
-            Err(error) => errors.push(format!("lockfile is invalid after GC: {error}")),
-        }
-        require_clear_journals(&self.root, &mut errors);
-        match classify_package_dirs(&self.root) {
-            Ok(classified) => {
-                for package in &classified {
-                    if package.orphan {
-                        errors.push(format!(
-                            "remaining package directory has no current/snapshot/journal reference: {}",
-                            package.path
-                        ));
-                    }
-                }
-            }
-            Err(error) => errors.push(format!("failed to classify package directories: {error}")),
-        }
-        self.record_step(gc, errors)?;
 
         let remaining_payloads = classify_package_dirs(&self.root).unwrap_or_default();
         let summary = self.summary("passed", remaining_payloads);

@@ -95,11 +95,9 @@ impl StepName {
             ],
             Self::Doctor => vec!["doctor".to_string(), "--json".to_string()],
             Self::List => vec!["list".to_string()],
-            Self::Remove => vec![
-                "remove".to_string(),
-                config.package_id.clone(),
-                "--force".to_string(),
-            ],
+            // Kept for future Stage 1 restore after plugin deactivate (Issue #22 PR2+).
+            // Current Stage 1 ends after List; these arms are unused by the runner.
+            Self::Remove => vec!["remove".to_string(), config.package_id.clone()],
             Self::Gc => vec!["gc".to_string()],
             Self::Preflight => panic!("preflight has no numan command arguments"),
         }
