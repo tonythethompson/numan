@@ -608,6 +608,49 @@ mod tests {
         assert!(err.contains("setup nu --version 0.113.1"), "{err}");
         assert!(err.contains("PATH Nu is not touched"), "{err}");
         assert!(
+            err.contains("numan search <query>"),
+            "expected alternate-package guidance: {err}"
+        );
+        assert!(
+            err.contains("Nothing was installed. No changes were made."),
+            "{err}"
+        );
+        assert!(!err.contains("registry sync"), "{err}");
+    }
+
+    #[test]
+    fn resolve_exact_nu_mismatch_without_pin_uses_generic_setup_hint() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let mut pkg = test_plugin();
+        // Open lower-bound-only `>` is not parsed for pin derivation
+        // (suggest_managed_nu_pin only uses >= / <), so pin stays None.
+        for v in &mut pkg.versions {
+            v.nu_version = ">999.0.0".to_string();
+            v.verified_with.clear();
+        }
+        assert!(suggest_managed_nu_pin(&pkg.versions[0]).is_none());
+
+        let target = semver::Version::new(2, 0, 0);
+        let err = resolver
+            .resolve_exact(&pkg, &target)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("Install a Nu that satisfies the package constraint: numan setup nu"),
+            "{err}"
+        );
+        assert!(
+            !err.contains("setup nu --version"),
+            "must not invent a concrete pin: {err}"
+        );
+        assert!(err.contains("PATH Nu is not touched"), "{err}");
+        assert!(
+            err.contains("numan search <query>"),
+            "expected alternate-package guidance: {err}"
+        );
+        assert!(
             err.contains("Nothing was installed. No changes were made."),
             "{err}"
         );
