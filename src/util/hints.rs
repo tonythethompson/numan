@@ -124,7 +124,16 @@ mod tests {
         assert!(hint.contains("deactivate"));
         assert!(hint.contains("remove"));
         assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("docs/active-plugin-gate.md"));
-        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("deactivate"));
+        let deactivate = ACTIVE_PLUGIN_MUTATION_GATED_FIX
+            .find("deactivate")
+            .expect("fix hint must mention deactivate");
+        let remove = ACTIVE_PLUGIN_MUTATION_GATED_FIX
+            .find("remove")
+            .expect("fix hint must mention remove");
+        assert!(
+            deactivate < remove,
+            "fix hint must list deactivate before remove"
+        );
     }
 
     #[test]
