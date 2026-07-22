@@ -25,6 +25,9 @@ pub enum LifecycleOp {
 /// - [`LockfileUpdated`]: install upgraded the lockfile/payload; reactivate may
 ///   be in progress (also see `pending-activation.json`). Cleared only after
 ///   successful reactivate (or plain upgrade with no activation).
+/// - When [`PendingLifecycle::needs_reactivate`] is true at this stage, the next
+///   `numan update` must resume activation (or refuse) before treating the
+///   package as up to date.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleStage {
@@ -98,6 +101,12 @@ pub struct PendingLifecycle {
     /// For rollback: the snapshot of current state taken before rollback.
     #[serde(default)]
     pub pre_rollback_snapshot_id: Option<String>,
+    /// Active-plugin update: after [`LifecycleStage::LockfileUpdated`], the
+    /// upgraded plugin still needs `activate` before the journal is cleared.
+    /// Plain (inactive) updates leave this false so a crash mid-clear does not
+    /// spuriously activate packages.
+    #[serde(default)]
+    pub needs_reactivate: bool,
 }
 
 impl PendingLifecycle {
@@ -156,6 +165,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate: false,
         }
     }
 

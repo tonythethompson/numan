@@ -327,6 +327,7 @@ fn t19_stale_nupm_import_journal_blocks_retry() {
         batch_staging_dirs: Vec::new(),
         target_snapshot_id: None,
         pre_rollback_snapshot_id: None,
+        needs_reactivate: false,
     }
     .save(root.path())
     .unwrap();

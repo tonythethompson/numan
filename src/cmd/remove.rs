@@ -69,6 +69,7 @@ pub fn execute(args: &RemoveArgs, root: &Path) -> Result<()> {
         batch_staging_dirs: Vec::new(),
         target_snapshot_id: None,
         pre_rollback_snapshot_id: None,
+        needs_reactivate: false,
     };
     journal.save(root)?;
 

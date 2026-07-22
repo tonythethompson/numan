@@ -1,7 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cmd::plugin_lifecycle::{
     activate_one_plugin, deactivate_one_plugin, run_plugin_add, run_plugin_rm,
@@ -85,19 +85,8 @@ pub fn execute_with_hooks(
     root: &PathBuf,
     hooks: &UpdateHooks<'_>,
 ) -> Result<()> {
-    if let Some(journal) = check_stale_journal(root)? {
-        let op = match journal.op {
-            LifecycleOp::Update => "update",
-            LifecycleOp::Remove => "remove",
-            LifecycleOp::NupmImport => "nupm import",
-            LifecycleOp::NupmImportManifest => "nupm manifest import",
-            LifecycleOp::Rollback => "rollback",
-        };
-        eprintln!(
-            "Warning: A previous '{}' operation on '{}' was interrupted.",
-            op, journal.package_id
-        );
-        eprintln!("Run `numan gc` to clean up any orphaned packages.");
+    if args.check {
+        warn_stale_lifecycle_journal(root)?;
     }
 
     let platform = Platform::detect();
@@ -154,6 +143,10 @@ pub fn execute_with_hooks(
     }
 
     let _lock = acquire_mutation_lock(root)?;
+    // Finish interrupted active-plugin reactivation before discovery so a
+    // LockfileUpdated package is not treated as already up to date.
+    resume_interrupted_reactivate(root, hooks)?;
+    warn_stale_lifecycle_journal(root)?;
 
     let lockfile = Lockfile::load(root)?;
     if lockfile.is_empty() {
@@ -239,6 +232,7 @@ pub fn execute_with_hooks(
             }
         };
 
+        let needs_reactivate = plan == ActiveUpdatePlan::OrchestrateActivePlugin;
         let journal = PendingLifecycle {
             op: LifecycleOp::Update,
             package_id: update.package_id.clone(),
@@ -254,6 +248,7 @@ pub fn execute_with_hooks(
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate,
         };
         journal.save(root)?;
 
@@ -388,6 +383,90 @@ pub fn execute_with_hooks(
         );
     }
 
+    Ok(())
+}
+
+fn warn_stale_lifecycle_journal(root: &Path) -> Result<()> {
+    let Some(journal) = check_stale_journal(root)? else {
+        return Ok(());
+    };
+
+    if journal.needs_reactivate && journal.stage == LifecycleStage::LockfileUpdated {
+        eprintln!(
+            "Warning: A previous update of '{}' finished installing but did not \
+             reactivate the plugin.",
+            journal.package_id
+        );
+        eprintln!(
+            "Run `numan update` to resume reactivation, or `numan activate {} --yes`.",
+            journal.package_id
+        );
+        return Ok(());
+    }
+
+    let op = match journal.op {
+        LifecycleOp::Update => "update",
+        LifecycleOp::Remove => "remove",
+        LifecycleOp::NupmImport => "nupm import",
+        LifecycleOp::NupmImportManifest => "nupm manifest import",
+        LifecycleOp::Rollback => "rollback",
+    };
+    eprintln!(
+        "Warning: A previous '{}' operation on '{}' was interrupted.",
+        op, journal.package_id
+    );
+    eprintln!("Run `numan gc` to clean up any orphaned packages.");
+    Ok(())
+}
+
+/// Resume activation after an interrupted orchestrated update
+/// (`LockfileUpdated` + `needs_reactivate`).
+///
+/// Without this, discovery treats the package as up to date and never
+/// reactivates it (Codex: resume LockfileUpdated journals).
+fn resume_interrupted_reactivate(root: &Path, hooks: &UpdateHooks<'_>) -> Result<()> {
+    let Some(journal) = PendingLifecycle::load(root)? else {
+        return Ok(());
+    };
+    if !matches!(journal.op, LifecycleOp::Update)
+        || journal.stage != LifecycleStage::LockfileUpdated
+        || !journal.needs_reactivate
+    {
+        return Ok(());
+    }
+
+    let lockfile = Lockfile::load(root)?;
+    let Some(entry) = lockfile.packages.get(&journal.package_id) else {
+        // Package removed after the interrupt; leave journal for gc warning.
+        return Ok(());
+    };
+    if entry.package_type != "plugin" {
+        return Ok(());
+    }
+
+    if entry.activation.is_some() {
+        // User (or doctor) already reactivated; clear the lifecycle journal.
+        PendingLifecycle::clear(root)?;
+        return Ok(());
+    }
+
+    println!(
+        "Resuming reactivation of {} after interrupted update...",
+        journal.package_id
+    );
+    activate_one_plugin(root, &journal.package_id, hooks.registrar).with_context(|| {
+        format!(
+            "Failed to resume reactivation of '{}'. {}",
+            journal.package_id,
+            hints::run(&format!("numan activate {} --yes", journal.package_id))
+        )
+    })?;
+    PendingLifecycle::clear(root)?;
+    println!(
+        "{} {} reactivated",
+        console::style("✓").green(),
+        journal.package_id
+    );
     Ok(())
 }
 
@@ -841,6 +920,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate: true,
         };
         journal.save(env.root())?;
 
@@ -967,6 +1047,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate: true,
         };
         journal.save(env.root()).unwrap();
         create_snapshot(
@@ -1064,6 +1145,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate: true,
         };
         journal.save(env.root()).unwrap();
         create_snapshot(
@@ -1161,6 +1243,7 @@ mod tests {
             batch_staging_dirs: Vec::new(),
             target_snapshot_id: None,
             pre_rollback_snapshot_id: None,
+            needs_reactivate: true,
         };
         journal.save(env.root()).unwrap();
 
@@ -1187,5 +1270,132 @@ mod tests {
         assert!(PendingLifecycle::load(env.root()).unwrap().is_some());
         assert!(PendingPluginDeactivate::load(env.root()).unwrap().is_some());
         std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+    }
+
+    #[test]
+    fn resume_lockfile_updated_reactivates_inactive_plugin() {
+        use crate::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Resume does not require the mutation env; finishing an interrupted
+        // orchestrated update must not leave the plugin gated forever.
+        std::env::remove_var("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION");
+
+        let env = ActiveUpdateEnv::new();
+        let pkg_id = env.pkg_id.clone();
+
+        // Simulate interrupt after install: already at to_version, activation cleared.
+        let mut lockfile = Lockfile::load(env.root()).unwrap();
+        let entry = lockfile.packages.get_mut(&pkg_id).unwrap();
+        let new_payload = "packages/plugins/owner/highlight/2.0.0-def";
+        let new_dir = env.root().join(new_payload);
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::write(new_dir.join("nu_plugin_highlight"), b"fake v2").unwrap();
+        entry.version = "2.0.0".to_string();
+        entry.payload_path = new_payload.to_string();
+        entry.activation = None;
+        lockfile.save(env.root()).unwrap();
+
+        let paths = NuPaths::load(env.root()).unwrap();
+        PendingLifecycle {
+            op: LifecycleOp::Update,
+            package_id: pkg_id.clone(),
+            stage: LifecycleStage::LockfileUpdated,
+            orphan_payload_path: Some("packages/plugins/owner/highlight/1.0.0-abc".to_string()),
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+            nupm_source_path: None,
+            nupm_metadata_sha256: None,
+            staging_dir: None,
+            promoted_payload_path: None,
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
+            target_snapshot_id: None,
+            pre_rollback_snapshot_id: None,
+            needs_reactivate: true,
+        }
+        .save(env.root())
+        .unwrap();
+
+        // Failed activate journal left by the interrupted reactivate attempt.
+        PendingActivation {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: "0".to_string(),
+            entries: vec![PendingActivationEntry {
+                package_id: pkg_id.clone(),
+                payload_path: new_payload.to_string(),
+                executable_path: "nu_plugin_highlight".to_string(),
+                absolute_binary_path: new_dir
+                    .join("nu_plugin_highlight")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PendingStatus::Failed,
+                error: Some("injected".to_string()),
+            }],
+        }
+        .save(env.root())
+        .unwrap();
+
+        let hooks = UpdateHooks {
+            unregistrar: &|_nu, _name, _cfg| Ok(()),
+            registrar: &|_nu, _bin, _cfg| Ok(()),
+            install: None,
+        };
+        resume_interrupted_reactivate(env.root(), &hooks).unwrap();
+
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        assert!(
+            lockfile.packages[&pkg_id].activation.is_some(),
+            "resume must reactivate after LockfileUpdated interrupt"
+        );
+        assert!(PendingLifecycle::load(env.root()).unwrap().is_none());
+        assert!(PendingActivation::load(env.root()).unwrap().is_none());
+    }
+
+    #[test]
+    fn resume_skips_plain_lockfile_updated_without_needs_reactivate() {
+        let env = ActiveUpdateEnv::new();
+        let pkg_id = env.pkg_id.clone();
+
+        let mut lockfile = Lockfile::load(env.root()).unwrap();
+        lockfile.packages.get_mut(&pkg_id).unwrap().activation = None;
+        lockfile.save(env.root()).unwrap();
+
+        PendingLifecycle {
+            op: LifecycleOp::Update,
+            package_id: pkg_id.clone(),
+            stage: LifecycleStage::LockfileUpdated,
+            orphan_payload_path: Some("packages/plugins/owner/highlight/1.0.0-abc".to_string()),
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+            nupm_source_path: None,
+            nupm_metadata_sha256: None,
+            staging_dir: None,
+            promoted_payload_path: None,
+            batch_package_ids: Vec::new(),
+            batch_staging_dirs: Vec::new(),
+            target_snapshot_id: None,
+            pre_rollback_snapshot_id: None,
+            needs_reactivate: false,
+        }
+        .save(env.root())
+        .unwrap();
+
+        let hooks = UpdateHooks {
+            unregistrar: &|_nu, _name, _cfg| Ok(()),
+            registrar: &|_nu, _bin, _cfg| Ok(()),
+            install: None,
+        };
+        resume_interrupted_reactivate(env.root(), &hooks).unwrap();
+
+        assert!(
+            Lockfile::load(env.root()).unwrap().packages[&pkg_id]
+                .activation
+                .is_none(),
+            "plain update crash must not spuriously activate"
+        );
+        assert!(PendingLifecycle::load(env.root()).unwrap().is_some());
     }
 }
