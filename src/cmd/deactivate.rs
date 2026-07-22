@@ -715,7 +715,11 @@ fn reconcile_plugin_deactivate_journal(
 }
 
 /// Invoke Nu with `plugin rm` — name and config via environment variables only.
-fn run_plugin_rm(nu_executable: &str, plugin_name: &str, plugin_config: &str) -> Result<()> {
+pub(crate) fn run_plugin_rm(
+    nu_executable: &str,
+    plugin_name: &str,
+    plugin_config: &str,
+) -> Result<()> {
     let output = std::process::Command::new(nu_executable)
         .args(["-c", RM_PLUGIN])
         .env("NUMAN_PLUGIN_NAME", plugin_name)

@@ -655,6 +655,17 @@ fn execute_list(lockfile: &Lockfile, nu_paths: &NuPaths) -> Result<()> {
             "{:<32} {:<12} {:<20} {:<10} {}",
             id, entry.package_type, entry.version, status, target
         );
+
+        if entry.package_type == "plugin" && entry.activation.is_some() {
+            let update_note = if crate::state::active_plugin_mutation::is_enabled() {
+                "update: permitted (deactivate→upgrade→activate)"
+            } else {
+                "update: gated (set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION or deactivate first)"
+            };
+            println!(
+                "  └─ active plugin: remove gated (deactivate first); {update_note}"
+            );
+        }
     }
     println!();
     Ok(())
@@ -1235,7 +1246,11 @@ pub fn validate_payload_path(
 }
 
 /// Invoke Nu with `plugin add` — paths via environment variables only.
-fn run_plugin_add(nu_executable: &str, plugin_binary: &str, plugin_config: &str) -> Result<()> {
+pub(crate) fn run_plugin_add(
+    nu_executable: &str,
+    plugin_binary: &str,
+    plugin_config: &str,
+) -> Result<()> {
     let output = std::process::Command::new(nu_executable)
         .args(["-c", ADD_PLUGIN])
         .env("NUMAN_PLUGIN_BINARY", plugin_binary)

@@ -93,13 +93,29 @@ pub fn deactivate_pkg(package_id: &str) -> String {
     format!("numan deactivate {package_id}")
 }
 
-/// Hint when an active plugin cannot be mutated (Issue #22 gate).
+/// Hint when an active plugin cannot be removed (Issue #22 gate).
+///
+/// Remove is always refused while `activation` is set, even when active-plugin
+/// update orchestration is enabled. Deactivate first, then remove.
 pub fn active_plugin_mutation_gated(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record. \
 Run `numan deactivate {package_id}`, then `numan remove {package_id}`. \
-Active-plugin update remains gated until Issue #22's safety matrix is green \
+Active-plugin remove stays gated (Issue #22); \
+`remove --force` does not bypass plugin activation \
 (https://github.com/tonythethompson/numan/issues/22)."
+    )
+}
+
+/// Hint when active-plugin update orchestration is disabled via env kill switch.
+pub fn active_plugin_update_disabled(package_id: &str) -> String {
+    format!(
+        "Package '{package_id}' has a plugin activation record and active-plugin \
+update orchestration is disabled \
+(NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=0). \
+Unset that env var (or set it to a non-disabling value) to allow \
+deactivate→update→activate, or run `numan deactivate {package_id}` first \
+and update while inactive (https://github.com/tonythethompson/numan/issues/22)."
     )
 }
 
@@ -115,6 +131,14 @@ mod tests {
         assert!(hint.contains("activation record"));
         assert!(hint.contains("deactivate"));
         assert!(hint.contains("remove"));
+    }
+
+    #[test]
+    fn active_plugin_update_disabled_mentions_env_kill_switch() {
+        let hint = active_plugin_update_disabled("owner/plugin");
+        assert!(hint.contains("owner/plugin"));
+        assert!(hint.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION"));
+        assert!(hint.contains("deactivate"));
     }
 
     #[test]

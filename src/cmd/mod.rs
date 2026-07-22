@@ -9,6 +9,7 @@ pub mod install;
 pub mod list;
 pub mod nu_pin_offer;
 pub mod nupm;
+pub mod plugin_lifecycle;
 pub mod registry;
 pub mod remove;
 pub mod search;

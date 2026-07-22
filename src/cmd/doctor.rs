@@ -631,13 +631,16 @@ fn check_activation(
                 "activation.plugin_mutation_gated",
                 Severity::Info,
                 format!(
-                    "Plugin '{id}' has an activation record; active-plugin remove/update \
-                     stay gated pending Issue #22 \
-                     (https://github.com/tonythethompson/numan/issues/22). \
-                     Run `numan deactivate {id}` before remove."
+                    "Plugin '{id}' has an activation record (Issue #22). Deactivate is available; \
+                     active remove stays gated (deactivate first). Active update is \
+                     permitted when NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION is enabled \
+                     (default on): deactivate→upgrade→activate \
+                     (https://github.com/tonythethompson/numan/issues/22)."
                 ),
                 Some(
-                    "Run `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+                    "Remove: `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+                     Update: `numan update <pkg>` (or deactivate first). \
+                     Kill switch: NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=0. \
                      See docs/active-plugin-gate.md.",
                 ),
                 RepairTier::None,
@@ -1704,6 +1707,8 @@ mod tests {
         assert_eq!(gated.severity, Severity::Info);
         assert_eq!(gated.repair, RepairTier::None);
         assert!(gated.message.contains("Issue #22"));
+        assert!(gated.message.contains("Deactivate is available"));
+        assert!(gated.message.contains("remove stays gated"));
         assert!(report
             .findings
             .iter()

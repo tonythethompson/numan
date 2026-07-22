@@ -16,6 +16,15 @@ pub enum LifecycleOp {
 
 /// Stage of the in-flight lifecycle operation at the time the process last
 /// checkpointed. Used for crash detection on the next invocation.
+///
+/// ## Active-plugin update (`LifecycleOp::Update`)
+///
+/// When updating an active plugin (mutation enabled), stages reuse this enum:
+/// - [`Prepared`]: journal written; deactivate may be in progress (also see
+///   `pending-plugin-deactivate.json`).
+/// - [`LockfileUpdated`]: install upgraded the lockfile/payload; reactivate may
+///   be in progress (also see `pending-activation.json`). Cleared only after
+///   successful reactivate (or plain upgrade with no activation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleStage {
