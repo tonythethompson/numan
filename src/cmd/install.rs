@@ -9,7 +9,6 @@ use crate::core::platform::Platform;
 use crate::core::registry::RegistryManager;
 use crate::core::resolve::Resolver;
 use crate::install::transaction;
-use crate::nu::paths::NuPaths;
 use crate::util::fs_safety::acquire_mutation_lock;
 
 /// Install a package
