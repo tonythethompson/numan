@@ -85,28 +85,47 @@ pub fn run_then(first: &str, second: &str) -> String {
     format!("Run '{first}', then '{second}'.")
 }
 
-/// Hint when an active plugin cannot be mutated (Issue #22 gate / PR1).
+/// `numan deactivate`
+pub const CMD_DEACTIVATE: &str = "numan deactivate";
+
+/// `numan deactivate <pkg>`
+pub fn deactivate_pkg(package_id: &str) -> String {
+    format!("numan deactivate {package_id}")
+}
+
+/// Hint when an active plugin cannot be **removed** (Issue #22 gate).
 ///
-/// Plugin deactivation is not available in this release slice, so there is no
-/// Numan command that clears `activation` yet. Users must keep the package
-/// installed (or install without activating) until deactivate ships.
+/// Remove is always refused while `activation` is set. Deactivate first, then remove.
 pub fn active_plugin_mutation_gated(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record. \
-Active-plugin remove/update/deactivate stay gated until Issue #22's safety matrix is green \
-(https://github.com/tonythethompson/numan/issues/22). \
-Plugin deactivation is not available yet; keep the package installed, or install without \
-activating, until `numan deactivate` for plugins ships. See docs/active-plugin-gate.md."
+Run `numan deactivate {package_id}`, then `numan remove {package_id}`. \
+Active-plugin remove stays gated (Issue #22); \
+`remove --force` does not bypass plugin activation \
+(https://github.com/tonythethompson/numan/issues/22)."
+    )
+}
+
+/// Hint when an active plugin cannot be **updated** (Issue #22 gate / PR2).
+///
+/// Update stays refused while `activation` is set. Deactivate first, then update
+/// while inactive (active-update orchestration lands in a later PR).
+pub fn active_plugin_update_gated(package_id: &str) -> String {
+    format!(
+        "Package '{package_id}' has a plugin activation record. \
+Run `numan deactivate {package_id}`, then `numan update {package_id}`. \
+Active-plugin update remains gated until Issue #22's safety matrix is green \
+(https://github.com/tonythethompson/numan/issues/22)."
     )
 }
 
 /// Doctor `fix` field for `activation.plugin_mutation_gated`.
 ///
-/// Aligned with [`active_plugin_mutation_gated`] and `docs/active-plugin-gate.md` /
-/// `docs/numan-doctor.md`.
+/// Aligned with [`active_plugin_mutation_gated`] (remove path) and
+/// `docs/active-plugin-gate.md` / `docs/numan-doctor.md`.
 pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
-    "Plugin deactivation is not available yet; keep the package installed, or install \
-without activating, until Issue #22 deactivate ships. See docs/active-plugin-gate.md.";
+    "Run `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+See docs/active-plugin-gate.md.";
 
 #[cfg(test)]
 mod tests {
@@ -118,9 +137,31 @@ mod tests {
         assert!(hint.contains("owner/plugin"));
         assert!(hint.contains("Issue #22"));
         assert!(hint.contains("activation record"));
-        assert!(hint.contains("not available yet"));
+        assert!(hint.contains("deactivate"));
+        assert!(hint.contains("remove"));
         assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("docs/active-plugin-gate.md"));
-        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("not available yet"));
+        let deactivate = ACTIVE_PLUGIN_MUTATION_GATED_FIX
+            .find("deactivate")
+            .expect("fix hint must mention deactivate");
+        let remove = ACTIVE_PLUGIN_MUTATION_GATED_FIX
+            .find("remove")
+            .expect("fix hint must mention remove");
+        assert!(
+            deactivate < remove,
+            "fix hint must list deactivate before remove"
+        );
+    }
+
+    #[test]
+    fn active_plugin_update_gated_points_at_update_not_remove() {
+        let hint = active_plugin_update_gated("owner/plugin");
+        assert!(hint.contains("owner/plugin"));
+        assert!(hint.contains("deactivate"));
+        assert!(hint.contains("numan update owner/plugin"));
+        assert!(
+            !hint.contains("numan remove"),
+            "update gate must not suggest remove"
+        );
     }
 
     #[test]

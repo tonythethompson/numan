@@ -52,6 +52,7 @@ pub enum StepName {
     Activate,
     Doctor,
     List,
+    Deactivate,
     Remove,
     Gc,
 }
@@ -68,6 +69,7 @@ impl StepName {
             Self::Activate => "activate",
             Self::Doctor => "doctor",
             Self::List => "list",
+            Self::Deactivate => "deactivate",
             Self::Remove => "remove",
             Self::Gc => "gc",
         }
@@ -75,7 +77,7 @@ impl StepName {
 
     pub fn timeout(&self) -> Duration {
         match self {
-            Self::RegistrySync | Self::Activate => Duration::from_secs(120),
+            Self::RegistrySync | Self::Activate | Self::Deactivate => Duration::from_secs(120),
             Self::Install => Duration::from_secs(300),
             _ => Duration::from_secs(60),
         }
@@ -95,8 +97,11 @@ impl StepName {
             ],
             Self::Doctor => vec!["doctor".to_string(), "--json".to_string()],
             Self::List => vec!["list".to_string()],
-            // Kept for future Stage 1 restore after plugin deactivate (Issue #22 PR2+).
-            // Current Stage 1 ends after List; these arms are unused by the runner.
+            Self::Deactivate => vec![
+                "deactivate".to_string(),
+                config.package_id.clone(),
+                "--yes".to_string(),
+            ],
             Self::Remove => vec!["remove".to_string(), config.package_id.clone()],
             Self::Gc => vec!["gc".to_string()],
             Self::Preflight => panic!("preflight has no numan command arguments"),

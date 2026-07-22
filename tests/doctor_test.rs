@@ -1,5 +1,6 @@
 //! Integration tests for `numan doctor`.
 
+use numan_cli::cmd::deactivate::DeactivateArgs;
 use numan_cli::cmd::doctor::{
     execute_with_options, run_checks_with_options, DoctorArgs, DoctorOptions, Severity,
 };
@@ -9,12 +10,18 @@ use numan_cli::nu::autoload::FakeCandidateRunner;
 use numan_cli::nu::bootstrap::managed_nu_binary;
 use numan_cli::nu::paths::NuPaths;
 use numan_cli::state::journal::{PendingActivation, PendingActivationEntry, PendingStatus};
+use numan_cli::state::plugin_deactivate_journal::{
+    PendingPluginDeactivate, PendingPluginDeactivateEntry, PluginDeactivateStatus,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;
 
 static TEST_OFF_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 static TEST_NU_SETUP_CALLED: Mutex<bool> = Mutex::new(false);
+static TEST_DEACTIVATE_REPAIR_CALLED: Mutex<bool> = Mutex::new(false);
+static TEST_DEACTIVATE_REPAIR_SHOULD_FAIL: Mutex<bool> = Mutex::new(false);
+static TEST_DEACTIVATE_REPAIR_GUARD: Mutex<()> = Mutex::new(());
 static TEST_PATH_GUARD: Mutex<()> = Mutex::new(());
 
 fn discover_off_path_test() -> Option<PathBuf> {
@@ -117,6 +124,7 @@ fn doctor_fix_auto_creates_layout_without_network() {
             skip_network: true,
             init_repair: Some(fake_init),
             activate_repair: None,
+            deactivate_repair: None,
             nu_setup_repair: None,
             discover_off_path: None,
         },
@@ -276,4 +284,144 @@ fn doctor_fix_registers_off_path_nu_without_network() {
 
     assert!(*TEST_NU_SETUP_CALLED.lock().unwrap());
     assert_eq!(code, 1);
+}
+
+fn fake_deactivate_repair(args: &DeactivateArgs, root: &Path) -> anyhow::Result<()> {
+    assert!(args.yes);
+    assert_eq!(args.packages, vec!["owner/plugin".to_string()]);
+    *TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap() = true;
+    if *TEST_DEACTIVATE_REPAIR_SHOULD_FAIL.lock().unwrap() {
+        anyhow::bail!("injected deactivate repair failure");
+    }
+    PendingPluginDeactivate::delete(root)?;
+    Ok(())
+}
+
+fn write_plugin_deactivate_journal(root: &Path, paths: &NuPaths) {
+    PendingPluginDeactivate {
+        nu_executable_sha256: paths.nu_executable_hash.clone(),
+        nu_version: paths.nu_version.clone(),
+        plugin_registry_path: paths.plugin_registry_path.clone(),
+        created_at: "now".to_string(),
+        entries: vec![PendingPluginDeactivateEntry {
+            package_id: "owner/plugin".to_string(),
+            plugin_name: "plugin".to_string(),
+            absolute_binary_path: root
+                .join("packages/plugins/owner/plugin/1.0.0-abc/nu_plugin_plugin")
+                .to_string_lossy()
+                .into_owned(),
+            status: PluginDeactivateStatus::Prepared,
+            error: None,
+        }],
+    }
+    .save(root)
+    .unwrap();
+}
+
+#[test]
+fn doctor_fix_reconciles_pending_plugin_deactivate_journal() {
+    let _guard = TEST_DEACTIVATE_REPAIR_GUARD.lock().unwrap();
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fake_init(&InitArgs { refresh: false }, root).unwrap();
+    let paths = NuPaths::load(root).unwrap();
+    write_plugin_deactivate_journal(root, &paths);
+
+    *TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap() = false;
+    *TEST_DEACTIVATE_REPAIR_SHOULD_FAIL.lock().unwrap() = false;
+
+    let args = DoctorArgs {
+        fix: true,
+        yes: true,
+        json: false,
+        nupm_home: None,
+    };
+    let code = execute_with_options(
+        &args,
+        root,
+        DoctorOptions {
+            skip_network: true,
+            init_repair: Some(fake_init),
+            deactivate_repair: Some(fake_deactivate_repair),
+            ..DoctorOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(code, 0);
+    assert!(*TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap());
+    assert!(PendingPluginDeactivate::load(root).unwrap().is_none());
+}
+
+#[test]
+fn doctor_fix_stale_plugin_deactivate_runs_refresh_then_deactivate() {
+    let _guard = TEST_DEACTIVATE_REPAIR_GUARD.lock().unwrap();
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fake_init(&InitArgs { refresh: false }, root).unwrap();
+    let mut paths = NuPaths::load(root).unwrap();
+    // Journal identity differs from cached paths → stale finding.
+    paths.nu_executable_hash = "stale-journal-hash".to_string();
+    write_plugin_deactivate_journal(root, &paths);
+
+    *TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap() = false;
+    *TEST_DEACTIVATE_REPAIR_SHOULD_FAIL.lock().unwrap() = false;
+
+    let args = DoctorArgs {
+        fix: true,
+        yes: true,
+        json: false,
+        nupm_home: None,
+    };
+    let code = execute_with_options(
+        &args,
+        root,
+        DoctorOptions {
+            skip_network: true,
+            init_repair: Some(fake_init),
+            deactivate_repair: Some(fake_deactivate_repair),
+            ..DoctorOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(code, 0);
+    assert!(*TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap());
+    assert!(PendingPluginDeactivate::load(root).unwrap().is_none());
+}
+
+#[test]
+fn doctor_fix_reports_deactivate_repair_failure() {
+    let _guard = TEST_DEACTIVATE_REPAIR_GUARD.lock().unwrap();
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fake_init(&InitArgs { refresh: false }, root).unwrap();
+    let paths = NuPaths::load(root).unwrap();
+    write_plugin_deactivate_journal(root, &paths);
+
+    *TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap() = false;
+    *TEST_DEACTIVATE_REPAIR_SHOULD_FAIL.lock().unwrap() = true;
+
+    let args = DoctorArgs {
+        fix: true,
+        yes: true,
+        json: true,
+        nupm_home: None,
+    };
+    let code = execute_with_options(
+        &args,
+        root,
+        DoctorOptions {
+            skip_network: true,
+            init_repair: Some(fake_init),
+            deactivate_repair: Some(fake_deactivate_repair),
+            ..DoctorOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(*TEST_DEACTIVATE_REPAIR_CALLED.lock().unwrap());
+    assert!(PendingPluginDeactivate::load(root).unwrap().is_some());
+    // Pending journal remains a warning after failed repair.
+    assert_eq!(code, 0);
 }

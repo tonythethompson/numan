@@ -193,6 +193,7 @@ fn capture_state_result(
         "nu_state/paths.json".to_string(),
         "state/autoload-state.json".to_string(),
         "state/pending-activation.json".to_string(),
+        "state/pending-plugin-deactivate.json".to_string(),
         "state/pending-autoload.json".to_string(),
         "state/pending-lifecycle.json".to_string(),
     ]);

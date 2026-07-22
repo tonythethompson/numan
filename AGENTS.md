@@ -50,9 +50,9 @@ src/
     init.rs            — `numan init [--refresh]`: Nu probe, paths cache, auto-configures official registry
     doctor.rs          — `numan doctor [--fix] [--yes]`: health checks + safe repairs (Phase 7.2; spec: docs/numan-doctor.md)
     snapshot.rs        — `numan snapshot list|inspect|delete|rollback` (Phase 5.3)
-    deactivate.rs      — Module deactivation: full (delete managed file) and partial (regenerate) (Phase 4)
+    deactivate.rs      — Plugin + module deactivation: journaled plugin unregister (`execute_with_unregistrar`); module full/partial (Phase 4 / Issue #22 PR2)
     update.rs          — `numan update [--check] [pkg]`: detect and apply registry version upgrades (Phase 5)
-    remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5); `--force` bypasses module activation only (active plugins gated, Issue #22)
+    remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5); `--force` bypasses module activation only (active plugins gated until deactivate, Issue #22)
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
     completions.rs     — `numan completions <shell>`: bash/fish/zsh/powershell/nushell scripts (Phase 7.3)
@@ -65,6 +65,7 @@ src/
   state/
     lockfile.rs        — Lockfile v2: PluginActivation, ModuleActivation, revision_id, payload_sha256, compute_revision_id()
     journal.rs         — Plugin pending-activation journal for crash recovery
+    plugin_deactivate_journal.rs — Plugin pending-deactivate journal (`pending-plugin-deactivate.json`) for crash recovery (Issue #22 PR2)
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
     autoload_recovery.rs — Command-independent PendingAutoload reconciliation into lockfile + derived autoload state
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
@@ -116,14 +117,16 @@ tests/
 - **Trust**: Ed25519 signatures over registry indexes; built-in production trust root for `official` (`src/core/official_registry.rs`); custom registries use `--key <base64-public-key>` via `registry add`
 - **Immutability**: `packages/<type>/<scoped-name>/<version-hash>/` paths, never overwrite
 - **Activate testability**: `execute_with_registrar(args, root, registrar)` for plugins; `execute_with_candidate_runner(args, root, registrar, runner)` for modules — inject fakes in tests, never spawn a real Nu binary in unit tests
+- **Deactivate testability**: `execute_with_unregistrar(args, root, unregistrar)` for plugins; `execute_with_candidate_runner_and_unregistrar` when both lanes need fakes — Nu program string is `RM_PLUGIN` with name/config via env only
 - **Module autoload testability**: `FakeCandidateRunner::success()` / `::failure(msg)` from `nu/autoload.rs` — use as test seam for candidate validation without real Nu
 - **Module autoload identity**: Nu executable hash + Nu version + vendor autoload dir + managed file path — all four must match for a module to be considered active
 - **Autoload state is NOT authoritative**: `autoload-state.json` is a fast-check projection; the lockfile `module_activation` records are ground truth
 - **Managed file ownership**: `OWNERSHIP_MARKER` header identifies Numan-managed files; `assert_managed_file_owned` blocks overwrite of foreign files
 - **Mutation serialization**: `acquire_mutation_lock(root)` returns `MutationLock` RAII guard; second acquire on same root fails immediately (non-blocking)
-- **Nu invocation**: paths only via env vars (`NUMAN_PLUGIN_BINARY`, `NUMAN_PLUGIN_CONFIG`); the Nu program string is a compile-time constant with no runtime interpolation
+- **Nu invocation**: paths/names only via env vars (`NUMAN_PLUGIN_BINARY`, `NUMAN_PLUGIN_CONFIG`, `NUMAN_PLUGIN_NAME`); the Nu program string is a compile-time constant with no runtime interpolation
 - **Activation scope**: `PluginActivation` struct stores `(nu_executable_sha256, nu_version, plugin_registry_path)`; a plugin is "active" only when all three match the current `NuPaths` — bare `bool` would go stale after `numan init --refresh`
 - **Journal**: `state/pending-activation.json` written as all-`prepared` before first registration; each entry advances to `registered` atomically before lockfile update; reconciled on next `activate` run if process is interrupted
+- **Plugin deactivate journal**: `state/pending-plugin-deactivate.json` (`Prepared` → `Unregistered` → clear lockfile `activation`); reconciled on next `deactivate`; doctor warns `journal.plugin_deactivate_pending`
 - **Atomic writes**: all JSON state files (lockfile, journal, nu_state/paths.json) use `write_json_atomic` (tempfile in same dir + persist) — no partial-write corruption
 - **Function signatures**: use `&Path` not `&PathBuf` in function parameters (clippy::ptr_arg is CI-enforced)
 
@@ -155,8 +158,8 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
 - [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
 - [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock)
-- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md)); active-plugin mutation gate PR1 ([docs/active-plugin-gate.md](docs/active-plugin-gate.md), Issue #22)
-- [ ] Phase 5 (deferred): Source builds (5.2), plugin deactivate + full gate (5.5 remainder)
+- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md)); active-plugin mutation gate PR1 + journaled plugin deactivate PR2 ([docs/active-plugin-gate.md](docs/active-plugin-gate.md), Issue #22)
+- [ ] Phase 5 (deferred): Source builds (5.2), full active-plugin safety matrix / update (5.5 remainder)
 - [x] Phase 6.0: nupm compatibility audit + fixture corpus (`docs/nupm-compatibility.md`)
 - [x] Phase 6.1: read-only `numan nupm status|inspect` (no import, no nupm mutation, no Nu)
 - [x] Phase 6.2: one-way `numan nupm import` (staging, provenance, lifecycle journal; no activation)
@@ -216,7 +219,7 @@ Standard build/test/lint/run commands live in "Build & Test" above and in the RE
 - Near-term adoption bottleneck is thin catalog depth; release handoff is numan-plugins → numan-registry → numan client.
 - `numan registry sync` only refreshes the local catalog; it does not install packages (`list` stays empty until `install`).
 - Supported install archives include `.zip`, `.tar.gz`/`.tgz`, `.tar.xz`/`.txz`, and plain `.tar`.
-- Active-plugin remove/update stay gated until Issue #22's safety matrix is green; `remove --force` does not bypass plugin activation (module only). See [docs/active-plugin-gate.md](docs/active-plugin-gate.md).
+- Active-plugin remove/update stay gated while `activation` is set; run `numan deactivate <pkg>` then `numan remove <pkg>`. `remove --force` does not bypass plugin activation (module only). See [docs/active-plugin-gate.md](docs/active-plugin-gate.md).
 - Prefers streamlining Nu-compat onboarding as honest search/install UX, a one-shot starter, and an offer-based managed Nu pin (never silent auto-switch of Nu).
 - Prefers the command name `numan try` for the prove-it-works starter (not `setup demo` / `setup starter`).
 - Product north star for Numan: make the Nushell package ecosystem more inviting for less experienced users.

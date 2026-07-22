@@ -563,8 +563,8 @@ impl AcceptanceRun {
         {
             errors.push(format!("list output has no exact row '{expected_row}'"));
         }
-        // Active-plugin remove is gated (Issue #22 PR1): Stage 1 ends with the
-        // package still installed and activated. Remove/gc return when deactivate exists.
+        // Active-plugin remove is gated while activation remains. Deactivate
+        // clears the record; then remove (no --force) and gc complete the lifecycle.
         match Lockfile::load(&self.root) {
             Ok(lockfile) => match lockfile.packages.get(&self.config.package_id) {
                 Some(entry) if entry.activation.is_some() => {}
@@ -577,6 +577,62 @@ impl AcceptanceRun {
             Err(error) => errors.push(format!("failed to parse lockfile after list: {error}")),
         }
         self.record_step(list, errors)?;
+
+        let deactivate = self.required_numan_step(9, StepName::Deactivate)?;
+        let mut errors = basic_errors(&deactivate);
+        match Lockfile::load(&self.root) {
+            Ok(lockfile) => match lockfile.packages.get(&self.config.package_id) {
+                Some(entry) if entry.activation.is_none() => {}
+                Some(_) => errors
+                    .push("plugin activation record still present after deactivate".to_string()),
+                None => errors.push("package missing from lockfile after deactivate".to_string()),
+            },
+            Err(error) => errors.push(format!(
+                "failed to parse lockfile after deactivate: {error}"
+            )),
+        }
+        let plugin_registry_after_deactivate = sha256_file(&plugin_registry).ok();
+        if plugin_registry_after_deactivate.is_none()
+            || plugin_registry_after_deactivate == plugin_registry_after
+        {
+            errors
+                .push("isolated Nu plugin registry did not change during deactivation".to_string());
+        }
+        require_clear_journals(&self.root, &mut errors);
+        self.record_step(deactivate, errors)?;
+
+        let remove = self.required_numan_step(10, StepName::Remove)?;
+        let mut errors = basic_errors(&remove);
+        match Lockfile::load(&self.root) {
+            Ok(lockfile) if !lockfile.packages.contains_key(&self.config.package_id) => {}
+            Ok(_) => errors.push("removed package remains in lockfile".to_string()),
+            Err(error) => errors.push(format!("lockfile is invalid after remove: {error}")),
+        }
+        require_clear_journals(&self.root, &mut errors);
+        self.record_step(remove, errors)?;
+
+        let gc = self.required_numan_step(11, StepName::Gc)?;
+        let mut errors = basic_errors(&gc);
+        match Lockfile::load(&self.root) {
+            Ok(lockfile) if lockfile.packages.is_empty() => {}
+            Ok(_) => errors.push("current lockfile is not empty after GC".to_string()),
+            Err(error) => errors.push(format!("lockfile is invalid after GC: {error}")),
+        }
+        require_clear_journals(&self.root, &mut errors);
+        match classify_package_dirs(&self.root) {
+            Ok(classified) => {
+                for package in &classified {
+                    if package.orphan {
+                        errors.push(format!(
+                            "remaining package directory has no current/snapshot/journal reference: {}",
+                            package.path
+                        ));
+                    }
+                }
+            }
+            Err(error) => errors.push(format!("failed to classify package directories: {error}")),
+        }
+        self.record_step(gc, errors)?;
 
         let remaining_payloads = classify_package_dirs(&self.root).unwrap_or_default();
         let summary = self.summary("passed", remaining_payloads);

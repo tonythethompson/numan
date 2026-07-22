@@ -6,6 +6,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cmd::activate::{execute as activate_execute, ActivateArgs};
+use crate::cmd::deactivate::{execute as deactivate_execute, DeactivateArgs};
 use crate::cmd::init::{ensure_official_registry_config, execute as init_execute, InitArgs};
 use crate::cmd::registry::{self, RegistryCommands};
 use crate::cmd::setup::{self, NuSetupArgs};
@@ -23,10 +24,11 @@ use crate::state::journal::PendingActivation;
 use crate::state::lifecycle_journal::PendingLifecycle;
 use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
+use crate::state::plugin_deactivate_journal::PendingPluginDeactivate;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
 use crate::util::hints::{
     self, registry_none_fix, setup_nu_use_existing, ACTIVE_PLUGIN_MUTATION_GATED_FIX, CMD_ACTIVATE,
-    CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC, CMD_SETUP_NU,
+    CMD_DEACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC, CMD_SETUP_NU,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -119,6 +121,8 @@ pub struct DoctorOptions {
     pub init_repair: Option<fn(&InitArgs, &Path) -> Result<()>>,
     /// Override activate repair (tests inject fakes; production uses `activate::execute`).
     pub activate_repair: Option<fn(&ActivateArgs, &Path) -> Result<()>>,
+    /// Override deactivate repair (tests inject fakes; production uses `deactivate::execute`).
+    pub deactivate_repair: Option<fn(&DeactivateArgs, &Path) -> Result<()>>,
     /// Override Nushell bootstrap repair (tests inject fakes; production uses `setup::execute_nu_impl`).
     pub nu_setup_repair: Option<fn(&NuSetupArgs, &Path) -> Result<()>>,
     /// Override off-PATH Nu discovery (tests inject a known binary path).
@@ -453,6 +457,40 @@ fn check_journals(root: &Path, nu_paths: Option<&NuPaths>, findings: &mut Vec<Fi
         }
     }
 
+    if let Ok(Some(j)) = PendingPluginDeactivate::load(root) {
+        if let Some(paths) = nu_paths {
+            if !j.matches_nu_identity(
+                &paths.nu_executable_hash,
+                &paths.nu_version,
+                &paths.plugin_registry_path,
+            ) {
+                findings.push(finding(
+                    "journal.plugin_deactivate_stale",
+                    Severity::Error,
+                    "Pending plugin deactivation journal has stale Nu identity",
+                    Some(CMD_INIT_REFRESH),
+                    RepairTier::Confirm,
+                ));
+            } else {
+                findings.push(finding(
+                    "journal.plugin_deactivate_pending",
+                    Severity::Warn,
+                    "Pending plugin deactivation journal detected",
+                    Some(CMD_DEACTIVATE),
+                    RepairTier::Confirm,
+                ));
+            }
+        } else {
+            findings.push(finding(
+                "journal.plugin_deactivate_pending",
+                Severity::Warn,
+                "Pending plugin deactivation journal detected",
+                Some(CMD_DEACTIVATE),
+                RepairTier::Confirm,
+            ));
+        }
+    }
+
     if let Ok(Some(j)) = PendingAutoload::load(root) {
         if let Some(paths) = nu_paths {
             if !j.matches_nu_identity(&paths.nu_executable_hash, &paths.nu_version) {
@@ -585,9 +623,10 @@ fn check_plugin_mutation_gates(lockfile: &Lockfile, findings: &mut Vec<Finding>)
                 "activation.plugin_mutation_gated",
                 Severity::Info,
                 format!(
-                    "Plugin '{id}' has an activation record; active-plugin remove/update/deactivate \
+                    "Plugin '{id}' has an activation record; active-plugin remove/update \
                      stay gated pending Issue #22 \
-                     (https://github.com/tonythethompson/numan/issues/22)"
+                     (https://github.com/tonythethompson/numan/issues/22). \
+                     Run `numan deactivate {id}` before remove."
                 ),
                 Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX),
                 RepairTier::None,
@@ -867,7 +906,7 @@ fn apply_repairs(
     let needs_lock = findings.iter().any(|f| {
         matches!(f.repair, RepairTier::Auto | RepairTier::Confirm) && f.severity != Severity::Ok
     });
-    let _lock = if needs_lock {
+    let mut lock = if needs_lock {
         Some(acquire_mutation_lock(root)?)
     } else {
         None
@@ -896,6 +935,42 @@ fn apply_repairs(
             }
         }
     }
+
+    // Config write does not reacquire the mutation lock; keep it under doctor's
+    // lock. Nested mutators below (setup / init / registry sync / refresh /
+    // activate / deactivate) do acquire again, so release first.
+    if findings
+        .iter()
+        .any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto)
+    {
+        let id = "registry.none".to_string();
+        match Config::load(root) {
+            Ok(mut config) => match ensure_official_registry_config(root, &mut config) {
+                Ok(true) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Applied,
+                    reason: None,
+                }),
+                Ok(false) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Skipped,
+                    reason: Some("official registry already configured".to_string()),
+                }),
+                Err(e) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Failed,
+                    reason: Some(e.to_string()),
+                }),
+            },
+            Err(e) => records.push(RepairRecord {
+                id,
+                status: RepairStatus::Failed,
+                reason: Some(e.to_string()),
+            }),
+        }
+    }
+
+    drop(lock.take());
 
     if findings
         .iter()
@@ -1027,44 +1102,13 @@ fn apply_repairs(
         });
     }
 
-    if findings
-        .iter()
-        .any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto)
-    {
-        let id = "registry.none".to_string();
-        match Config::load(root) {
-            Ok(mut config) => match ensure_official_registry_config(root, &mut config) {
-                Ok(true) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Applied,
-                    reason: None,
-                }),
-                Ok(false) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Skipped,
-                    reason: Some("official registry already configured".to_string()),
-                }),
-                Err(e) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Failed,
-                    reason: Some(e.to_string()),
-                }),
-            },
-            Err(e) => records.push(RepairRecord {
-                id,
-                status: RepairStatus::Failed,
-                reason: Some(e.to_string()),
-            }),
-        }
-    }
-
     let needs_refresh = findings.iter().any(|f| {
         matches!(f.id.as_str(), "nu_paths.drift" | "nu_paths.vendor_drift")
             && f.severity == Severity::Error
     }) || findings.iter().any(|f| {
         matches!(
             f.id.as_str(),
-            "journal.plugin_stale" | "journal.autoload_stale"
+            "journal.plugin_stale" | "journal.autoload_stale" | "journal.plugin_deactivate_stale"
         ) && f.severity == Severity::Error
     });
 
@@ -1139,6 +1183,62 @@ fn apply_repairs(
         }
     }
 
+    let needs_deactivate = findings.iter().any(|f| {
+        f.repair == RepairTier::Confirm
+            && matches!(
+                f.id.as_str(),
+                "journal.plugin_deactivate_pending" | "journal.plugin_deactivate_stale"
+            )
+            && f.severity != Severity::Ok
+    });
+
+    if needs_deactivate {
+        let id = "plugin_deactivate.reconcile".to_string();
+        if !confirm {
+            records.push(RepairRecord {
+                id,
+                status: RepairStatus::Skipped,
+                reason: Some("not_confirmed".to_string()),
+            });
+        } else {
+            let journal_packages = PendingPluginDeactivate::load(root)?
+                .map(|journal| {
+                    journal
+                        .entries
+                        .iter()
+                        .map(|entry| entry.package_id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if journal_packages.is_empty() {
+                records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Skipped,
+                    reason: Some("no_pending_plugin_deactivate_journal".to_string()),
+                });
+            } else {
+                let deactivate_args = DeactivateArgs {
+                    packages: journal_packages,
+                    yes: true,
+                    verbose: false,
+                };
+                let deactivate_fn = options.deactivate_repair.unwrap_or(deactivate_execute);
+                match deactivate_fn(&deactivate_args, root) {
+                    Ok(()) => records.push(RepairRecord {
+                        id,
+                        status: RepairStatus::Applied,
+                        reason: None,
+                    }),
+                    Err(e) => records.push(RepairRecord {
+                        id,
+                        status: RepairStatus::Failed,
+                        reason: Some(e.to_string()),
+                    }),
+                }
+            }
+        }
+    }
+
     Ok(records)
 }
 
@@ -1180,6 +1280,8 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
             &[
                 "journal.plugin_pending",
                 "journal.plugin_stale",
+                "journal.plugin_deactivate_pending",
+                "journal.plugin_deactivate_stale",
                 "journal.autoload_pending",
                 "journal.autoload_stale",
                 "journal.lifecycle_pending",
@@ -1378,6 +1480,7 @@ mod tests {
                 skip_network: true,
                 init_repair: Some(test_init_repair),
                 activate_repair: None,
+                deactivate_repair: None,
                 nu_setup_repair: None,
                 discover_off_path: None,
             },
@@ -1434,6 +1537,7 @@ mod tests {
                 skip_network: true,
                 init_repair: None,
                 activate_repair: None,
+                deactivate_repair: None,
                 nu_setup_repair: None,
                 discover_off_path: None,
             },
