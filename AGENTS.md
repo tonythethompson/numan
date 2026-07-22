@@ -146,7 +146,7 @@ tests/
 Automated and human PR reviewers should follow [`.github/instructions/review.instructions.md`](.github/instructions/review.instructions.md) for review checklists, severity expectations, and architecture invariants to flag. Keep that file updated when review conventions change; link here rather than duplicating review rules in this doc.
 
 ## Dependencies
-- clap (CLI), clap_complete + clap_complete_nushell (shell completions), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/zip (archives)
+- clap (CLI), clap_complete + clap_complete_nushell (shell completions), serde/serde_json/toml (serialization), reqwest (HTTP), tar/flate2/xz2/zip (archives)
 - sha2/hex (integrity), ed25519-dalek/base64 (signatures), semver (versioning)
 - dirs (platform paths), git2 (source builds), tempfile (safe extraction)
 
@@ -215,7 +215,7 @@ Standard build/test/lint/run commands live in "Build & Test" above and in the RE
 - Numan product spans three repos (`numan`, `numan-registry`, `numan-plugins`); trust is cross-cutting (client verifies, registry signs); there is no separate `numan-registry.trust` product repo.
 - Near-term adoption bottleneck is thin catalog depth; release handoff is numan-plugins → numan-registry → numan client.
 - `numan registry sync` only refreshes the local catalog; it does not install packages (`list` stays empty until `install`).
-- Numan installer does not support `.tar.xz` archives yet, so some upstream Linux/macOS plugin artifacts cannot be installed.
+- Supported install archives include `.zip`, `.tar.gz`/`.tgz`, `.tar.xz`/`.txz`, and plain `.tar`.
 - Prefers streamlining Nu-compat onboarding as honest search/install UX, a one-shot starter, and an offer-based managed Nu pin (never silent auto-switch of Nu).
 - Prefers the command name `numan try` for the prove-it-works starter (not `setup demo` / `setup starter`).
 - Product north star for Numan: make the Nushell package ecosystem more inviting for less experienced users.

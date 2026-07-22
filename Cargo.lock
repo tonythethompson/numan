@@ -1225,6 +1225,7 @@ dependencies = [
  "toml",
  "uuid",
  "wait-timeout",
+ "xz2",
  "zip",
 ]
 
