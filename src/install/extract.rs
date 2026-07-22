@@ -733,7 +733,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let xz_path = create_test_tar_xz(
             tmp.path(),
-            &[("test.txt", b"hello-xz"), ("subdir/nested.txt", b"nested-xz")],
+            &[
+                ("test.txt", b"hello-xz"),
+                ("subdir/nested.txt", b"nested-xz"),
+            ],
         );
 
         let dest = tmp.path().join("extracted");
@@ -784,10 +787,7 @@ mod tests {
             Some(ArchiveFormat::Tar)
         );
         assert_eq!(ArchiveFormat::from_url("https://example.com/pkg.bin"), None);
-        assert_eq!(
-            ArchiveFormat::extension(&ArchiveFormat::TarXz),
-            "tar.xz"
-        );
+        assert_eq!(ArchiveFormat::extension(&ArchiveFormat::TarXz), "tar.xz");
     }
 
     #[test]
