@@ -16,7 +16,9 @@ After `numan deactivate <pkg>`, `numan remove <pkg>` succeeds without `--force` 
 
 `numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()` (even when `nu_state/paths.json` is missing). A pending deactivate journal surfaces as `journal.plugin_deactivate_pending` (warn); `--fix` runs deactivate reconcile.
 
-Canonical hint text lives in `util::hints::active_plugin_mutation_gated` / `ACTIVE_PLUGIN_MUTATION_GATED_FIX` (points at `deactivate` then `remove`).
+Canonical hint text lives in `util::hints::active_plugin_mutation_gated` /
+`ACTIVE_PLUGIN_MUTATION_GATED_FIX` (remove: deactivate then remove) and
+`util::hints::active_plugin_update_gated` (update: deactivate then update).
 
 ## Deferred (Issue #22 remainder)
 

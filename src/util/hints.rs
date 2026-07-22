@@ -93,11 +93,27 @@ pub fn deactivate_pkg(package_id: &str) -> String {
     format!("numan deactivate {package_id}")
 }
 
-/// Hint when an active plugin cannot be removed/updated (Issue #22 gate).
+/// Hint when an active plugin cannot be **removed** (Issue #22 gate).
+///
+/// Remove is always refused while `activation` is set. Deactivate first, then remove.
 pub fn active_plugin_mutation_gated(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record. \
 Run `numan deactivate {package_id}`, then `numan remove {package_id}`. \
+Active-plugin remove stays gated (Issue #22); \
+`remove --force` does not bypass plugin activation \
+(https://github.com/tonythethompson/numan/issues/22)."
+    )
+}
+
+/// Hint when an active plugin cannot be **updated** (Issue #22 gate / PR2).
+///
+/// Update stays refused while `activation` is set. Deactivate first, then update
+/// while inactive (active-update orchestration lands in a later PR).
+pub fn active_plugin_update_gated(package_id: &str) -> String {
+    format!(
+        "Package '{package_id}' has a plugin activation record. \
+Run `numan deactivate {package_id}`, then `numan update {package_id}`. \
 Active-plugin update remains gated until Issue #22's safety matrix is green \
 (https://github.com/tonythethompson/numan/issues/22)."
     )
@@ -105,8 +121,8 @@ Active-plugin update remains gated until Issue #22's safety matrix is green \
 
 /// Doctor `fix` field for `activation.plugin_mutation_gated`.
 ///
-/// Aligned with [`active_plugin_mutation_gated`] and `docs/active-plugin-gate.md` /
-/// `docs/numan-doctor.md`.
+/// Aligned with [`active_plugin_mutation_gated`] (remove path) and
+/// `docs/active-plugin-gate.md` / `docs/numan-doctor.md`.
 pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
     "Run `numan deactivate <pkg>`, then `numan remove <pkg>`. \
 See docs/active-plugin-gate.md.";
@@ -133,6 +149,18 @@ mod tests {
         assert!(
             deactivate < remove,
             "fix hint must list deactivate before remove"
+        );
+    }
+
+    #[test]
+    fn active_plugin_update_gated_points_at_update_not_remove() {
+        let hint = active_plugin_update_gated("owner/plugin");
+        assert!(hint.contains("owner/plugin"));
+        assert!(hint.contains("deactivate"));
+        assert!(hint.contains("numan update owner/plugin"));
+        assert!(
+            !hint.contains("numan remove"),
+            "update gate must not suggest remove"
         );
     }
 

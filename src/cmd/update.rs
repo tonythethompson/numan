@@ -306,7 +306,7 @@ fn is_upgrade_available(current: &str, resolved: &semver::Version) -> bool {
 /// Reject updates that would overwrite an active plugin/module lockfile entry.
 fn ensure_not_active(entry: &LockfileEntry, pkg_id: &str) -> Result<()> {
     if entry.activation.is_some() {
-        bail!("{}", hints::active_plugin_mutation_gated(pkg_id));
+        bail!("{}", hints::active_plugin_update_gated(pkg_id));
     }
     if entry.module_activation.is_some() {
         bail!(
@@ -403,6 +403,11 @@ mod tests {
         assert!(msg.contains("owner/pkg"));
         assert!(msg.contains("Issue #22"));
         assert!(msg.contains("activation record"));
+        assert!(msg.contains("numan update owner/pkg"));
+        assert!(
+            !msg.contains("numan remove"),
+            "update gate must not suggest remove"
+        );
     }
 
     #[test]

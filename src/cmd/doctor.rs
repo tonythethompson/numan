@@ -1201,23 +1201,40 @@ fn apply_repairs(
                 reason: Some("not_confirmed".to_string()),
             });
         } else {
-            let deactivate_args = DeactivateArgs {
-                packages: Vec::new(),
-                yes: true,
-                verbose: false,
-            };
-            let deactivate_fn = options.deactivate_repair.unwrap_or(deactivate_execute);
-            match deactivate_fn(&deactivate_args, root) {
-                Ok(()) => records.push(RepairRecord {
+            let journal_packages = PendingPluginDeactivate::load(root)?
+                .map(|journal| {
+                    journal
+                        .entries
+                        .iter()
+                        .map(|entry| entry.package_id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if journal_packages.is_empty() {
+                records.push(RepairRecord {
                     id,
-                    status: RepairStatus::Applied,
-                    reason: None,
-                }),
-                Err(e) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Failed,
-                    reason: Some(e.to_string()),
-                }),
+                    status: RepairStatus::Skipped,
+                    reason: Some("no_pending_plugin_deactivate_journal".to_string()),
+                });
+            } else {
+                let deactivate_args = DeactivateArgs {
+                    packages: journal_packages,
+                    yes: true,
+                    verbose: false,
+                };
+                let deactivate_fn = options.deactivate_repair.unwrap_or(deactivate_execute);
+                match deactivate_fn(&deactivate_args, root) {
+                    Ok(()) => records.push(RepairRecord {
+                        id,
+                        status: RepairStatus::Applied,
+                        reason: None,
+                    }),
+                    Err(e) => records.push(RepairRecord {
+                        id,
+                        status: RepairStatus::Failed,
+                        reason: Some(e.to_string()),
+                    }),
+                }
             }
         }
     }
