@@ -1,0 +1,56 @@
+name: Active Plugin Update Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  active-update:
+    name: ${{ matrix.os }} / Nu 0.113.1
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Nushell 0.113.1
+        uses: hustcer/setup-nu@v3
+        with:
+          version: "0.113.1"
+
+      - name: Verify Nushell version
+        shell: bash
+        run: |
+          version="$(nu --version | tr -d '\r')"
+          if [ "$version" != "0.113.1" ]; then
+            echo "Expected Nushell 0.113.1, found '$version'"
+            exit 1
+          fi
+
+      - name: Build locked binary
+        run: cargo build --locked
+
+      - name: Run active-plugin update real-Nu matrix
+        run: cargo test --locked --test plugin_active_update_real_nu -- --ignored --nocapture --test-threads=1
+
+      - name: Upload acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: active-plugin-update-evidence-${{ matrix.os }}
+          path: target/acceptance/active-plugin-update-real-nu/*/evidence/
+          if-no-files-found: warn
+          retention-days: 30
