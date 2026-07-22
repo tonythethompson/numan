@@ -28,9 +28,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use numan_cli::state::journal::PendingActivation;
-use numan_cli::state::lifecycle_journal::{
-    LifecycleOp, LifecycleStage, PendingLifecycle,
-};
+use numan_cli::state::lifecycle_journal::{LifecycleOp, LifecycleStage, PendingLifecycle};
 use numan_cli::state::plugin_deactivate_journal::PendingPluginDeactivate;
 use support::active_update::{
     resolve_numan_binary, ActiveUpdateConfig, ActiveUpdateRun, ENV_FAIL_PLUGIN_ADD,
