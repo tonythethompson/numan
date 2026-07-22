@@ -900,7 +900,7 @@ fn apply_repairs(
     let needs_lock = findings.iter().any(|f| {
         matches!(f.repair, RepairTier::Auto | RepairTier::Confirm) && f.severity != Severity::Ok
     });
-    let _lock = if needs_lock {
+    let mut lock = if needs_lock {
         Some(acquire_mutation_lock(root)?)
     } else {
         None
@@ -1091,6 +1091,11 @@ fn apply_repairs(
         }
     }
 
+    // Nested commands (init / activate / deactivate) acquire their own
+    // mutation lock. Release doctor's lock first so repair does not deadlock
+    // on the non-reentrant advisory lock.
+    drop(lock.take());
+
     let needs_refresh = findings.iter().any(|f| {
         matches!(f.id.as_str(), "nu_paths.drift" | "nu_paths.vendor_drift")
             && f.severity == Severity::Error
@@ -1174,7 +1179,10 @@ fn apply_repairs(
 
     let needs_deactivate = findings.iter().any(|f| {
         f.repair == RepairTier::Confirm
-            && f.id == "journal.plugin_deactivate_pending"
+            && matches!(
+                f.id.as_str(),
+                "journal.plugin_deactivate_pending" | "journal.plugin_deactivate_stale"
+            )
             && f.severity != Severity::Ok
     });
 

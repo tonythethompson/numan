@@ -571,7 +571,8 @@ impl AcceptanceRun {
                 Some(_) => errors.push(
                     "activated package lost its plugin activation record after list".to_string(),
                 ),
-                None => errors.push("activated package disappeared from lockfile after list".to_string()),
+                None => errors
+                    .push("activated package disappeared from lockfile after list".to_string()),
             },
             Err(error) => errors.push(format!("failed to parse lockfile after list: {error}")),
         }
@@ -582,16 +583,20 @@ impl AcceptanceRun {
         match Lockfile::load(&self.root) {
             Ok(lockfile) => match lockfile.packages.get(&self.config.package_id) {
                 Some(entry) if entry.activation.is_none() => {}
-                Some(_) => errors.push(
-                    "plugin activation record still present after deactivate".to_string(),
-                ),
-                None => {
-                    errors.push("package missing from lockfile after deactivate".to_string())
-                }
+                Some(_) => errors
+                    .push("plugin activation record still present after deactivate".to_string()),
+                None => errors.push("package missing from lockfile after deactivate".to_string()),
             },
-            Err(error) => {
-                errors.push(format!("failed to parse lockfile after deactivate: {error}"))
-            }
+            Err(error) => errors.push(format!(
+                "failed to parse lockfile after deactivate: {error}"
+            )),
+        }
+        let plugin_registry_after_deactivate = sha256_file(&plugin_registry).ok();
+        if plugin_registry_after_deactivate.is_none()
+            || plugin_registry_after_deactivate == plugin_registry_after
+        {
+            errors
+                .push("isolated Nu plugin registry did not change during deactivation".to_string());
         }
         require_clear_journals(&self.root, &mut errors);
         self.record_step(deactivate, errors)?;

@@ -25,8 +25,11 @@ use crate::util::{format_timestamp, fs_safety::acquire_mutation_lock};
 use super::print_autoload_recovery;
 
 /// Nu program string for plugin unregister. Paths/name only via env vars.
+///
+/// `--force` makes recovery idempotent: if Nu already removed the plugin but
+/// the journal is still `Prepared`, retry succeeds instead of marking Failed.
 const RM_PLUGIN: &str =
-    "plugin rm --plugin-config $env.NUMAN_PLUGIN_CONFIG $env.NUMAN_PLUGIN_NAME";
+    "plugin rm --force --plugin-config $env.NUMAN_PLUGIN_CONFIG $env.NUMAN_PLUGIN_NAME";
 
 #[derive(Args, Debug)]
 pub struct DeactivateArgs {
@@ -117,7 +120,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     let lockfile = Lockfile::load(root)?;
 
     // 3. Classify explicit package IDs (plugins + modules; script/completion deferred).
-    let targets_requested = classify_and_validate_packages(args, &lockfile, root)?;
+    let targets_requested = classify_and_validate_packages(args, &lockfile, root, &nu_paths)?;
 
     if targets_requested.is_empty() {
         println!("Nothing to deactivate.");
@@ -136,8 +139,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
             .values()
             .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
             .count();
-        let is_full_deactivation =
-            targets_requested.modules.len() == total_with_any_activation;
+        let is_full_deactivation = targets_requested.modules.len() == total_with_any_activation;
         if !is_full_deactivation {
             nu_paths.validate_drift()?;
         }
@@ -178,7 +180,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     // on the current authoritative state.
     let mut lockfile = Lockfile::load(root)?;
     let targets_requested =
-        reclassify_confirmed_targets(args, &lockfile, root, &targets_requested)?;
+        reclassify_confirmed_targets(args, &lockfile, root, &nu_paths, &targets_requested)?;
     if targets_requested.is_empty() {
         println!("Nothing to deactivate.");
         return Ok(());
@@ -193,8 +195,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
             .values()
             .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
             .count();
-        let is_full_deactivation =
-            targets_requested.modules.len() == total_with_any_activation;
+        let is_full_deactivation = targets_requested.modules.len() == total_with_any_activation;
         if !is_full_deactivation {
             nu_paths.validate_drift()?;
         }
@@ -361,17 +362,14 @@ fn run_module_deactivate_lane(
 
 /// Derive the Nu plugin registry name from a lockfile `executable_path`.
 ///
-/// Strips a Windows `.exe` suffix, then strips a leading `nu_plugin_` prefix
+/// Normalizes `/` and `\` so Windows-style relative paths parse on Unix CI,
+/// strips a Windows `.exe` suffix, then strips a leading `nu_plugin_` prefix
 /// (`nu_plugin_highlight` → `highlight`).
 pub fn plugin_name_from_executable_path(executable_path: &str) -> String {
-    let basename = Path::new(executable_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(executable_path);
+    let normalized = executable_path.replace('\\', "/");
+    let basename = normalized.rsplit('/').next().unwrap_or(executable_path);
     let stem = basename.trim_end_matches(".exe");
-    stem.strip_prefix("nu_plugin_")
-        .unwrap_or(stem)
-        .to_string()
+    stem.strip_prefix("nu_plugin_").unwrap_or(stem).to_string()
 }
 
 /// Classify and validate explicit or implicit deactivation targets.
@@ -386,6 +384,7 @@ fn classify_and_validate_packages(
     args: &DeactivateArgs,
     lockfile: &Lockfile,
     root: &Path,
+    nu_paths: &NuPaths,
 ) -> Result<ClassifiedTargets> {
     // First pass: reject deferred / unknown types in the explicit list.
     for pkg_id in &args.packages {
@@ -423,7 +422,13 @@ fn classify_and_validate_packages(
         for pkg_id in sorted_ids {
             let entry = &lockfile.packages[pkg_id];
             match entry.package_type.as_str() {
-                "plugin" if entry.activation.is_some() => {
+                "plugin"
+                    if entry.is_active_for(
+                        &nu_paths.nu_executable_hash,
+                        &nu_paths.nu_version,
+                        &nu_paths.plugin_registry_path,
+                    ) =>
+                {
                     plugins.push(active_plugin_from_entry(pkg_id, entry, root)?);
                 }
                 "module" if entry.module_activation.is_some() => {
@@ -444,6 +449,19 @@ fn classify_and_validate_packages(
                 "plugin" => {
                     if entry.activation.is_none() {
                         bail!("Package '{pkg_id}' is a plugin but is not currently active.");
+                    }
+                    if !entry.is_active_for(
+                        &nu_paths.nu_executable_hash,
+                        &nu_paths.nu_version,
+                        &nu_paths.plugin_registry_path,
+                    ) {
+                        bail!(
+                            "Package '{pkg_id}' has a plugin activation record that does not match \
+                             the current Nu identity.\n\
+                             {}\n\
+                             Stale activation is not unregistered from the current plugin registry.",
+                            hints::run_then(CMD_INIT_REFRESH, CMD_DEACTIVATE)
+                        );
                     }
                     plugins.push(active_plugin_from_entry(pkg_id, entry, root)?);
                 }
@@ -482,9 +500,7 @@ fn active_plugin_from_entry(
         .with_context(|| format!("{pkg_id}: missing executable_path in lockfile"))?
         .to_string();
     let plugin_name = plugin_name_from_executable_path(&executable_path);
-    let absolute_binary_path = root
-        .join(&entry.payload_path)
-        .join(&executable_path);
+    let absolute_binary_path = root.join(&entry.payload_path).join(&executable_path);
     Ok(ActivePlugin {
         package_id: pkg_id.to_string(),
         executable_path,
@@ -498,9 +514,10 @@ fn reclassify_confirmed_targets(
     args: &DeactivateArgs,
     lockfile: &Lockfile,
     root: &Path,
+    nu_paths: &NuPaths,
     confirmed_targets: &ClassifiedTargets,
 ) -> Result<ClassifiedTargets> {
-    let current_targets = classify_and_validate_packages(args, lockfile, root)?;
+    let current_targets = classify_and_validate_packages(args, lockfile, root, nu_paths)?;
     if current_targets != *confirmed_targets {
         bail!(
             "Activation state changed after confirmation. No packages were deactivated; retry the command to review the current targets."
@@ -583,28 +600,10 @@ fn run_plugin_deactivate_lane(
         }
     }
 
-    // Clear journal only when every entry finished Unregistered or Failed
-    // (Failed packages keep their activation; Unregistered already cleared).
+    // Keep the journal whenever any unregister failed (doctor / retry visibility).
+    // Otherwise every entry is Unregistered and activations are already cleared.
     if !any_failed {
         PendingPluginDeactivate::delete(root)?;
-    } else {
-        // Leave journal for doctor / next deactivate reconcile of Unregistered rows.
-        // Delete only if all entries reached a terminal state and Unregistered
-        // activations are already cleared — still keep Failed for visibility.
-        let all_terminal = journal
-            .entries
-            .iter()
-            .all(|e| matches!(e.status, PluginDeactivateStatus::Unregistered | PluginDeactivateStatus::Failed));
-        if all_terminal {
-            // Keep Failed evidence until doctor/retry; drop only if everything Unregistered.
-            let any_failed_status = journal
-                .entries
-                .iter()
-                .any(|e| e.status == PluginDeactivateStatus::Failed);
-            if !any_failed_status {
-                PendingPluginDeactivate::delete(root)?;
-            }
-        }
     }
 
     Ok(any_failed)
@@ -647,38 +646,44 @@ fn reconcile_plugin_deactivate_journal(
 
     let mut changed = false;
     let mut retain_journal = false;
-    for entry in &mut existing.entries {
-        match entry.status {
+    for i in 0..existing.entries.len() {
+        match existing.entries[i].status {
             PluginDeactivateStatus::Unregistered => {
-                if let Some(pkg) = lockfile.packages.get_mut(&entry.package_id) {
+                let package_id = existing.entries[i].package_id.clone();
+                if let Some(pkg) = lockfile.packages.get_mut(&package_id) {
                     if pkg.activation.is_some() {
                         pkg.activation = None;
                         changed = true;
+                        lockfile.save(root)?;
                     }
                 }
             }
             PluginDeactivateStatus::Prepared => {
+                let plugin_name = existing.entries[i].plugin_name.clone();
+                let package_id = existing.entries[i].package_id.clone();
                 match unregistrar(
                     &nu_paths.nu_executable,
-                    &entry.plugin_name,
+                    &plugin_name,
                     &nu_paths.plugin_registry_path,
                 ) {
                     Ok(()) => {
-                        entry.status = PluginDeactivateStatus::Unregistered;
-                        entry.error = None;
-                        if let Some(pkg) = lockfile.packages.get_mut(&entry.package_id) {
+                        existing.entries[i].status = PluginDeactivateStatus::Unregistered;
+                        existing.entries[i].error = None;
+                        if let Some(pkg) = lockfile.packages.get_mut(&package_id) {
                             pkg.activation = None;
                         }
+                        // Persist per entry so a mid-loop crash does not replay
+                        // a successful unregister as Prepared.
+                        lockfile.save(root)?;
+                        existing.save(root)?;
                         changed = true;
                     }
                     Err(e) => {
-                        entry.status = PluginDeactivateStatus::Failed;
-                        entry.error = Some(e.to_string());
+                        existing.entries[i].status = PluginDeactivateStatus::Failed;
+                        existing.entries[i].error = Some(e.to_string());
                         retain_journal = true;
-                        eprintln!(
-                            "   Retry unregister for '{}' failed: {e}",
-                            entry.package_id
-                        );
+                        existing.save(root)?;
+                        eprintln!("   Retry unregister for '{package_id}' failed: {e}");
                     }
                 }
             }
@@ -703,9 +708,7 @@ fn reconcile_plugin_deactivate_journal(
 
     if retain_journal || any_failed || any_prepared {
         existing.save(root)?;
-        eprintln!(
-            "   Plugin deactivation journal retained (failed or still prepared entries)."
-        );
+        eprintln!("   Plugin deactivation journal retained (failed or still prepared entries).");
     } else {
         PendingPluginDeactivate::delete(root)?;
         eprintln!("   Plugin deactivation reconciliation complete.");
@@ -1248,11 +1251,15 @@ mod tests {
             plugin_name_from_executable_path(r"bin\nu_plugin_query.exe"),
             "query"
         );
-        assert_eq!(plugin_name_from_executable_path("custom_name"), "custom_name");
+        assert_eq!(
+            plugin_name_from_executable_path("custom_name"),
+            "custom_name"
+        );
     }
 
     #[test]
     fn rm_plugin_uses_env_only() {
+        assert!(RM_PLUGIN.contains("--force"));
         assert!(RM_PLUGIN.contains("$env.NUMAN_PLUGIN_NAME"));
         assert!(RM_PLUGIN.contains("$env.NUMAN_PLUGIN_CONFIG"));
         assert!(
@@ -1274,11 +1281,51 @@ mod tests {
             verbose: false,
         };
 
-        let targets = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap();
+        let targets =
+            classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths()).unwrap();
         assert_eq!(targets.plugins.len(), 1);
         assert_eq!(targets.plugins[0].package_id, "owner/myplugin");
         assert_eq!(targets.plugins[0].plugin_name, "highlight");
         assert!(targets.modules.is_empty());
+    }
+
+    #[test]
+    fn stale_plugin_activation_is_rejected_when_explicit() {
+        let dir = TempDir::new().unwrap();
+        let lockfile = make_active_plugin_lockfile(dir.path(), "owner/myplugin");
+        let mut stale_paths = fake_nu_paths();
+        stale_paths.nu_executable_hash = "other-hash".to_string();
+
+        let args = DeactivateArgs {
+            packages: vec!["owner/myplugin".to_string()],
+            yes: true,
+            verbose: false,
+        };
+
+        let err =
+            classify_and_validate_packages(&args, &lockfile, dir.path(), &stale_paths).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match"),
+            "Expected stale-identity error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn stale_plugin_activation_skipped_on_broad_cleanup() {
+        let dir = TempDir::new().unwrap();
+        let lockfile = make_active_plugin_lockfile(dir.path(), "owner/myplugin");
+        let mut stale_paths = fake_nu_paths();
+        stale_paths.nu_executable_hash = "other-hash".to_string();
+
+        let args = DeactivateArgs {
+            packages: vec![],
+            yes: true,
+            verbose: false,
+        };
+
+        let targets =
+            classify_and_validate_packages(&args, &lockfile, dir.path(), &stale_paths).unwrap();
+        assert!(targets.plugins.is_empty());
     }
 
     #[test]
@@ -1292,7 +1339,8 @@ mod tests {
             verbose: false,
         };
 
-        let err = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap_err();
+        let err = classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths())
+            .unwrap_err();
         assert!(
             err.to_string().contains("not currently active"),
             "Expected not-active error for inactive plugin, got: {err}"
@@ -1310,7 +1358,8 @@ mod tests {
             verbose: false,
         };
 
-        let err = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap_err();
+        let err = classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths())
+            .unwrap_err();
         assert!(
             err.to_string().contains("deferred"),
             "Expected deferred error for script type, got: {err}"
@@ -1328,7 +1377,8 @@ mod tests {
             verbose: false,
         };
 
-        let err = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap_err();
+        let err = classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths())
+            .unwrap_err();
         assert!(
             err.to_string().contains("deferred"),
             "Expected deferred error for completion type, got: {err}"
@@ -1347,7 +1397,8 @@ mod tests {
             verbose: false,
         };
 
-        let err = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap_err();
+        let err = classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths())
+            .unwrap_err();
         assert!(
             err.to_string().contains("not currently active"),
             "Expected not-active error, got: {err}"
@@ -1365,7 +1416,8 @@ mod tests {
             verbose: false,
         };
 
-        let err = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap_err();
+        let err = classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths())
+            .unwrap_err();
         assert!(
             err.to_string().contains("not found"),
             "Expected not-found error, got: {err}"
@@ -1384,7 +1436,8 @@ mod tests {
             verbose: false,
         };
 
-        let targets = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap();
+        let targets =
+            classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths()).unwrap();
         assert_eq!(targets.modules.len(), 1);
         assert_eq!(targets.modules[0].package_id, "owner/mymod");
         assert!(targets.plugins.is_empty());
@@ -1405,7 +1458,8 @@ mod tests {
             verbose: false,
         };
 
-        let targets = classify_and_validate_packages(&args, &lockfile, dir.path()).unwrap();
+        let targets =
+            classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths()).unwrap();
         assert_eq!(targets.modules.len(), 2);
         assert_eq!(targets.modules[0].package_id, "owner/alpha");
         assert_eq!(targets.modules[1].package_id, "owner/beta");
@@ -1420,16 +1474,26 @@ mod tests {
             verbose: false,
         };
         let confirmed_lockfile = make_lockfile_with_modules(vec![("owner/alpha", "module", true)]);
-        let confirmed_targets =
-            classify_and_validate_packages(&args, &confirmed_lockfile, dir.path()).unwrap();
+        let confirmed_targets = classify_and_validate_packages(
+            &args,
+            &confirmed_lockfile,
+            dir.path(),
+            &fake_nu_paths(),
+        )
+        .unwrap();
         let changed_lockfile = make_lockfile_with_modules(vec![
             ("owner/alpha", "module", true),
             ("owner/beta", "module", true),
         ]);
 
-        let error =
-            reclassify_confirmed_targets(&args, &changed_lockfile, dir.path(), &confirmed_targets)
-                .unwrap_err();
+        let error = reclassify_confirmed_targets(
+            &args,
+            &changed_lockfile,
+            dir.path(),
+            &fake_nu_paths(),
+            &confirmed_targets,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("changed after confirmation"));
     }
 
