@@ -387,7 +387,8 @@ pub fn plugin_name_from_executable_path(executable_path: &str) -> String {
 /// - Modules with `module_activation` are collected as `ActiveModule`.
 /// - Script/completion packages return a deferred-feature error.
 /// - Unknown package IDs fail.
-/// - Plugins/modules that are not currently active fail when listed explicitly.
+/// - Plugins that are not currently active are skipped when listed explicitly
+///   (idempotent after journal reconcile). Modules that are not active still fail.
 /// - No IDs means deactivate all currently active plugins and modules.
 fn classify_and_validate_packages(
     args: &DeactivateArgs,
@@ -457,7 +458,8 @@ fn classify_and_validate_packages(
             match entry.package_type.as_str() {
                 "plugin" => {
                     if entry.activation.is_none() {
-                        bail!("Package '{pkg_id}' is a plugin but is not currently active.");
+                        // Already inactive (common after journal reconcile): skip.
+                        continue;
                     }
                     if !entry.is_active_for(
                         &nu_paths.nu_executable_hash,
@@ -675,6 +677,32 @@ fn reconcile_plugin_deactivate_journal(
         return Ok(());
     };
 
+    // Commit Unregistered clears even when Nu identity drifted: no Nu spawn is
+    // required, and leaving activation set would keep remove/update gated.
+    let mut changed = false;
+    let mut retain_journal = false;
+    existing.entries.retain(|entry| {
+        if entry.status != PluginDeactivateStatus::Unregistered {
+            return true;
+        }
+        if let Some(pkg) = lockfile.packages.get_mut(&entry.package_id) {
+            if pkg.activation.is_some() {
+                pkg.activation = None;
+                changed = true;
+            }
+        }
+        false
+    });
+    if changed {
+        lockfile.save(root)?;
+    }
+    if existing.entries.is_empty() {
+        PendingPluginDeactivate::delete(root)?;
+        eprintln!("   Plugin deactivation reconciliation complete.");
+        return Ok(());
+    }
+    existing.save(root)?;
+
     if !existing.matches_nu_identity(
         &nu_paths.nu_executable_hash,
         &nu_paths.nu_version,
@@ -694,19 +722,11 @@ fn reconcile_plugin_deactivate_journal(
         console::style("⚠").yellow()
     );
 
-    let mut changed = false;
-    let mut retain_journal = false;
+    changed = false;
     for i in 0..existing.entries.len() {
         match existing.entries[i].status {
             PluginDeactivateStatus::Unregistered => {
-                let package_id = existing.entries[i].package_id.clone();
-                if let Some(pkg) = lockfile.packages.get_mut(&package_id) {
-                    if pkg.activation.is_some() {
-                        pkg.activation = None;
-                        changed = true;
-                        lockfile.save(root)?;
-                    }
-                }
+                // Already drained above; defensive no-op.
             }
             PluginDeactivateStatus::Prepared => {
                 let rm_identity = plugin_rm_identity(&existing.entries[i]).to_string();
@@ -743,6 +763,10 @@ fn reconcile_plugin_deactivate_journal(
         }
     }
 
+    // Drop Unregistered entries completed in this pass.
+    existing
+        .entries
+        .retain(|e| e.status != PluginDeactivateStatus::Unregistered);
     if changed {
         lockfile.save(root)?;
     }
@@ -756,7 +780,7 @@ fn reconcile_plugin_deactivate_journal(
         .iter()
         .any(|e| e.status == PluginDeactivateStatus::Failed);
 
-    if retain_journal || any_failed || any_prepared {
+    if retain_journal || any_failed || any_prepared || !existing.entries.is_empty() {
         existing.save(root)?;
         eprintln!("   Plugin deactivation journal retained (failed or still prepared entries).");
     } else {
@@ -1383,7 +1407,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_plugin_returns_error() {
+    fn inactive_plugin_is_skipped_when_explicit() {
         let dir = TempDir::new().unwrap();
         let lockfile = make_lockfile_with_modules(vec![("owner/myplugin", "plugin", false)]);
 
@@ -1393,12 +1417,10 @@ mod tests {
             verbose: false,
         };
 
-        let err = classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths())
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("not currently active"),
-            "Expected not-active error for inactive plugin, got: {err}"
-        );
+        let targets =
+            classify_and_validate_packages(&args, &lockfile, dir.path(), &fake_nu_paths()).unwrap();
+        assert!(targets.plugins.is_empty());
+        assert!(targets.modules.is_empty());
     }
 
     #[test]
@@ -1688,6 +1710,64 @@ mod tests {
                 .is_some_and(|j| j.entries[0].status == PluginDeactivateStatus::Prepared),
             "Prepared journal must remain unreplayed after drift"
         );
+    }
+
+    #[test]
+    fn unregistered_journal_clears_activation_despite_identity_mismatch() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let env = PluginTestEnv::new();
+        env.write_nu_paths();
+        env.seed_active_plugin("owner/highlight");
+
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        let entry = lockfile.packages.get("owner/highlight").unwrap();
+        let absolute_binary_path = env
+            .root()
+            .join(&entry.payload_path)
+            .join(entry.executable_path.as_ref().unwrap())
+            .to_string_lossy()
+            .into_owned();
+
+        let journal = PendingPluginDeactivate {
+            nu_executable_sha256: "stale-journal-hash".to_string(),
+            nu_version: "0.113.1".to_string(),
+            plugin_registry_path: env.registry_path.to_string_lossy().into_owned(),
+            created_at: "0".to_string(),
+            entries: vec![PendingPluginDeactivateEntry {
+                package_id: "owner/highlight".to_string(),
+                plugin_name: "highlight".to_string(),
+                absolute_binary_path,
+                status: PluginDeactivateStatus::Unregistered,
+                error: None,
+            }],
+        };
+        journal.save(env.root()).unwrap();
+
+        let called = AtomicBool::new(false);
+        let args = DeactivateArgs {
+            packages: vec!["owner/highlight".to_string()],
+            yes: true,
+            verbose: false,
+        };
+        execute_with_unregistrar(&args, env.root(), &|_nu, _identity, _cfg| {
+            called.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "Unregistered recovery must not spawn unregistrar"
+        );
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        assert!(lockfile
+            .packages
+            .get("owner/highlight")
+            .unwrap()
+            .activation
+            .is_none());
+        assert!(PendingPluginDeactivate::load(env.root()).unwrap().is_none());
     }
 
     #[test]

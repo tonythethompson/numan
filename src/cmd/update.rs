@@ -656,6 +656,10 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("owner/pkg"));
         assert!(msg.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION"));
+        assert!(
+            !msg.contains("numan remove"),
+            "update gate must not suggest remove"
+        );
     }
 
     #[test]

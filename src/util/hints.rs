@@ -171,6 +171,10 @@ mod tests {
         assert!(hint.contains("default off"));
         assert!(hint.contains("numan deactivate owner/plugin"));
         assert!(hint.contains("numan update owner/plugin"));
+        assert!(
+            !hint.contains("numan remove"),
+            "update gate must not suggest remove"
+        );
         assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1"));
         assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("default off"));
         assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("numan update"));
