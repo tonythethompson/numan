@@ -591,6 +591,13 @@ impl AcceptanceRun {
                 "failed to parse lockfile after deactivate: {error}"
             )),
         }
+        let plugin_registry_after_deactivate = sha256_file(&plugin_registry).ok();
+        if plugin_registry_after_deactivate.is_none()
+            || plugin_registry_after_deactivate == plugin_registry_after
+        {
+            errors
+                .push("isolated Nu plugin registry did not change during deactivation".to_string());
+        }
         require_clear_journals(&self.root, &mut errors);
         self.record_step(deactivate, errors)?;
 

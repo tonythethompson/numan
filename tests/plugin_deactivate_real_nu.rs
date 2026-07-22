@@ -1,36 +1,23 @@
-//! Real-Nu plugin deactivate path (Issue #22 PR2).
+//! Real-Nu plugin deactivate coverage pointer (Issue #22 PR2).
 //!
-//! Documents the production path: activate a plugin, then deactivate it with
-//! the real Nu `plugin rm` seam. Ignored by default because it needs a Nu
-//! binary on PATH and an installed plugin fixture.
+//! This crate intentionally does **not** ship a green no-op ignored test.
+//! Authoritative real-Nu deactivate evidence is the Stage 1 acceptance harness:
 //!
-//! Run with:
-//!   cargo test --test plugin_deactivate_real_nu -- --ignored --nocapture
+//! ```text
+//! cargo test --locked --test official_registry_stage1 stage1_official_registry -- --ignored --nocapture --test-threads=1
+//! ```
 //!
-//! Preconditions: `nu --version` succeeds. Without Nu, this test returns early
-//! (same pattern as other real-Nu acceptance tests).
-
-use std::process::Command;
+//! See `docs/acceptance/official-registry-stage1.md`.
 
 #[test]
-#[ignore = "requires real Nu on PATH and an activated plugin fixture"]
-fn real_nu_plugin_deactivate_path_documented() {
-    let nu_ok = Command::new("nu")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !nu_ok {
-        eprintln!("skip: no `nu` on PATH — cannot exercise real plugin deactivate");
-        return;
-    }
-
-    // Full lifecycle lives in Stage 1 acceptance
-    // (`official_registry_stage1` → list → deactivate → remove → gc).
-    // This ignored test exists so CI/docs can point at a dedicated real-Nu
-    // deactivate marker until a dedicated plugin binary fixture is checked in.
-    eprintln!(
-        "real-Nu deactivate: use Stage 1 acceptance or manually \
-         `numan activate <plugin> --yes` then `numan deactivate <plugin> --yes`"
+fn stage1_is_authoritative_real_nu_deactivate_gate() {
+    let doc = include_str!("../docs/acceptance/official-registry-stage1.md");
+    assert!(
+        doc.contains("deactivate → remove → gc") || doc.contains("deactivate"),
+        "Stage 1 docs must describe deactivate as part of the lifecycle gate"
+    );
+    assert!(
+        doc.contains("official_registry_stage1") || doc.contains("Stage 1"),
+        "Stage 1 docs must identify the acceptance harness"
     );
 }

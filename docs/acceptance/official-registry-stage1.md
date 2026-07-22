@@ -99,6 +99,6 @@ Start with `summary.md`, then inspect that step's `command.json`, streams, inven
 
 ## Remaining payloads after Stage 1
 
-Because Stage 1 ends with an activated plugin still present, the final summary may list package directories that are referenced by the current lockfile (and possibly snapshots). Those are not orphans. Full remove → gc payload accounting returns when plugin deactivation clears the activation record and Stage 1 regain remove/gc steps.
+Stage 1 ends after `deactivate` → `remove` → `gc`. The package is absent from the current lockfile, and GC removes the payload directory unless a snapshot still references it. Remaining package directories in the final summary must therefore be snapshot-referenced (or otherwise accounted for by the harness classifier), not an activated leftover from Stage 1. Orphan directories fail the run.
 
 The live test is ignored by default because it depends on production network state, an exact platform/Nu compatibility window, and activation of a real plugin. Keeping it manual prevents ordinary `cargo test` runs from silently becoming networked or host-mutating tests while retaining an explicit, reproducible release gate.
