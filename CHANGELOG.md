@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `numan completions` prints a copy-ready install command on stderr after the script (stdout stays pipe-safe)
+- winget manifests: identifier/path `tonythethompson.numan` (all-lowercase), plus `InstallationNotes` for Nu PATH / `init` / `registry sync`
 
 ## [0.1.4] - 2026-07-05
 

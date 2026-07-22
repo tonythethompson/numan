@@ -130,13 +130,13 @@ See [packaging/homebrew/README.md](packaging/homebrew/README.md).
 After the package is listed in [winget-pkgs](https://github.com/microsoft/winget-pkgs):
 
 ```powershell
-winget install tonythethompson.Numan
+winget install tonythethompson.numan
 ```
 
 Until then, install from the in-repo manifest (from a clone of this repository):
 
 ```powershell
-winget install --manifest .\packaging\winget\manifests\t\tonythethompson\Numan\0.1.4
+winget install --manifest .\packaging\winget\manifests\t\tonythethompson\numan\0.1.4
 ```
 
 See [packaging/winget/README.md](packaging/winget/README.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
@@ -433,7 +433,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 
 | Item | Tracking |
 |------|----------|
-| Community **winget** install (`winget install tonythethompson.Numan`) | 🔄 [winget-pkgs PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) |
+| Community **winget** install (`winget install tonythethompson.numan`) | 🔄 [winget-pkgs PR #400470](https://github.com/microsoft/winget-pkgs/pull/400470) |
 | Curated **official registry** packages + trust/bootstrap policy | 🔄 [#18](https://github.com/tonythethompson/numan/issues/18), [intake roadmap](docs/registry-intake-roadmap.md) stage 1 |
 | Cross-platform **fresh-install** dogfooding | 🔄 `init` → `registry sync` → `search` → `install` → `activate` → `doctor` on Linux, macOS, Windows |
 
