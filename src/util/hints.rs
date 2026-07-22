@@ -103,6 +103,14 @@ Active-plugin update remains gated until Issue #22's safety matrix is green \
     )
 }
 
+/// Doctor `fix` field for `activation.plugin_mutation_gated`.
+///
+/// Aligned with [`active_plugin_mutation_gated`] and `docs/active-plugin-gate.md` /
+/// `docs/numan-doctor.md`.
+pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
+    "Run `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+See docs/active-plugin-gate.md.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +123,8 @@ mod tests {
         assert!(hint.contains("activation record"));
         assert!(hint.contains("deactivate"));
         assert!(hint.contains("remove"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("docs/active-plugin-gate.md"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("deactivate"));
     }
 
     #[test]
