@@ -85,14 +85,21 @@ pub fn run_then(first: &str, second: &str) -> String {
     format!("Run '{first}', then '{second}'.")
 }
 
+/// `numan deactivate`
+pub const CMD_DEACTIVATE: &str = "numan deactivate";
+
+/// `numan deactivate <pkg>`
+pub fn deactivate_pkg(package_id: &str) -> String {
+    format!("numan deactivate {package_id}")
+}
+
 /// Hint when an active plugin cannot be mutated (Issue #22 gate).
 pub fn active_plugin_mutation_gated(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record. \
-Active-plugin remove/update/deactivate stay gated until Issue #22's safety matrix is green \
-(https://github.com/tonythethompson/numan/issues/22). \
-Remove the package only after plugin deactivation clears the activation record \
-(or install without activating)."
+Run `numan deactivate {package_id}`, then `numan remove {package_id}`. \
+Active-plugin update remains gated until Issue #22's safety matrix is green \
+(https://github.com/tonythethompson/numan/issues/22)."
     )
 }
 
@@ -106,6 +113,8 @@ mod tests {
         assert!(hint.contains("owner/plugin"));
         assert!(hint.contains("Issue #22"));
         assert!(hint.contains("activation record"));
+        assert!(hint.contains("deactivate"));
+        assert!(hint.contains("remove"));
     }
 
     #[test]

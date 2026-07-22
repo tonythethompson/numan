@@ -117,6 +117,7 @@ fn doctor_fix_auto_creates_layout_without_network() {
             skip_network: true,
             init_repair: Some(fake_init),
             activate_repair: None,
+            deactivate_repair: None,
             nu_setup_repair: None,
             discover_off_path: None,
         },

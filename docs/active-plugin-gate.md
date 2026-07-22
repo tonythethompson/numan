@@ -2,26 +2,25 @@
 
 ## Safety invariant
 
-While a package has a lockfile `activation` record (plugin activation), Numan must not mutate that package via remove, update, or deactivate until the Issue #22 safety matrix is green.
+While a package has a lockfile `activation` record (plugin activation), Numan must not mutate that package via remove or update until the activation record is cleared. Plugin deactivate clears the record via a journaled `plugin rm` flow. `--force` on `numan remove` does **not** bypass active plugin activation. It only bypasses active *module* activation (`module_activation`).
 
-`--force` on `numan remove` does **not** bypass active plugin activation. It only bypasses active *module* activation (`module_activation`).
-
-## Current behavior (PR1)
+## Current behavior
 
 | Operation | Active plugin | Active module |
 |---|---|---|
-| `numan remove` | Always refused (Issue #22 hint) | Refused unless `--force` |
+| `numan remove` | Refused while `activation` is set (Issue #22 hint) | Refused unless `--force` |
 | `numan update` | Refused (Issue #22 hint) | Refused (use `deactivate` first) |
-| `numan deactivate` | Deferred (plugin deactivate lands in a later PR) | Supported today |
+| `numan deactivate` | Supported: journaled unregister + clear `activation` (payload kept) | Supported today |
 
-`numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()`.
+After `numan deactivate <pkg>`, `numan remove <pkg>` succeeds without `--force` (inactive plugin).
 
-Canonical hint text lives in `util::hints::active_plugin_mutation_gated`.
+`numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()`. A pending deactivate journal surfaces as `journal.plugin_deactivate_pending` (warn); `--fix` runs deactivate reconcile.
 
-## Deferred (PR2+)
+Canonical hint text lives in `util::hints::active_plugin_mutation_gated` (points at `deactivate` then `remove`).
 
-- Plugin deactivation that clears the activation record safely
-- Re-enable Stage 1 acceptance remove/gc after deactivate exists
-- Full safety matrix from [Issue #22](https://github.com/tonythethompson/numan/issues/22)
+## Deferred (Issue #22 remainder)
+
+- Full safety matrix from [Issue #22](https://github.com/tonythethompson/numan/issues/22) (fault injection across every phase, real-Nu multi-OS coverage, active-plugin update)
+- Active-plugin update remains gated
 
 See also: [docs/acceptance/official-registry-stage1.md](acceptance/official-registry-stage1.md).

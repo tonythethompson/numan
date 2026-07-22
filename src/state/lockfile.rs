@@ -13,7 +13,7 @@ use crate::util::atomic::write_json_atomic;
 /// A plugin is "currently active" only when this record's hash, version, and
 /// registry path all match the loaded `NuPaths`. A bare boolean would become
 /// stale after `numan init --refresh` changes the Nu binary or registry target.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginActivation {
     pub plugin_registry_path: String,
     pub nu_executable_sha256: String,

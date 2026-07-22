@@ -3,10 +3,10 @@
 The Stage 1 acceptance harness is a manual, production-registry integration test for the Windows x64 Numan release path. It spawns the built `numan` executable directly and exercises this lifecycle:
 
 ```text
-init → registry sync → search → info → install → activate → doctor → list
+init → registry sync → search → info → install → activate → doctor → list → deactivate → remove → gc
 ```
 
-Stage 1 ends after `list` with the plugin still installed and activated. Active-plugin `remove` (including `--force`) is gated until Issue #22's safety matrix is green; remove/gc return to the harness after plugin deactivate exists. See [docs/active-plugin-gate.md](../active-plugin-gate.md).
+Stage 1 deactivates the plugin (clears the activation record, keeps the payload), then removes and garbage-collects. Active-plugin `remove` while activated (including `--force`) remains refused; deactivate first. See [docs/active-plugin-gate.md](../active-plugin-gate.md).
 
 The default subject is the official-registry package `fdncred/nu_plugin_file`, queried as `nu_plugin_file`. The production resolver chooses the compatible version for Windows x64 and Nu 0.113.x; the harness does not duplicate version-selection logic or hard-code a package version.
 
@@ -14,7 +14,7 @@ The default subject is the official-registry package `fdncred/nu_plugin_file`, q
 
 Stage 1 proves that a clean Numan root can consume the signed production official registry, install and activate a compatible plugin, and report healthy state through `doctor` and `list`. It also records the signing key ID, index digest, lockfile provenance, executable digest, Nu plugin-registry changes, lifecycle journals, and snapshots.
 
-The harness does not change CLI behavior, registry trust policy, unsigned-registry fallback, retry failed commands, install Nushell, test non-Windows targets, test other Nu minor versions, or call production command handlers in-process. It is not a replacement for ordinary unit and integration tests. It does not currently remove or garbage-collect the activated plugin (Issue #22 PR1 gate).
+The harness does not change CLI behavior, registry trust policy, unsigned-registry fallback, retry failed commands, install Nushell, test non-Windows targets, test other Nu minor versions, or call production command handlers in-process. It is not a replacement for ordinary unit and integration tests.
 
 ## Prerequisites
 

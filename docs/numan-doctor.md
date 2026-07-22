@@ -75,17 +75,19 @@ When `--fix` is set, doctor acquires `acquire_mutation_lock(root)` once for the 
 | **confirm** | Unless `--yes` / non-TTY | `nu.binary.found_off_path` | `numan setup nu --use-existing <path> --yes` (adds existing install to PATH) |
 | **confirm** | Unless `--yes` / non-TTY | `nu_paths.drift`, `nu_paths.vendor_drift` | `numan init --refresh` |
 | **confirm** | Unless `--yes` / non-TTY | `journal.plugin_pending`, `journal.autoload_pending`, `journal.plugin_stale`, `journal.autoload_stale`, `activation.plugin_stale`, `activation.module_stale`, `autoload.projection`, `autoload.managed_missing` | `numan activate` (empty package list — reconciles journals and re-activates stale entries; same entry point as normal activate recovery) |
+| **confirm** | Unless `--yes` / non-TTY | `journal.plugin_deactivate_pending` | `numan deactivate` (empty package list — reconciles pending-plugin-deactivate journal) |
+| **confirm** | Unless `--yes` / non-TTY | `journal.plugin_deactivate_stale` | `numan init --refresh` then `numan deactivate` |
 | **manual** | Never auto | `autoload.managed_foreign`, `payload.missing`, `journal.lifecycle_pending`, `journal.lifecycle_stale`, `registry.none` (placeholder trust root), `nu_paths.vendor_missing`, `nupm.*` | Print fix hint only |
 
 **Invariants during repair:**
 
-1. Reuse `cmd::init::execute`, `cmd::activate::execute`, `cmd::registry::sync` — no duplicated mutation logic.
+1. Reuse `cmd::init::execute`, `cmd::activate::execute`, `cmd::deactivate::execute`, `cmd::registry::sync` — no duplicated mutation logic.
 2. Install remains inert; doctor never invokes install transaction.
 3. Never write under `NUPM_HOME`.
 4. If any **manual**-tier error remains after repair, exit `1` even if some auto/confirm fixes succeeded.
 5. Report a repair summary: `Fixed N issues; M require manual action.`
 
-**Journal note:** Default mode still *reports* journals without acting. `--fix` may reconcile plugin/autoload journals **only** via the existing `activate` recovery path — not by editing journal files directly.
+**Journal note:** Default mode still *reports* journals without acting. `--fix` may reconcile plugin/autoload journals via `activate` recovery, and plugin-deactivate journals via `deactivate` recovery — not by editing journal files directly.
 
 ## Check catalog
 
@@ -116,6 +118,8 @@ Checks run in order below. Implementation should call existing validators (`NuPa
 |----|----------|-----------|--------|
 | `journal.plugin_pending` | `warn` | `state/pending-activation.json` exists | **confirm:** `activate` reconciles |
 | `journal.plugin_stale` | `error` | Journal Nu identity ≠ current `NuPaths` | **confirm:** `init --refresh` then `activate` |
+| `journal.plugin_deactivate_pending` | `warn` | `state/pending-plugin-deactivate.json` exists | **confirm:** `deactivate` reconciles |
+| `journal.plugin_deactivate_stale` | `error` | Deactivate journal Nu identity ≠ current `NuPaths` | **confirm:** `init --refresh` then `deactivate` |
 | `journal.autoload_pending` | `warn` | `state/pending-autoload.json` exists | **confirm:** `activate` reconciles |
 | `journal.autoload_stale` | `error` | Journal identity mismatch | **confirm:** `init --refresh` then `activate` |
 | `journal.lifecycle_pending` | `warn` | `state/pending-lifecycle.json` exists | **manual:** re-run or clear per op |

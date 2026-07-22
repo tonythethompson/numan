@@ -223,6 +223,7 @@ mod tests {
         let err = ensure_removable(&entry, "owner/pkg", true).unwrap_err();
         assert!(err.to_string().contains("Issue #22"));
         assert!(err.to_string().contains("activation record"));
+        assert!(err.to_string().contains("deactivate"));
     }
 
     #[test]
