@@ -78,6 +78,7 @@ When `--fix` is set, doctor acquires `acquire_mutation_lock(root)` once for the 
 | **confirm** | Unless `--yes` / non-TTY | `journal.plugin_deactivate_pending` | `numan deactivate` (empty package list — reconciles pending-plugin-deactivate journal) |
 | **confirm** | Unless `--yes` / non-TTY | `journal.plugin_deactivate_stale` | `numan init --refresh` then `numan deactivate` |
 | **manual** | Never auto | `autoload.managed_foreign`, `payload.missing`, `journal.lifecycle_pending`, `journal.lifecycle_stale`, `registry.none` (placeholder trust root), `nu_paths.vendor_missing`, `nupm.*` | Print fix hint only |
+| **none** | Never | `activation.plugin_mutation_gated` (`info`) | Informational only; see [docs/active-plugin-gate.md](active-plugin-gate.md) |
 
 **Invariants during repair:**
 
@@ -131,6 +132,7 @@ Checks run in order below. Implementation should call existing validators (`NuPa
 |----|----------|-----------|
 | `lockfile.missing` | `info` | No lockfile or empty → nothing installed |
 | `lockfile.parse` | `error` | Lockfile unreadable or invalid JSON |
+| `activation.plugin_mutation_gated` | `info` | Plugin has `activation.is_some()` (lockfile-only; reported even when `NuPaths` is missing). Remove stays gated until deactivate; update is opt-in via `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION`. **Repair:** none (info). See [docs/active-plugin-gate.md](active-plugin-gate.md). |
 | `activation.plugin_stale` | `warn` | Plugin has `activation` but `is_active_for` false for current `NuPaths` |
 | `activation.module_stale` | `warn` | Module has `module_activation` but `is_module_active_for` false |
 | `autoload.projection` | `error` | `AutoloadState::validate_against_lockfile` fails |

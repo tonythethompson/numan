@@ -24,6 +24,10 @@ NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1   # enable active update orchestration
 
 Unset or any value other than `1` / `true` / `TRUE` / `yes` keeps orchestration **disabled** (default).
 
+`numan doctor` reports an **info** finding `activation.plugin_mutation_gated` for each package with `package_type == "plugin"` and `activation.is_some()` (even when `nu_state/paths.json` is missing). A pending deactivate journal surfaces as `journal.plugin_deactivate_pending` (warn); `--fix` runs deactivate reconcile.
+
+Canonical hint text lives in `util::hints::active_plugin_mutation_gated` / `ACTIVE_PLUGIN_MUTATION_GATED_FIX` (and `active_plugin_update_disabled` for the update opt-in path).
+
 ### Lifecycle journal (active update)
 
 `state/pending-lifecycle.json` with `op: update` reuses existing stages:

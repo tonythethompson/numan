@@ -191,6 +191,10 @@ pub fn run_checks_with_options(
     let nu_paths = check_nu_paths(root, options, &mut findings);
     check_journals(root, nu_paths.as_ref(), &mut findings);
     let lockfile = check_lockfile(root, nu_paths.as_ref(), &mut findings);
+    if let Some(lf) = lockfile.as_ref() {
+        // Lockfile-only: explain remove/update refusals even when NuPaths is missing.
+        check_plugin_mutation_gates(lf, &mut findings);
+    }
     if let (Some(paths), Some(lf)) = (nu_paths.as_ref(), lockfile.as_ref()) {
         check_activation(root, paths, lf, &mut findings);
     }
@@ -612,19 +616,7 @@ fn check_lockfile(
     Some(lockfile)
 }
 
-fn check_activation(
-    root: &Path,
-    paths: &NuPaths,
-    lockfile: &Lockfile,
-    findings: &mut Vec<Finding>,
-) {
-    let vendor_dir = paths.vendor_autoload_dir.as_deref().unwrap_or("");
-    let managed_path = if vendor_dir.is_empty() {
-        String::new()
-    } else {
-        format!("{vendor_dir}/numan.nu")
-    };
-
+fn check_plugin_mutation_gates(lockfile: &Lockfile, findings: &mut Vec<Finding>) {
     for (id, entry) in &lockfile.packages {
         if entry.package_type == "plugin" && entry.activation.is_some() {
             findings.push(finding(
@@ -641,6 +633,23 @@ fn check_activation(
                 RepairTier::None,
             ));
         }
+    }
+}
+
+fn check_activation(
+    root: &Path,
+    paths: &NuPaths,
+    lockfile: &Lockfile,
+    findings: &mut Vec<Finding>,
+) {
+    let vendor_dir = paths.vendor_autoload_dir.as_deref().unwrap_or("");
+    let managed_path = if vendor_dir.is_empty() {
+        String::new()
+    } else {
+        format!("{vendor_dir}/numan.nu")
+    };
+
+    for (id, entry) in &lockfile.packages {
         if entry.package_type == "plugin"
             && entry.activation.is_some()
             && !entry.is_active_for(
@@ -1717,5 +1726,75 @@ mod tests {
             .findings
             .iter()
             .all(|f| f.id != "activation.plugin_stale"));
+    }
+
+    #[test]
+    fn doctor_reports_plugin_mutation_gate_without_nu_paths() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("state")).unwrap();
+        std::fs::create_dir_all(root.join("packages/plugins/owner/plugin/1.0.0-abc")).unwrap();
+
+        let mut lockfile = Lockfile::empty();
+        lockfile.packages.insert(
+            "owner/plugin".to_string(),
+            LockfileEntry {
+                version: "1.0.0".to_string(),
+                package_type: "plugin".to_string(),
+                source: "binary".to_string(),
+                target: None,
+                artifact_url: None,
+                artifact_sha256: None,
+                executable_path: Some("nu_plugin_test".to_string()),
+                archive_root: None,
+                include: None,
+                entry: None,
+                installed_at: "now".to_string(),
+                nu_version_at_install: None,
+                activation: Some(PluginActivation {
+                    plugin_registry_path: "/missing/plugins.msgpackz".to_string(),
+                    nu_executable_sha256: "deadbeef".to_string(),
+                    nu_version: "0.113.1".to_string(),
+                    activated_at: "now".to_string(),
+                }),
+                registry_url: None,
+                registry_revision: None,
+                index_sha256: None,
+                signing_key_fingerprint: None,
+                git_url: None,
+                git_rev: None,
+                cargo_name: None,
+                cargo_lock_sha256: None,
+                built_sha256: None,
+                payload_path: "packages/plugins/owner/plugin/1.0.0-abc".to_string(),
+                revision_id: None,
+                payload_sha256: None,
+                executable_sha256: None,
+                selection_reason: None,
+                origin: None,
+                module_activation: None,
+                module_import_mode: None,
+                locked_dependencies: BTreeMap::new(),
+            },
+        );
+        lockfile.save(root).unwrap();
+
+        let args = DoctorArgs {
+            fix: false,
+            yes: false,
+            json: false,
+            nupm_home: None,
+        };
+        let report = run_checks(&args, root).unwrap();
+        assert!(
+            report.findings.iter().any(|f| {
+                f.id == "activation.plugin_mutation_gated" && f.severity == Severity::Info
+            }),
+            "gate finding must not require NuPaths"
+        );
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.id == "nu_paths.missing" || f.id == "nu.binary.missing_on_path"));
     }
 }
