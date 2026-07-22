@@ -937,6 +937,42 @@ fn apply_repairs(
         }
     }
 
+    // Config write does not reacquire the mutation lock; keep it under doctor's
+    // lock. Nested mutators below (setup / init / registry sync / refresh /
+    // activate / deactivate) do acquire again, so release first.
+    if findings
+        .iter()
+        .any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto)
+    {
+        let id = "registry.none".to_string();
+        match Config::load(root) {
+            Ok(mut config) => match ensure_official_registry_config(root, &mut config) {
+                Ok(true) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Applied,
+                    reason: None,
+                }),
+                Ok(false) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Skipped,
+                    reason: Some("official registry already configured".to_string()),
+                }),
+                Err(e) => records.push(RepairRecord {
+                    id,
+                    status: RepairStatus::Failed,
+                    reason: Some(e.to_string()),
+                }),
+            },
+            Err(e) => records.push(RepairRecord {
+                id,
+                status: RepairStatus::Failed,
+                reason: Some(e.to_string()),
+            }),
+        }
+    }
+
+    drop(lock.take());
+
     if findings
         .iter()
         .any(|f| f.id == "nu.binary.found_off_path" && f.severity == Severity::Warn)
@@ -1066,42 +1102,6 @@ fn apply_repairs(
             reason: Some("skip_network".to_string()),
         });
     }
-
-    if findings
-        .iter()
-        .any(|f| f.id == "registry.none" && f.repair == RepairTier::Auto)
-    {
-        let id = "registry.none".to_string();
-        match Config::load(root) {
-            Ok(mut config) => match ensure_official_registry_config(root, &mut config) {
-                Ok(true) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Applied,
-                    reason: None,
-                }),
-                Ok(false) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Skipped,
-                    reason: Some("official registry already configured".to_string()),
-                }),
-                Err(e) => records.push(RepairRecord {
-                    id,
-                    status: RepairStatus::Failed,
-                    reason: Some(e.to_string()),
-                }),
-            },
-            Err(e) => records.push(RepairRecord {
-                id,
-                status: RepairStatus::Failed,
-                reason: Some(e.to_string()),
-            }),
-        }
-    }
-
-    // Nested commands (init / activate / deactivate) acquire their own
-    // mutation lock. Release doctor's lock first so repair does not deadlock
-    // on the non-reentrant advisory lock.
-    drop(lock.take());
 
     let needs_refresh = findings.iter().any(|f| {
         matches!(f.id.as_str(), "nu_paths.drift" | "nu_paths.vendor_drift")

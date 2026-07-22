@@ -24,7 +24,11 @@ use crate::util::{format_timestamp, fs_safety::acquire_mutation_lock};
 
 use super::print_autoload_recovery;
 
-/// Nu program string for plugin unregister. Paths/name only via env vars.
+/// Nu program string for plugin unregister. Identity/config only via env vars.
+///
+/// `NUMAN_PLUGIN_NAME` carries the recorded absolute plugin binary path (Nu
+/// accepts name or filename for `plugin rm`). Preferring the path scopes removal
+/// to Numan's installed entry when another binary shares the derived name.
 ///
 /// `--force` makes recovery idempotent: if Nu already removed the plugin but
 /// the journal is still `Prepared`, retry succeeds instead of marking Failed.
@@ -80,8 +84,10 @@ pub fn execute(args: &DeactivateArgs, root: &Path) -> Result<()> {
 
 /// Testability entry point — accepts an injectable plugin unregistrar.
 ///
-/// The unregistrar receives `(nu_executable, plugin_name, plugin_config_path)`
-/// and returns `Ok(())` on success. Production code calls `run_plugin_rm`.
+/// The unregistrar receives `(nu_executable, plugin_rm_identity, plugin_config_path)`
+/// where `plugin_rm_identity` is the absolute plugin binary path (preferred) or
+/// the derived Nu plugin name as a fallback for older journals.
+/// Returns `Ok(())` on success. Production code calls `run_plugin_rm`.
 pub fn execute_with_unregistrar(
     args: &DeactivateArgs,
     root: &Path,
@@ -114,6 +120,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     //    early error or no-op return.
     let planning_lock = acquire_mutation_lock(root)?;
     let mut lockfile = Lockfile::load(root)?;
+    prepare_deactivate_recovery(&nu_paths, root)?;
     reconcile_plugin_deactivate_journal(root, &nu_paths, &mut lockfile, unregistrar)?;
     print_autoload_recovery(reconcile_pending_autoload(root, &nu_paths, &mut lockfile)?);
     let lockfile = Lockfile::load(root)?;
@@ -171,7 +178,8 @@ pub fn execute_with_candidate_runner_and_unregistrar(
     // Reload lockfile under the lock
     let mut lockfile = Lockfile::load(root)?;
 
-    // 7. Reconcile interrupted journals under the lock.
+    // 7. Reconcile interrupted journals under the lock (drift + snapshot first).
+    prepare_deactivate_recovery(&nu_paths, root)?;
     reconcile_plugin_deactivate_journal(root, &nu_paths, &mut lockfile, unregistrar)?;
     print_autoload_recovery(reconcile_pending_autoload(root, &nu_paths, &mut lockfile)?);
 
@@ -563,9 +571,10 @@ fn run_plugin_deactivate_lane(
             );
         }
 
+        let rm_identity = target.absolute_binary_path.to_string_lossy();
         match unregistrar(
             &nu_paths.nu_executable,
-            &target.plugin_name,
+            &rm_identity,
             &nu_paths.plugin_registry_path,
         ) {
             Ok(()) => {
@@ -606,6 +615,46 @@ fn run_plugin_deactivate_lane(
     }
 
     Ok(any_failed)
+}
+
+/// Drift-check and snapshot before journal replay can mutate state or spawn Nu.
+///
+/// `Prepared` plugin-deactivate entries invoke the unregistrar, so Nu binary
+/// drift must be rejected first. Any pending plugin/autoload journal can write
+/// the lockfile, so take a pre-mutation snapshot when either journal exists.
+fn prepare_deactivate_recovery(nu_paths: &NuPaths, root: &Path) -> Result<()> {
+    let plugin_journal = PendingPluginDeactivate::load(root)?;
+    let has_autoload_journal = PendingAutoload::load(root)?.is_some();
+
+    if plugin_journal.as_ref().is_some_and(|journal| {
+        journal
+            .entries
+            .iter()
+            .any(|entry| entry.status == PluginDeactivateStatus::Prepared)
+    }) {
+        nu_paths.validate_drift()?;
+    }
+
+    if plugin_journal.is_some() || has_autoload_journal {
+        let _snapshot = create_snapshot(
+            root,
+            SnapshotReason::PreMutation,
+            SnapshotTrigger::Deactivate,
+            None,
+            None,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Identity passed to `plugin rm`: prefer the recorded absolute binary path.
+fn plugin_rm_identity(entry: &PendingPluginDeactivateEntry) -> &str {
+    if entry.absolute_binary_path.is_empty() {
+        &entry.plugin_name
+    } else {
+        &entry.absolute_binary_path
+    }
 }
 
 /// Reconcile an interrupted plugin-deactivate journal.
@@ -658,11 +707,11 @@ fn reconcile_plugin_deactivate_journal(
                 }
             }
             PluginDeactivateStatus::Prepared => {
-                let plugin_name = existing.entries[i].plugin_name.clone();
+                let rm_identity = plugin_rm_identity(&existing.entries[i]).to_string();
                 let package_id = existing.entries[i].package_id.clone();
                 match unregistrar(
                     &nu_paths.nu_executable,
-                    &plugin_name,
+                    &rm_identity,
                     &nu_paths.plugin_registry_path,
                 ) {
                     Ok(()) => {
@@ -716,15 +765,15 @@ fn reconcile_plugin_deactivate_journal(
     Ok(())
 }
 
-/// Invoke Nu with `plugin rm` — name and config via environment variables only.
+/// Invoke Nu with `plugin rm` — identity and config via environment variables only.
 pub(crate) fn run_plugin_rm(
     nu_executable: &str,
-    plugin_name: &str,
+    plugin_rm_identity: &str,
     plugin_config: &str,
 ) -> Result<()> {
     let output = std::process::Command::new(nu_executable)
         .args(["-c", RM_PLUGIN])
-        .env("NUMAN_PLUGIN_NAME", plugin_name)
+        .env("NUMAN_PLUGIN_NAME", plugin_rm_identity)
         .env("NUMAN_PLUGIN_CONFIG", plugin_config)
         .output()
         .with_context(|| format!("Failed to invoke Nu at '{nu_executable}'"))?;
@@ -1522,8 +1571,12 @@ mod tests {
             yes: true,
             verbose: false,
         };
-        execute_with_unregistrar(&args, env.root(), &|_nu, name, _cfg| {
-            assert_eq!(name, "highlight");
+        execute_with_unregistrar(&args, env.root(), &|_nu, identity, _cfg| {
+            let normalized = identity.replace('\\', "/");
+            assert!(
+                normalized.ends_with("nu_plugin_highlight"),
+                "expected absolute plugin path, got {identity}"
+            );
             Ok(())
         })
         .unwrap();
@@ -1532,6 +1585,69 @@ mod tests {
         let entry = lockfile.packages.get("owner/highlight").unwrap();
         assert!(entry.activation.is_none());
         assert!(PendingPluginDeactivate::load(env.root()).unwrap().is_none());
+    }
+
+    #[test]
+    fn prepared_journal_recovery_skips_unregistrar_on_nu_drift() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let env = PluginTestEnv::new();
+        env.write_nu_paths();
+        env.seed_active_plugin("owner/highlight");
+
+        let lockfile = Lockfile::load(env.root()).unwrap();
+        let entry = lockfile.packages.get("owner/highlight").unwrap();
+        let absolute_binary_path = env
+            .root()
+            .join(&entry.payload_path)
+            .join(entry.executable_path.as_ref().unwrap())
+            .to_string_lossy()
+            .into_owned();
+
+        let journal = PendingPluginDeactivate {
+            nu_executable_sha256: env.nu_hash.clone(),
+            nu_version: "0.113.1".to_string(),
+            plugin_registry_path: env.registry_path.to_string_lossy().into_owned(),
+            created_at: "0".to_string(),
+            entries: vec![PendingPluginDeactivateEntry {
+                package_id: "owner/highlight".to_string(),
+                plugin_name: "highlight".to_string(),
+                absolute_binary_path,
+                status: PluginDeactivateStatus::Prepared,
+                error: None,
+            }],
+        };
+        journal.save(env.root()).unwrap();
+
+        // Swap the cached Nu binary after the journal was written.
+        std::fs::write(&env.nu_exe, b"swapped nu binary contents").unwrap();
+
+        let called = AtomicBool::new(false);
+        let args = DeactivateArgs {
+            packages: vec![],
+            yes: true,
+            verbose: false,
+        };
+        let err = execute_with_unregistrar(&args, env.root(), &|_nu, _identity, _cfg| {
+            called.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("hash mismatch") || err.to_string().contains("changed since"),
+            "expected drift error, got: {err}"
+        );
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "unregistrar must not run when Nu binary drifted"
+        );
+        assert!(
+            PendingPluginDeactivate::load(env.root())
+                .unwrap()
+                .is_some_and(|j| j.entries[0].status == PluginDeactivateStatus::Prepared),
+            "Prepared journal must remain unreplayed after drift"
+        );
     }
 
     #[test]
