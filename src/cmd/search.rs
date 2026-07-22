@@ -53,10 +53,7 @@ pub fn execute(args: &SearchArgs, root: &Path) -> Result<()> {
         shown += 1;
 
         // Find newest version by semver (for display and classification)
-        let newest_version = pkg
-            .versions
-            .iter()
-            .max_by(|a, b| a.version.cmp(&b.version));
+        let newest_version = pkg.versions.iter().max_by(|a, b| a.version.cmp(&b.version));
 
         let version_label = match resolver.as_ref() {
             Some(r) if compatible => r
