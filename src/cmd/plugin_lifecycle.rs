@@ -37,7 +37,10 @@ pub fn deactivate_one_plugin(
         .with_context(|| format!("Package '{pkg_id}' is not installed"))?;
 
     if entry.package_type != "plugin" {
-        bail!("Package '{pkg_id}' is not a plugin (type: {})", entry.package_type);
+        bail!(
+            "Package '{pkg_id}' is not a plugin (type: {})",
+            entry.package_type
+        );
     }
 
     if entry.activation.is_none() {
@@ -66,6 +69,31 @@ pub fn deactivate_one_plugin(
         }],
     };
     journal.save(root)?;
+
+    // Lockfile-grounded ownership preflight (no msgpackz parse available).
+    if !entry.is_active_for(
+        &nu_paths.nu_executable_hash,
+        &nu_paths.nu_version,
+        &nu_paths.plugin_registry_path,
+    ) {
+        let err = anyhow::anyhow!(
+            "Plugin '{pkg_id}' activation is stale or mismatched for current Nu identity"
+        );
+        journal.entries[0].status = PluginDeactivateStatus::Failed;
+        journal.entries[0].error = Some(err.to_string());
+        journal.save(root)?;
+        return Err(err);
+    }
+    if !absolute_binary_path.is_file() {
+        let err = anyhow::anyhow!(
+            "Plugin '{pkg_id}' binary is missing at {}",
+            absolute_binary_path.display()
+        );
+        journal.entries[0].status = PluginDeactivateStatus::Failed;
+        journal.entries[0].error = Some(err.to_string());
+        journal.save(root)?;
+        return Err(err);
+    }
 
     match unregistrar(
         &nu_paths.nu_executable,
@@ -111,7 +139,10 @@ pub fn activate_one_plugin(
         .with_context(|| format!("Package '{pkg_id}' is not installed"))?;
 
     if entry.package_type != "plugin" {
-        bail!("Package '{pkg_id}' is not a plugin (type: {})", entry.package_type);
+        bail!(
+            "Package '{pkg_id}' is not a plugin (type: {})",
+            entry.package_type
+        );
     }
 
     if entry.is_active_for(

@@ -25,8 +25,7 @@ use crate::util::{format_timestamp, fs_safety::acquire_mutation_lock};
 use super::print_autoload_recovery;
 
 /// Nu program string for plugin unregister. Paths/name only via env vars.
-const RM_PLUGIN: &str =
-    "plugin rm --plugin-config $env.NUMAN_PLUGIN_CONFIG $env.NUMAN_PLUGIN_NAME";
+const RM_PLUGIN: &str = "plugin rm --plugin-config $env.NUMAN_PLUGIN_CONFIG $env.NUMAN_PLUGIN_NAME";
 
 #[derive(Args, Debug)]
 pub struct DeactivateArgs {
@@ -136,8 +135,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
             .values()
             .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
             .count();
-        let is_full_deactivation =
-            targets_requested.modules.len() == total_with_any_activation;
+        let is_full_deactivation = targets_requested.modules.len() == total_with_any_activation;
         if !is_full_deactivation {
             nu_paths.validate_drift()?;
         }
@@ -193,8 +191,7 @@ pub fn execute_with_candidate_runner_and_unregistrar(
             .values()
             .filter(|pkg| pkg.package_type == "module" && pkg.module_activation.is_some())
             .count();
-        let is_full_deactivation =
-            targets_requested.modules.len() == total_with_any_activation;
+        let is_full_deactivation = targets_requested.modules.len() == total_with_any_activation;
         if !is_full_deactivation {
             nu_paths.validate_drift()?;
         }
@@ -369,9 +366,7 @@ pub fn plugin_name_from_executable_path(executable_path: &str) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or(executable_path);
     let stem = basename.trim_end_matches(".exe");
-    stem.strip_prefix("nu_plugin_")
-        .unwrap_or(stem)
-        .to_string()
+    stem.strip_prefix("nu_plugin_").unwrap_or(stem).to_string()
 }
 
 /// Classify and validate explicit or implicit deactivation targets.
@@ -482,9 +477,7 @@ fn active_plugin_from_entry(
         .with_context(|| format!("{pkg_id}: missing executable_path in lockfile"))?
         .to_string();
     let plugin_name = plugin_name_from_executable_path(&executable_path);
-    let absolute_binary_path = root
-        .join(&entry.payload_path)
-        .join(&executable_path);
+    let absolute_binary_path = root.join(&entry.payload_path).join(&executable_path);
     Ok(ActivePlugin {
         package_id: pkg_id.to_string(),
         executable_path,
@@ -591,10 +584,12 @@ fn run_plugin_deactivate_lane(
         // Leave journal for doctor / next deactivate reconcile of Unregistered rows.
         // Delete only if all entries reached a terminal state and Unregistered
         // activations are already cleared — still keep Failed for visibility.
-        let all_terminal = journal
-            .entries
-            .iter()
-            .all(|e| matches!(e.status, PluginDeactivateStatus::Unregistered | PluginDeactivateStatus::Failed));
+        let all_terminal = journal.entries.iter().all(|e| {
+            matches!(
+                e.status,
+                PluginDeactivateStatus::Unregistered | PluginDeactivateStatus::Failed
+            )
+        });
         if all_terminal {
             // Keep Failed evidence until doctor/retry; drop only if everything Unregistered.
             let any_failed_status = journal
@@ -675,10 +670,7 @@ fn reconcile_plugin_deactivate_journal(
                         entry.status = PluginDeactivateStatus::Failed;
                         entry.error = Some(e.to_string());
                         retain_journal = true;
-                        eprintln!(
-                            "   Retry unregister for '{}' failed: {e}",
-                            entry.package_id
-                        );
+                        eprintln!("   Retry unregister for '{}' failed: {e}", entry.package_id);
                     }
                 }
             }
@@ -703,9 +695,7 @@ fn reconcile_plugin_deactivate_journal(
 
     if retain_journal || any_failed || any_prepared {
         existing.save(root)?;
-        eprintln!(
-            "   Plugin deactivation journal retained (failed or still prepared entries)."
-        );
+        eprintln!("   Plugin deactivation journal retained (failed or still prepared entries).");
     } else {
         PendingPluginDeactivate::delete(root)?;
         eprintln!("   Plugin deactivation reconciliation complete.");
@@ -1252,7 +1242,10 @@ mod tests {
             plugin_name_from_executable_path(r"bin\nu_plugin_query.exe"),
             "query"
         );
-        assert_eq!(plugin_name_from_executable_path("custom_name"), "custom_name");
+        assert_eq!(
+            plugin_name_from_executable_path("custom_name"),
+            "custom_name"
+        );
     }
 
     #[test]

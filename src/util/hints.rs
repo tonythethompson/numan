@@ -107,13 +107,12 @@ Active-plugin remove stays gated (Issue #22); \
     )
 }
 
-/// Hint when active-plugin update orchestration is disabled via env kill switch.
+/// Hint when active-plugin update orchestration is disabled (default off / opt-in).
 pub fn active_plugin_update_disabled(package_id: &str) -> String {
     format!(
         "Package '{package_id}' has a plugin activation record and active-plugin \
-update orchestration is disabled \
-(NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=0). \
-Unset that env var (or set it to a non-disabling value) to allow \
+update orchestration is disabled (default off). \
+Set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable \
 deactivate→update→activate, or run `numan deactivate {package_id}` first \
 and update while inactive (https://github.com/tonythethompson/numan/issues/22)."
     )

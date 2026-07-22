@@ -52,7 +52,7 @@ src/
     snapshot.rs        — `numan snapshot list|inspect|delete|rollback` (Phase 5.3)
     deactivate.rs      — Plugin + module deactivation: journaled plugin unregister (`execute_with_unregistrar`); module full/partial (Phase 4 / Issue #22 PR2)
     plugin_lifecycle.rs — Shared `deactivate_one_plugin` / `activate_one_plugin` for lock-holding callers (Issue #22 PR3 update orchestration)
-    update.rs          — `numan update [--check] [pkg]`: upgrades; active plugins orchestrate deactivate→upgrade→activate when mutation enabled (Phase 5 / Issue #22 PR3)
+    update.rs          — `numan update [--check] [pkg]`: upgrades; active plugins orchestrate deactivate→upgrade→activate when mutation opt-in enabled (Phase 5 / Issue #22 PR3)
     remove.rs          — `numan remove [--force] <pkg>`: remove from lockfile + delete payload (Phase 5); `--force` bypasses module activation only (active plugins always gated until deactivate, Issue #22)
     gc.rs              — `numan gc [--dry-run]`: delete orphaned payload directories (Phase 5)
     nupm.rs            — `numan nupm status|inspect|import|diff`: nupm discovery + import + drift (Phase 6.1–6.3)
@@ -67,7 +67,7 @@ src/
     lockfile.rs        — Lockfile v2: PluginActivation, ModuleActivation, revision_id, payload_sha256, compute_revision_id()
     journal.rs         — Plugin pending-activation journal for crash recovery
     plugin_deactivate_journal.rs — Plugin pending-deactivate journal (`pending-plugin-deactivate.json`) for crash recovery (Issue #22 PR2)
-    active_plugin_mutation.rs — Kill switch `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION` (default on) for active update orchestration (Issue #22 PR3)
+    active_plugin_mutation.rs — Opt-in enable `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1` (default off) for active update orchestration (Issue #22 PR3)
     autoload_journal.rs — Module autoload journal (PendingAutoload, Prepared→Replaced stages) for crash recovery (Phase 4)
     autoload_recovery.rs — Command-independent PendingAutoload reconciliation into lockfile + derived autoload state
     autoload_state.rs  — Derived autoload-state projection (NOT authoritative; lockfile is ground truth) (Phase 4)
@@ -120,7 +120,7 @@ tests/
 - **Immutability**: `packages/<type>/<scoped-name>/<version-hash>/` paths, never overwrite
 - **Activate testability**: `execute_with_registrar(args, root, registrar)` for plugins; `execute_with_candidate_runner(args, root, registrar, runner)` for modules — inject fakes in tests, never spawn a real Nu binary in unit tests
 - **Deactivate testability**: `execute_with_unregistrar(args, root, unregistrar)` for plugins; `execute_with_candidate_runner_and_unregistrar` when both lanes need fakes — Nu program string is `RM_PLUGIN` with name/config via env only
-- **Active-plugin update testability**: `update::execute_with_hooks` + `plugin_lifecycle::{deactivate_one_plugin,activate_one_plugin}`; kill switch `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION` (default on)
+- **Active-plugin update testability**: `update::execute_with_hooks` + `plugin_lifecycle::{deactivate_one_plugin,activate_one_plugin}`; opt-in `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1` (default off)
 - **Module autoload testability**: `FakeCandidateRunner::success()` / `::failure(msg)` from `nu/autoload.rs` — use as test seam for candidate validation without real Nu
 - **Module autoload identity**: Nu executable hash + Nu version + vendor autoload dir + managed file path — all four must match for a module to be considered active
 - **Autoload state is NOT authoritative**: `autoload-state.json` is a fast-check projection; the lockfile `module_activation` records are ground truth
@@ -161,8 +161,8 @@ Automated and human PR reviewers should follow [`.github/instructions/review.ins
 - [x] Phase 2: Install transaction (download, verify, extract, lockfile write)
 - [x] Phase 3: Activate command (plugin-only; `plugin add` via env-vars; journal recovery; drift detection)
 - [x] Phase 4: Module autoload (render_use_statement, candidate validation, managed-file replacement, deactivation, journal recovery, mutation lock)
-- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md)); active-plugin mutation gate PR1 + journaled plugin deactivate PR2 + update orchestration PR3 ([docs/active-plugin-gate.md](docs/active-plugin-gate.md), Issue #22)
-- [ ] Phase 5 (deferred): Source builds (5.2) only; plugin lifecycle gate (5.5 / Issue #22) shipped — see [docs/active-plugin-gate.md](docs/active-plugin-gate.md)
+- [x] Phase 5 (partial): Lockfile v2; `numan update/remove/gc`; pending-lifecycle journal; activation snapshots + rollback CLI ([docs/snapshots-and-rollback.md](docs/snapshots-and-rollback.md)); active-plugin gate PR1–PR3 land with update orchestration **opt-in** ([docs/active-plugin-gate.md](docs/active-plugin-gate.md)); full real-Nu evidence matrix still open on Issue #22
+- [ ] Phase 5 (deferred): Source builds (5.2); plugin lifecycle gate (5.5 / Issue #22) default-on only after evidence matrix green — see [docs/active-plugin-gate.md](docs/active-plugin-gate.md)
 - [x] Phase 6.0: nupm compatibility audit + fixture corpus (`docs/nupm-compatibility.md`)
 - [x] Phase 6.1: read-only `numan nupm status|inspect` (no import, no nupm mutation, no Nu)
 - [x] Phase 6.2: one-way `numan nupm import` (staging, provenance, lifecycle journal; no activation)
@@ -222,7 +222,7 @@ Standard build/test/lint/run commands live in "Build & Test" above and in the RE
 - Near-term adoption bottleneck is thin catalog depth; release handoff is numan-plugins → numan-registry → numan client.
 - `numan registry sync` only refreshes the local catalog; it does not install packages (`list` stays empty until `install`).
 - Supported install archives include `.zip`, `.tar.gz`/`.tgz`, `.tar.xz`/`.txz`, and plain `.tar`.
-- Active-plugin **remove** stays gated while `activation` is set; run `numan deactivate <pkg>` then `numan remove <pkg>`. `remove --force` does not bypass plugin activation (module only). Active **update** orchestrates deactivate→upgrade→activate when enabled (default; kill switch `NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=0`). See [docs/active-plugin-gate.md](docs/active-plugin-gate.md).
+- Active-plugin **remove** stays gated while `activation` is set; run `numan deactivate <pkg>` then `numan remove <pkg>`. `remove --force` does not bypass plugin activation (module only). Active **update** orchestrates deactivate→upgrade→activate when opt-in enabled (`NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1`; default off). See [docs/active-plugin-gate.md](docs/active-plugin-gate.md).
 - Prefers streamlining Nu-compat onboarding as honest search/install UX, a one-shot starter, and an offer-based managed Nu pin (never silent auto-switch of Nu).
 - Prefers the command name `numan try` for the prove-it-works starter (not `setup demo` / `setup starter`).
 - Product north star for Numan: make the Nushell package ecosystem more inviting for less experienced users.

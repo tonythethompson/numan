@@ -633,14 +633,14 @@ fn check_activation(
                 format!(
                     "Plugin '{id}' has an activation record (Issue #22). Deactivate is available; \
                      active remove stays gated (deactivate first). Active update is \
-                     permitted when NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION is enabled \
-                     (default on): deactivate→upgrade→activate \
+                     opt-in via NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 \
+                     (default off): deactivate→upgrade→activate \
                      (https://github.com/tonythethompson/numan/issues/22)."
                 ),
                 Some(
                     "Remove: `numan deactivate <pkg>`, then `numan remove <pkg>`. \
-                     Update: `numan update <pkg>` (or deactivate first). \
-                     Kill switch: NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=0. \
+                     Update: set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 then \
+                     `numan update <pkg>` (or deactivate first). \
                      See docs/active-plugin-gate.md.",
                 ),
                 RepairTier::None,

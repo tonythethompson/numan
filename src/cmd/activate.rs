@@ -660,11 +660,9 @@ fn execute_list(lockfile: &Lockfile, nu_paths: &NuPaths) -> Result<()> {
             let update_note = if crate::state::active_plugin_mutation::is_enabled() {
                 "update: permitted (deactivate→upgrade→activate)"
             } else {
-                "update: gated (set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION or deactivate first)"
+                "update: gated (set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 to enable, or deactivate first)"
             };
-            println!(
-                "  └─ active plugin: remove gated (deactivate first); {update_note}"
-            );
+            println!("  └─ active plugin: remove gated (deactivate first); {update_note}");
         }
     }
     println!();

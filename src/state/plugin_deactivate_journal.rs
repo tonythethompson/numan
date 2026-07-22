@@ -103,8 +103,7 @@ mod tests {
                 package_id: "owner/plugin".to_string(),
                 plugin_name: "highlight".to_string(),
                 absolute_binary_path:
-                    "/numan/packages/plugins/owner/plugin/1.0.0-abc/nu_plugin_highlight"
-                        .to_string(),
+                    "/numan/packages/plugins/owner/plugin/1.0.0-abc/nu_plugin_highlight".to_string(),
                 status: PluginDeactivateStatus::Prepared,
                 error: None,
             }],
