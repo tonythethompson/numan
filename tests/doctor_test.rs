@@ -21,6 +21,7 @@ static TEST_OFF_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 static TEST_NU_SETUP_CALLED: Mutex<bool> = Mutex::new(false);
 static TEST_DEACTIVATE_REPAIR_CALLED: Mutex<bool> = Mutex::new(false);
 static TEST_DEACTIVATE_REPAIR_SHOULD_FAIL: Mutex<bool> = Mutex::new(false);
+static TEST_DEACTIVATE_REPAIR_GUARD: Mutex<()> = Mutex::new(());
 static TEST_PATH_GUARD: Mutex<()> = Mutex::new(());
 
 fn discover_off_path_test() -> Option<PathBuf> {
@@ -319,6 +320,7 @@ fn write_plugin_deactivate_journal(root: &Path, paths: &NuPaths) {
 
 #[test]
 fn doctor_fix_reconciles_pending_plugin_deactivate_journal() {
+    let _guard = TEST_DEACTIVATE_REPAIR_GUARD.lock().unwrap();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     fake_init(&InitArgs { refresh: false }, root).unwrap();
@@ -353,6 +355,7 @@ fn doctor_fix_reconciles_pending_plugin_deactivate_journal() {
 
 #[test]
 fn doctor_fix_stale_plugin_deactivate_runs_refresh_then_deactivate() {
+    let _guard = TEST_DEACTIVATE_REPAIR_GUARD.lock().unwrap();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     fake_init(&InitArgs { refresh: false }, root).unwrap();
@@ -389,6 +392,7 @@ fn doctor_fix_stale_plugin_deactivate_runs_refresh_then_deactivate() {
 
 #[test]
 fn doctor_fix_reports_deactivate_repair_failure() {
+    let _guard = TEST_DEACTIVATE_REPAIR_GUARD.lock().unwrap();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     fake_init(&InitArgs { refresh: false }, root).unwrap();
