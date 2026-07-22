@@ -571,7 +571,8 @@ impl AcceptanceRun {
                 Some(_) => errors.push(
                     "activated package lost its plugin activation record after list".to_string(),
                 ),
-                None => errors.push("activated package disappeared from lockfile after list".to_string()),
+                None => errors
+                    .push("activated package disappeared from lockfile after list".to_string()),
             },
             Err(error) => errors.push(format!("failed to parse lockfile after list: {error}")),
         }

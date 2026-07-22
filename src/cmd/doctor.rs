@@ -25,8 +25,8 @@ use crate::state::lockfile::Lockfile;
 use crate::state::nupm_import::NupmImportsFile;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
 use crate::util::hints::{
-    self, registry_none_fix, setup_nu_use_existing, CMD_ACTIVATE, CMD_INIT, CMD_INIT_REFRESH,
-    CMD_REGISTRY_SYNC, CMD_SETUP_NU,
+    self, registry_none_fix, setup_nu_use_existing, ACTIVE_PLUGIN_MUTATION_GATED_FIX, CMD_ACTIVATE,
+    CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC, CMD_SETUP_NU,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -597,10 +597,7 @@ fn check_activation(
                      stay gated pending Issue #22 \
                      (https://github.com/tonythethompson/numan/issues/22)"
                 ),
-                Some(
-                    "Remove only after plugin deactivation clears the activation record \
-                     (or install without activating). See docs/active-plugin-gate.md.",
-                ),
+                Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX),
                 RepairTier::None,
             ));
         }
@@ -1625,6 +1622,7 @@ mod tests {
         assert_eq!(gated.severity, Severity::Info);
         assert_eq!(gated.repair, RepairTier::None);
         assert!(gated.message.contains("Issue #22"));
+        assert_eq!(gated.fix.as_deref(), Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX));
         assert!(report
             .findings
             .iter()

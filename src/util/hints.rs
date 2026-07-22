@@ -96,6 +96,14 @@ Remove the package only after plugin deactivation clears the activation record \
     )
 }
 
+/// Doctor `fix` field for `activation.plugin_mutation_gated`.
+///
+/// Aligned with [`active_plugin_mutation_gated`] and `docs/active-plugin-gate.md` /
+/// `docs/numan-doctor.md`.
+pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
+    "Remove only after plugin deactivation clears the activation record \
+(or install without activating). See docs/active-plugin-gate.md.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +114,8 @@ mod tests {
         assert!(hint.contains("owner/plugin"));
         assert!(hint.contains("Issue #22"));
         assert!(hint.contains("activation record"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("docs/active-plugin-gate.md"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("deactivation"));
     }
 
     #[test]
