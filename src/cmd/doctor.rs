@@ -11,9 +11,13 @@ use crate::cmd::init::{ensure_official_registry_config, execute as init_execute,
 use crate::cmd::registry::{self, RegistryCommands};
 use crate::cmd::setup::{self, NuSetupArgs};
 use crate::config::Config;
+use crate::core::nu_version::NuVersion;
 use crate::core::official_registry::OFFICIAL_REGISTRY;
 use crate::core::registry::RegistryManager;
-use crate::nu::paths::{discover_nu_off_path, find_nu_executable_with_root, NuPaths};
+use crate::nu::bootstrap::managed_nu_binary;
+use crate::nu::paths::{
+    discover_nu_off_path, find_nu_executable_with_root, find_nu_on_path, NuPaths,
+};
 use crate::nupm_compat::NupmCompatibility;
 use crate::nupm_compat::{
     count_drifted_imports, resolve_nupm_home, scan_nupm_home, NupmHomeResolution,
@@ -127,6 +131,8 @@ pub struct DoctorOptions {
     pub nu_setup_repair: Option<fn(&NuSetupArgs, &Path) -> Result<()>>,
     /// Override off-PATH Nu discovery (tests inject a known binary path).
     pub discover_off_path: Option<fn() -> Option<PathBuf>>,
+    /// Override Nu `--version` probing (tests inject a fixed version string).
+    pub nu_version_probe: Option<fn(&Path) -> Result<String>>,
 }
 
 pub fn execute(args: &DoctorArgs, root: &Path) -> Result<i32> {
@@ -189,6 +195,7 @@ pub fn run_checks_with_options(
 
     check_root_layout(root, &mut findings);
     let nu_paths = check_nu_paths(root, options, &mut findings);
+    check_nu_environments(root, options, &mut findings);
     check_journals(root, nu_paths.as_ref(), &mut findings);
     let lockfile = check_lockfile(root, nu_paths.as_ref(), &mut findings);
     if let Some(lf) = lockfile.as_ref() {
@@ -420,6 +427,73 @@ fn check_nu_paths(
     }
 
     Some(paths)
+}
+
+/// Report PATH vs managed Nu versions (informational; never prefer managed as PATH).
+fn check_nu_environments(root: &Path, options: &DoctorOptions, findings: &mut Vec<Finding>) {
+    match find_nu_on_path() {
+        Ok(path) => match probe_nu_version(Path::new(&path), options) {
+            Ok(version) => findings.push(finding(
+                "nu.path.version",
+                Severity::Info,
+                format!("PATH Nu: {version}"),
+                None,
+                RepairTier::None,
+            )),
+            Err(e) => findings.push(finding(
+                "nu.path.version",
+                Severity::Info,
+                format!("PATH Nu: found at '{path}' but version probe failed ({e})"),
+                None,
+                RepairTier::None,
+            )),
+        },
+        Err(_) => findings.push(finding(
+            "nu.path.version",
+            Severity::Info,
+            "PATH Nu: not found",
+            None,
+            RepairTier::None,
+        )),
+    }
+
+    let managed = managed_nu_binary(root);
+    if managed.is_file() {
+        match probe_nu_version(&managed, options) {
+            Ok(version) => findings.push(finding(
+                "nu.managed.version",
+                Severity::Info,
+                format!("Managed Nu: {version} ({})", managed.display()),
+                None,
+                RepairTier::None,
+            )),
+            Err(e) => findings.push(finding(
+                "nu.managed.version",
+                Severity::Info,
+                format!(
+                    "Managed Nu: present at '{}' but version probe failed ({e})",
+                    managed.display()
+                ),
+                None,
+                RepairTier::None,
+            )),
+        }
+    } else {
+        findings.push(finding(
+            "nu.managed.version",
+            Severity::Info,
+            "Managed Nu: not installed",
+            None,
+            RepairTier::None,
+        ));
+    }
+}
+
+fn probe_nu_version(path: &Path, options: &DoctorOptions) -> Result<String> {
+    if let Some(probe) = options.nu_version_probe {
+        return probe(path);
+    }
+    Ok(NuVersion::from_binary(path)?.version)
 }
 
 fn check_journals(root: &Path, nu_paths: Option<&NuPaths>, findings: &mut Vec<Finding>) {
@@ -786,6 +860,28 @@ fn check_registry(root: &Path, findings: &mut Vec<Finding>) {
     for (name, reg) in &config.registries {
         if !reg.enabled {
             continue;
+        }
+        if name == OFFICIAL_REGISTRY.name {
+            if OFFICIAL_REGISTRY.is_placeholder_key() {
+                findings.push(finding(
+                    "registry.trust_root",
+                    Severity::Info,
+                    format!(
+                        "Official trust root: {} (placeholder; not a production key)",
+                        OFFICIAL_REGISTRY.key_id
+                    ),
+                    None,
+                    RepairTier::None,
+                ));
+            } else {
+                findings.push(finding(
+                    "registry.trust_root",
+                    Severity::Info,
+                    format!("Official trust root: {}", OFFICIAL_REGISTRY.key_id),
+                    None,
+                    RepairTier::None,
+                ));
+            }
         }
         if !mgr.index_path(name).exists() {
             findings.push(finding(
@@ -1270,6 +1366,8 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
             &[
                 "nu.binary.missing_on_path",
                 "nu.binary.found_off_path",
+                "nu.path.version",
+                "nu.managed.version",
                 "nu_paths.missing",
                 "nu_paths.drift",
                 "nu_paths.vendor_drift",
@@ -1310,6 +1408,7 @@ fn print_report(args: &DoctorArgs, root: &Path, report: &DoctorReport) -> Result
                 "registry.index_missing",
                 "registry.config",
                 "registry.trust",
+                "registry.trust_root",
             ],
         ),
         (
@@ -1484,6 +1583,7 @@ mod tests {
                 deactivate_repair: None,
                 nu_setup_repair: None,
                 discover_off_path: None,
+                nu_version_probe: None,
             },
         )
         .unwrap();
@@ -1541,6 +1641,7 @@ mod tests {
                 deactivate_repair: None,
                 nu_setup_repair: None,
                 discover_off_path: None,
+                nu_version_probe: None,
             },
         )
         .unwrap();
@@ -1824,5 +1925,162 @@ mod tests {
             .findings
             .iter()
             .any(|f| f.id == "nu_paths.missing" || f.id == "nu.binary.missing_on_path"));
+    }
+
+    fn probe_fixed_version(_path: &Path) -> Result<String> {
+        Ok("0.99.9".to_string())
+    }
+
+    #[test]
+    fn doctor_reports_managed_nu_version_via_probe() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        ensure_fake_managed_nu(root);
+
+        let report = run_checks_with_options(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: true,
+                nupm_home: None,
+            },
+            root,
+            &DoctorOptions {
+                skip_network: true,
+                nu_version_probe: Some(probe_fixed_version),
+                ..DoctorOptions::default()
+            },
+        )
+        .unwrap();
+
+        let managed = report
+            .findings
+            .iter()
+            .find(|f| f.id == "nu.managed.version")
+            .expect("nu.managed.version");
+        assert_eq!(managed.severity, Severity::Info);
+        assert_eq!(managed.repair, RepairTier::None);
+        assert!(
+            managed.message.starts_with("Managed Nu: 0.99.9"),
+            "unexpected message: {}",
+            managed.message
+        );
+        assert!(report.findings.iter().any(|f| f.id == "nu.path.version"));
+    }
+
+    #[test]
+    fn doctor_reports_managed_nu_not_installed() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root).unwrap();
+
+        let report = run_checks(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: true,
+                nupm_home: None,
+            },
+            root,
+        )
+        .unwrap();
+
+        let managed = report
+            .findings
+            .iter()
+            .find(|f| f.id == "nu.managed.version")
+            .expect("nu.managed.version");
+        assert_eq!(managed.message, "Managed Nu: not installed");
+        assert_eq!(managed.severity, Severity::Info);
+        assert_eq!(managed.repair, RepairTier::None);
+    }
+
+    #[test]
+    fn doctor_reports_official_trust_root() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root).unwrap();
+
+        let mut config = Config::default();
+        config.registries.insert(
+            OFFICIAL_REGISTRY.name.to_string(),
+            crate::config::RegistryConfig {
+                url: OFFICIAL_REGISTRY.production_url.to_string(),
+                sync_interval: "24h".to_string(),
+                enabled: true,
+                trust_key: None,
+            },
+        );
+        config.save(root).unwrap();
+
+        let report = run_checks(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: true,
+                nupm_home: None,
+            },
+            root,
+        )
+        .unwrap();
+
+        let trust = report
+            .findings
+            .iter()
+            .find(|f| f.id == "registry.trust_root")
+            .expect("registry.trust_root");
+        assert!(
+            trust.message.contains(OFFICIAL_REGISTRY.key_id),
+            "unexpected message: {}",
+            trust.message
+        );
+        assert!(trust.message.contains("official-2026-07-01"));
+        assert_eq!(trust.severity, Severity::Info);
+        assert_eq!(trust.repair, RepairTier::None);
+    }
+
+    #[test]
+    fn doctor_json_includes_path_managed_and_trust_root_ids() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        ensure_fake_managed_nu(root);
+
+        let mut config = Config::default();
+        config.registries.insert(
+            OFFICIAL_REGISTRY.name.to_string(),
+            crate::config::RegistryConfig {
+                url: OFFICIAL_REGISTRY.production_url.to_string(),
+                sync_interval: "24h".to_string(),
+                enabled: true,
+                trust_key: None,
+            },
+        );
+        config.save(root).unwrap();
+
+        let report = run_checks_with_options(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: true,
+                nupm_home: None,
+            },
+            root,
+            &DoctorOptions {
+                skip_network: true,
+                nu_version_probe: Some(probe_fixed_version),
+                ..DoctorOptions::default()
+            },
+        )
+        .unwrap();
+
+        let ids: Vec<_> = report.findings.iter().map(|f| f.id.as_str()).collect();
+        assert!(ids.contains(&"nu.path.version"));
+        assert!(ids.contains(&"nu.managed.version"));
+        assert!(ids.contains(&"registry.trust_root"));
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("nu.path.version"));
+        assert!(json.contains("nu.managed.version"));
+        assert!(json.contains("registry.trust_root"));
     }
 }

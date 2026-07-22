@@ -127,6 +127,7 @@ fn doctor_fix_auto_creates_layout_without_network() {
             deactivate_repair: None,
             nu_setup_repair: None,
             discover_off_path: None,
+            nu_version_probe: None,
         },
     )
     .unwrap();
@@ -424,4 +425,104 @@ fn doctor_fix_reports_deactivate_repair_failure() {
     assert!(PendingPluginDeactivate::load(root).unwrap().is_some());
     // Pending journal remains a warning after failed repair.
     assert_eq!(code, 0);
+}
+
+fn probe_fixed_version(_path: &Path) -> anyhow::Result<String> {
+    Ok("0.99.9".to_string())
+}
+
+#[test]
+fn doctor_reports_path_nu_not_found_when_path_cleared() {
+    let _path_guard = TEST_PATH_GUARD.lock().unwrap();
+    let _cleared_path = ClearedPath::new();
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root).unwrap();
+
+    let report = run_checks_with_options(
+        &DoctorArgs {
+            fix: false,
+            yes: false,
+            json: true,
+            nupm_home: None,
+        },
+        root,
+        &DoctorOptions {
+            discover_off_path: Some(|| None),
+            ..DoctorOptions::default()
+        },
+    )
+    .unwrap();
+
+    let path_finding = report
+        .findings
+        .iter()
+        .find(|f| f.id == "nu.path.version")
+        .expect("nu.path.version");
+    assert_eq!(path_finding.message, "PATH Nu: not found");
+    assert_eq!(path_finding.severity, Severity::Info);
+}
+
+#[test]
+fn doctor_reports_managed_and_trust_root_findings() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let managed = managed_nu_binary(root);
+    std::fs::create_dir_all(managed.parent().unwrap()).unwrap();
+    std::fs::write(&managed, b"nu").unwrap();
+
+    let mut config = numan_cli::config::Config::default();
+    config.registries.insert(
+        "official".to_string(),
+        numan_cli::config::RegistryConfig {
+            url: "https://example.invalid/registry".to_string(),
+            sync_interval: "24h".to_string(),
+            enabled: true,
+            trust_key: None,
+        },
+    );
+    config.save(root).unwrap();
+
+    let report = run_checks_with_options(
+        &DoctorArgs {
+            fix: false,
+            yes: false,
+            json: true,
+            nupm_home: None,
+        },
+        root,
+        &DoctorOptions {
+            nu_version_probe: Some(probe_fixed_version),
+            ..DoctorOptions::default()
+        },
+    )
+    .unwrap();
+
+    let managed_finding = report
+        .findings
+        .iter()
+        .find(|f| f.id == "nu.managed.version")
+        .expect("nu.managed.version");
+    assert!(
+        managed_finding.message.starts_with("Managed Nu: 0.99.9"),
+        "unexpected: {}",
+        managed_finding.message
+    );
+
+    let trust = report
+        .findings
+        .iter()
+        .find(|f| f.id == "registry.trust_root")
+        .expect("registry.trust_root");
+    assert!(
+        trust.message.contains("official-2026-07-01"),
+        "unexpected: {}",
+        trust.message
+    );
+
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(json.contains("nu.path.version"));
+    assert!(json.contains("nu.managed.version"));
+    assert!(json.contains("registry.trust_root"));
 }
