@@ -276,7 +276,9 @@ pub fn execute_with_hooks(
                 eprintln!("Failed to deactivate {}: {}", update.package_id, e);
                 // Leave PendingLifecycle at Prepared + deactivate journal for recovery.
                 failures.push(update.package_id.clone());
-                continue;
+                // Do not continue the batch: a leftover deactivate/activate journal
+                // can poison the next orchestrated update (Codex batch-abort).
+                break;
             }
             deactivated = true;
         }
@@ -325,7 +327,9 @@ pub fn execute_with_hooks(
                         );
                         // Leave LockfileUpdated journal + activate journal for recovery.
                         failures.push(update.package_id.clone());
-                        continue;
+                        // Abort remaining updates so a Failed activate journal cannot
+                        // let the next plugin deactivate/upgrade then fail reactivate.
+                        break;
                     }
                 }
 
@@ -367,6 +371,11 @@ pub fn execute_with_hooks(
                     eprintln!("Run `numan gc` to clean up orphaned packages.");
                 }
                 failures.push(update.package_id.clone());
+                if deactivated {
+                    // Journals may remain; stop the batch rather than risk the next
+                    // orchestrated update against a half-finished singleton journal.
+                    break;
+                }
             }
         }
     }

@@ -18,7 +18,7 @@ use crate::state::plugin_deactivate_journal::{
     PendingPluginDeactivate, PendingPluginDeactivateEntry, PluginDeactivateStatus,
 };
 use crate::util::format_timestamp;
-use crate::util::hints::{self, CMD_ACTIVATE, CMD_INIT_REFRESH};
+use crate::util::hints::{self, CMD_ACTIVATE, CMD_DEACTIVATE, CMD_INIT_REFRESH};
 
 /// Unregister one active plugin and clear its lockfile `activation` record.
 ///
@@ -55,6 +55,15 @@ pub fn deactivate_one_plugin(
         .to_string();
     let plugin_name = plugin_name_from_executable_path(&executable_path);
     let absolute_binary_path = root.join(&entry.payload_path).join(&executable_path);
+    let was_active_for = entry.is_active_for(
+        &nu_paths.nu_executable_hash,
+        &nu_paths.nu_version,
+        &nu_paths.plugin_registry_path,
+    );
+
+    // Singleton journal: commit Unregistered clears / refuse unfinished foreign
+    // work before overwriting (mirror of activate_one_plugin).
+    reconcile_or_refuse_pending_deactivate(root, &nu_paths, &mut lockfile, pkg_id)?;
 
     let mut journal = PendingPluginDeactivate {
         nu_executable_sha256: nu_paths.nu_executable_hash.clone(),
@@ -72,11 +81,7 @@ pub fn deactivate_one_plugin(
     journal.save(root)?;
 
     // Lockfile-grounded ownership preflight (no msgpackz parse available).
-    if !entry.is_active_for(
-        &nu_paths.nu_executable_hash,
-        &nu_paths.nu_version,
-        &nu_paths.plugin_registry_path,
-    ) {
+    if !was_active_for {
         let err = anyhow::anyhow!(
             "Plugin '{pkg_id}' activation is stale or mismatched for current Nu identity"
         );
@@ -214,6 +219,100 @@ pub fn activate_one_plugin(
     }
 }
 
+/// Commit `Unregistered` pending-deactivate entries, then clear the journal so a
+/// new singleton write is safe.
+///
+/// Unfinished (`Prepared` / `Failed`) entries for **other** packages refuse so
+/// we do not discard their recovery path. Same-package unfinished entries are
+/// dropped: this helper is about to retry deactivation for `pkg_id`.
+fn reconcile_or_refuse_pending_deactivate(
+    root: &Path,
+    nu_paths: &NuPaths,
+    lockfile: &mut Lockfile,
+    pkg_id: &str,
+) -> Result<()> {
+    let Some(existing) = PendingPluginDeactivate::load(root)? else {
+        return Ok(());
+    };
+
+    let identity_ok = existing.matches_nu_identity(
+        &nu_paths.nu_executable_hash,
+        &nu_paths.nu_version,
+        &nu_paths.plugin_registry_path,
+    );
+
+    // Commit Unregistered clears even when identity drifted (no Nu spawn needed).
+    let mut changed = false;
+    let mut remaining: Vec<PendingPluginDeactivateEntry> = Vec::new();
+    for entry in existing.entries {
+        if entry.status == PluginDeactivateStatus::Unregistered {
+            if let Some(pkg) = lockfile.packages.get_mut(&entry.package_id) {
+                if pkg.activation.is_some() {
+                    pkg.activation = None;
+                    changed = true;
+                }
+            }
+            continue;
+        }
+        remaining.push(entry);
+    }
+    if changed {
+        lockfile.save(root)?;
+    }
+
+    if remaining.is_empty() {
+        PendingPluginDeactivate::delete(root)?;
+        return Ok(());
+    }
+
+    let unfinished_other: Vec<String> = remaining
+        .iter()
+        .filter(|e| {
+            e.package_id != pkg_id
+                && matches!(
+                    e.status,
+                    PluginDeactivateStatus::Prepared | PluginDeactivateStatus::Failed
+                )
+        })
+        .map(|e| e.package_id.clone())
+        .collect();
+
+    // Persist drained state before refusing so Unregistered clears are kept.
+    PendingPluginDeactivate {
+        nu_executable_sha256: existing.nu_executable_sha256,
+        nu_version: existing.nu_version,
+        plugin_registry_path: existing.plugin_registry_path,
+        created_at: existing.created_at,
+        entries: remaining,
+    }
+    .save(root)?;
+
+    if !identity_ok {
+        bail!(
+            "A pending plugin deactivation journal exists from a different Nu identity.\n\
+             {}\n\
+             Journal: {}",
+            hints::run_then(CMD_INIT_REFRESH, CMD_DEACTIVATE),
+            root.join("state/pending-plugin-deactivate.json").display()
+        );
+    }
+
+    if !unfinished_other.is_empty() {
+        bail!(
+            "A pending plugin deactivation journal still has unfinished entries for: {}.\n\
+             {}\n\
+             Journal: {}",
+            unfinished_other.join(", "),
+            hints::run(CMD_DEACTIVATE),
+            root.join("state/pending-plugin-deactivate.json").display()
+        );
+    }
+
+    // Same-package Prepared/Failed only: drop journal and retry.
+    PendingPluginDeactivate::delete(root)?;
+    Ok(())
+}
+
 /// Commit `Registered` pending-activation entries, then clear the journal so a
 /// new singleton write is safe.
 ///
@@ -320,7 +419,7 @@ mod tests {
             nu_executable: nu_exe.to_string_lossy().into_owned(),
             nu_version: "0.95.0".to_string(),
             plugin_registry_path: registry.to_string_lossy().into_owned(),
-            nu_executable_hash: nu_hash,
+            nu_executable_hash: nu_hash.clone(),
             platform: "x86_64-pc-windows-msvc".to_string(),
             data_dir: None,
             vendor_autoload_dirs: vec![],
@@ -330,6 +429,7 @@ mod tests {
 
         let pkg_a = "owner/a".to_string();
         let pkg_b = "owner/b".to_string();
+        let mut lockfile = Lockfile::empty();
         for (id, payload) in [
             (&pkg_a, "packages/plugins/owner/a/1.0.0-abc"),
             (&pkg_b, "packages/plugins/owner/b/1.0.0-abc"),
@@ -337,7 +437,6 @@ mod tests {
             let payload_dir = root.join(payload);
             std::fs::create_dir_all(&payload_dir).unwrap();
             std::fs::write(payload_dir.join("nu_plugin_x"), b"fake").unwrap();
-            let mut lockfile = Lockfile::load(root).unwrap_or_else(|_| Lockfile::empty());
             lockfile.packages.insert(
                 id.clone(),
                 LockfileEntry {
@@ -353,7 +452,12 @@ mod tests {
                     entry: None,
                     installed_at: "0".to_string(),
                     nu_version_at_install: None,
-                    activation: None,
+                    activation: Some(PluginActivation {
+                        plugin_registry_path: paths.plugin_registry_path.clone(),
+                        nu_executable_sha256: nu_hash.clone(),
+                        nu_version: paths.nu_version.clone(),
+                        activated_at: "0".to_string(),
+                    }),
                     registry_url: None,
                     registry_revision: None,
                     index_sha256: None,
@@ -374,10 +478,16 @@ mod tests {
                     locked_dependencies: BTreeMap::new(),
                 },
             );
-            lockfile.save(root).unwrap();
         }
+        lockfile.save(root).unwrap();
 
         (dir, pkg_a, pkg_b)
+    }
+
+    fn clear_activation(root: &Path, pkg_id: &str) {
+        let mut lockfile = Lockfile::load(root).unwrap();
+        lockfile.packages.get_mut(pkg_id).unwrap().activation = None;
+        lockfile.save(root).unwrap();
     }
 
     #[test]
@@ -385,6 +495,8 @@ mod tests {
         let (dir, pkg_a, pkg_b) = fixture();
         let root = dir.path();
         let paths = NuPaths::load(root).unwrap();
+        clear_activation(root, &pkg_a);
+        clear_activation(root, &pkg_b);
 
         PendingActivation {
             nu_executable_sha256: paths.nu_executable_hash.clone(),
@@ -422,6 +534,7 @@ mod tests {
         let (dir, pkg_a, pkg_b) = fixture();
         let root = dir.path();
         let paths = NuPaths::load(root).unwrap();
+        clear_activation(root, &pkg_b);
 
         PendingActivation {
             nu_executable_sha256: paths.nu_executable_hash.clone(),
@@ -450,5 +563,77 @@ mod tests {
         assert!(Lockfile::load(root).unwrap().packages[&pkg_b]
             .activation
             .is_none());
+    }
+
+    #[test]
+    fn deactivate_commits_unregistered_journal_before_overwrite() {
+        let (dir, pkg_a, pkg_b) = fixture();
+        let root = dir.path();
+        let paths = NuPaths::load(root).unwrap();
+
+        // Simulate crash after Nu unregister for pkg_a: journal Unregistered,
+        // lockfile activation still present.
+        PendingPluginDeactivate {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: format_timestamp(),
+            entries: vec![PendingPluginDeactivateEntry {
+                package_id: pkg_a.clone(),
+                plugin_name: "nu_plugin_x".to_string(),
+                absolute_binary_path: root
+                    .join("packages/plugins/owner/a/1.0.0-abc/nu_plugin_x")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PluginDeactivateStatus::Unregistered,
+                error: None,
+            }],
+        }
+        .save(root)
+        .unwrap();
+
+        deactivate_one_plugin(root, &pkg_b, &|_nu, _name, _cfg| Ok(())).unwrap();
+
+        let lockfile = Lockfile::load(root).unwrap();
+        assert!(
+            lockfile.packages[&pkg_a].activation.is_none(),
+            "Unregistered journal entry must clear activation before overwrite"
+        );
+        assert!(lockfile.packages[&pkg_b].activation.is_none());
+        assert!(PendingPluginDeactivate::load(root).unwrap().is_none());
+    }
+
+    #[test]
+    fn deactivate_refuses_unfinished_foreign_journal_entries() {
+        let (dir, pkg_a, pkg_b) = fixture();
+        let root = dir.path();
+        let paths = NuPaths::load(root).unwrap();
+
+        PendingPluginDeactivate {
+            nu_executable_sha256: paths.nu_executable_hash.clone(),
+            nu_version: paths.nu_version.clone(),
+            plugin_registry_path: paths.plugin_registry_path.clone(),
+            created_at: format_timestamp(),
+            entries: vec![PendingPluginDeactivateEntry {
+                package_id: pkg_a.clone(),
+                plugin_name: "nu_plugin_x".to_string(),
+                absolute_binary_path: root
+                    .join("packages/plugins/owner/a/1.0.0-abc/nu_plugin_x")
+                    .to_string_lossy()
+                    .into_owned(),
+                status: PluginDeactivateStatus::Prepared,
+                error: None,
+            }],
+        }
+        .save(root)
+        .unwrap();
+
+        let err = deactivate_one_plugin(root, &pkg_b, &|_nu, _name, _cfg| Ok(())).unwrap_err();
+        assert!(err.to_string().contains("unfinished entries"));
+        assert!(err.to_string().contains(&pkg_a));
+        assert!(PendingPluginDeactivate::load(root).unwrap().is_some());
+        assert!(Lockfile::load(root).unwrap().packages[&pkg_b]
+            .activation
+            .is_some());
     }
 }
