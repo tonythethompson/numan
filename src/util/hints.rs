@@ -118,6 +118,16 @@ and update while inactive (https://github.com/tonythethompson/numan/issues/22)."
     )
 }
 
+/// Doctor `fix` field for `activation.plugin_mutation_gated`.
+///
+/// Aligned with [`active_plugin_mutation_gated`], [`active_plugin_update_disabled`],
+/// and `docs/active-plugin-gate.md` / `docs/numan-doctor.md`.
+pub const ACTIVE_PLUGIN_MUTATION_GATED_FIX: &str =
+    "Remove: `numan deactivate <pkg>`, then `numan remove <pkg>`. \
+Update: set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 then \
+`numan update <pkg>` (or deactivate first). \
+See docs/active-plugin-gate.md.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +140,8 @@ mod tests {
         assert!(hint.contains("activation record"));
         assert!(hint.contains("deactivate"));
         assert!(hint.contains("remove"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("docs/active-plugin-gate.md"));
+        assert!(ACTIVE_PLUGIN_MUTATION_GATED_FIX.contains("deactivate"));
     }
 
     #[test]

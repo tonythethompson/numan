@@ -27,8 +27,8 @@ use crate::state::nupm_import::NupmImportsFile;
 use crate::state::plugin_deactivate_journal::PendingPluginDeactivate;
 use crate::util::fs_safety::{acquire_mutation_lock, assert_managed_file_owned};
 use crate::util::hints::{
-    self, registry_none_fix, setup_nu_use_existing, CMD_ACTIVATE, CMD_DEACTIVATE, CMD_INIT,
-    CMD_INIT_REFRESH, CMD_REGISTRY_SYNC, CMD_SETUP_NU,
+    self, registry_none_fix, setup_nu_use_existing, ACTIVE_PLUGIN_MUTATION_GATED_FIX, CMD_ACTIVATE,
+    CMD_DEACTIVATE, CMD_INIT, CMD_INIT_REFRESH, CMD_REGISTRY_SYNC, CMD_SETUP_NU,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -637,12 +637,7 @@ fn check_activation(
                      (default off): deactivate→upgrade→activate \
                      (https://github.com/tonythethompson/numan/issues/22)."
                 ),
-                Some(
-                    "Remove: `numan deactivate <pkg>`, then `numan remove <pkg>`. \
-                     Update: set NUMAN_ENABLE_ACTIVE_PLUGIN_MUTATION=1 then \
-                     `numan update <pkg>` (or deactivate first). \
-                     See docs/active-plugin-gate.md.",
-                ),
+                Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX),
                 RepairTier::None,
             ));
         }
@@ -1717,6 +1712,7 @@ mod tests {
         assert!(gated.message.contains("Issue #22"));
         assert!(gated.message.contains("Deactivate is available"));
         assert!(gated.message.contains("remove stays gated"));
+        assert_eq!(gated.fix.as_deref(), Some(ACTIVE_PLUGIN_MUTATION_GATED_FIX));
         assert!(report
             .findings
             .iter()
