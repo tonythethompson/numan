@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Commands::Search { query } => numan_cli::cmd::search::execute(&query, &root),
+        Commands::Search(args) => numan_cli::cmd::search::execute(&args, &root),
         Commands::Info { id } => numan_cli::cmd::info::execute(&id, &root),
         Commands::Install(args) => numan_cli::cmd::install::execute(&args, &root),
         Commands::Update(args) => numan_cli::cmd::update::execute(&args, &root),
@@ -42,5 +42,6 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(code);
         }
         Commands::Setup(cmd) => numan_cli::cmd::setup::execute(cmd, &root),
+        Commands::Try(args) => numan_cli::cmd::try_cmd::execute(&args, &root),
     }
 }

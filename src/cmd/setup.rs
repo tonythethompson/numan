@@ -40,8 +40,12 @@ pub struct NuSetupArgs {
     #[arg(long)]
     pub yes: bool,
 
+    /// Install a specific Nushell release (e.g. 0.113.1) instead of latest
+    #[arg(long, value_name = "VERSION")]
+    pub version: Option<String>,
+
     /// Use an existing Nushell binary (add its directory to PATH instead of downloading)
-    #[arg(long, value_name = "PATH", conflicts_with = "force")]
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["force", "version"])]
     pub use_existing: Option<PathBuf>,
 }
 
@@ -86,6 +90,7 @@ pub(crate) fn execute_nu_impl(args: &NuSetupArgs, root: &Path) -> Result<()> {
         yes: args.yes,
         force: args.force,
         skip_path: args.skip_path,
+        version: args.version.clone(),
     };
     if let Some(existing) = &args.use_existing {
         bootstrap::register_existing_nu(existing, &options)?;
