@@ -27,3 +27,6 @@ desktop.ini
 
 # Serena MCP project config
 .serena/
+
+# Cursor hooks state (machine-specific generated files)
+.cursor/hooks/state/

@@ -7,12 +7,14 @@ pub mod info;
 pub mod init;
 pub mod install;
 pub mod list;
+pub mod nu_pin_offer;
 pub mod nupm;
 pub mod registry;
 pub mod remove;
 pub mod search;
 pub mod setup;
 pub mod snapshot;
+pub mod try_cmd;
 pub mod update;
 
 use crate::state::autoload_recovery::AutoloadRecoveryOutcome;

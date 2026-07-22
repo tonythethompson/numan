@@ -25,7 +25,7 @@ Numan fills that gap:
 | **Crash recovery** | Journals for activation, autoload, lifecycle, and nupm import operations |
 | **nupm coexistence** | Read-only discovery, one-way import, and drift detection for existing nupm installs |
 
-Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 376 tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
+Numan is **early-stage** (v0.1.4). Core install, activate, update, remove, gc, registry, doctor, snapshots, nupm interoperability, and shell completions are implemented and covered by 419 tests plus real-Nu acceptance on CI. Pre-built release binaries are published via GitHub Releases.
 
 ---
 
@@ -130,13 +130,13 @@ See [packaging/homebrew/README.md](packaging/homebrew/README.md).
 After the package is listed in [winget-pkgs](https://github.com/microsoft/winget-pkgs):
 
 ```powershell
-winget install tonythethompson.Numan
+winget install tonythethompson.numan
 ```
 
 Until then, install from the in-repo manifest (from a clone of this repository):
 
 ```powershell
-winget install --manifest .\packaging\winget\manifests\t\tonythethompson\Numan\0.1.4
+winget install --manifest .\packaging\winget\manifests\t\tonythethompson\numan\0.1.4
 ```
 
 See [packaging/winget/README.md](packaging/winget/README.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
@@ -195,14 +195,20 @@ cargo install numan-cli
 
 numan init
 numan registry sync
+numan try                 # install + activate a starter that fits your Nu
+numan doctor
+```
+
+Or pick a package yourself (`numan search` hides incompatible hits by default; use `--all` to see them):
+
+```bash
 numan search nutest
 numan info vyadh/nutest
 numan install vyadh/nutest
 numan activate vyadh/nutest --yes
-numan doctor
 ```
 
-Install is **inert** — nothing is registered with Nu until you run `numan activate`.
+Install is **inert** — nothing is registered with Nu until you run `numan activate` (or `numan try`, which activates after install). If a package needs an older Nu minor, Numan explains the mismatch and can offer `numan setup nu --version <x.y.z>` (activations are per-Nu; re-activate after switching).
 
 After Nu upgrades, refresh cached paths and activation identity:
 
@@ -230,10 +236,12 @@ numan init
 numan registry sync
 ```
 
-#### 3. Search and install
+#### 3. Prove it works, or search and install
 
 ```bash
-numan search nutest
+numan try                     # curated starter for your Nu + platform
+# or:
+numan search nutest           # hides incompatible hits; use --all to show them
 numan info vyadh/nutest
 numan install vyadh/nutest
 numan list
@@ -247,6 +255,8 @@ numan activate owner/package-name # activate specific packages
 numan activate --list             # show activation status
 numan activate --check            # verify activation integrity (read-only)
 ```
+
+`numan try` already activates unless you pass `--no-activate`.
 
 For modules:
 
@@ -316,6 +326,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | Command | Description |
 |---------|-------------|
 | `numan init [--refresh]` | Probe Nu and cache paths for activation |
+| `numan try [--yes] [--no-activate]` | Install and activate a curated starter package for your Nu + platform |
 | `numan search <query>` | Search registry by name, description, or tags |
 | `numan info <owner/name>` | Show package metadata and available versions |
 | `numan install <owner/name[@version]>` | Download, verify, extract, and lock |
@@ -330,6 +341,7 @@ Global flag: `--root <path>` — override the Numan root directory (all commands
 | `numan snapshot delete <id> [--yes]` | Delete a snapshot |
 | `numan snapshot rollback <id> [--yes]` | Restore exactly a stored snapshot |
 | `numan registry list\|sync\|add\|remove\|packages` | Registry management |
+| `numan setup nu [--version <x.y.z>]` | Download and install official Nushell under Numan root (optionally pinned) |
 | `numan nupm status` | Summarize nupm home and import eligibility |
 | `numan nupm inspect [--all] [path]` | Classify nupm packages at a path |
 | `numan nupm import [--as owner/name] [path]` | One-way import into Numan |
@@ -395,7 +407,7 @@ See [AGENTS.md](AGENTS.md) for architecture details aimed at contributors and ag
 
 ```bash
 cargo build
-cargo test                    # unit + integration (376 tests)
+cargo test                    # unit + integration (419 tests)
 cargo clippy -- -D warnings   # lint (CI-enforced)
 cargo fmt                     # format
 
@@ -433,7 +445,7 @@ PR reviewers should follow [`.github/instructions/review.instructions.md`](.gith
 
 | Item | Tracking |
 |------|----------|
-| Community **winget** install (`winget install tonythethompson.Numan`) | 🔄 [winget-pkgs PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) |
+| Community **winget** install (`winget install tonythethompson.numan`) | 🔄 [winget-pkgs PR #400470](https://github.com/microsoft/winget-pkgs/pull/400470) |
 | Curated **official registry** packages + trust/bootstrap policy | 🔄 [#18](https://github.com/tonythethompson/numan/issues/18), [intake roadmap](docs/registry-intake-roadmap.md) stage 1 |
 | Cross-platform **fresh-install** dogfooding | 🔄 `init` → `registry sync` → `search` → `install` → `activate` → `doctor` on Linux, macOS, Windows |
 

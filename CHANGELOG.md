@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Install support for `.tar.xz` / `.txz` package archives (alongside `.zip`, `.tar.gz`/`.tgz`, and `.tar`)
 - `numan completions nushell` (alias `nu`) via `clap_complete_nushell`, with a vendor-autoload install hint
 
 ### Fixed
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `numan completions` prints a copy-ready install command on stderr after the script (stdout stays pipe-safe)
+- winget manifests: identifier/path `tonythethompson.numan` (all-lowercase), plus `InstallationNotes` for Nu PATH / `init` / `registry sync`
 
 ## [0.1.4] - 2026-07-05
 

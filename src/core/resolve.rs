@@ -3,10 +3,46 @@ use anyhow::{bail, Context, Result};
 use crate::core::nu_version::NuVersion;
 use crate::core::package::{Package, PackageType, VersionEntry};
 use crate::core::platform::Platform;
+use crate::util::hints;
 
 pub struct Resolver<'a> {
     pub platform: &'a Platform,
     pub nu_version: &'a NuVersion,
+}
+
+/// Why a version (or package) is not installable on this Nu + platform.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Incompatibility {
+    /// Current Nu is newer than the version's allowed range.
+    NuTooNew { constraint: String },
+    /// Current Nu is older than the version's minimum.
+    NuTooOld { constraint: String },
+    /// Nu does not satisfy the constraint for another reason.
+    NuUnsatisfied { constraint: String },
+    /// Binary artifact has no entry for this platform triple.
+    MissingTarget { triple: String },
+}
+
+impl Incompatibility {
+    pub fn short_label(&self) -> String {
+        match self {
+            Self::NuTooNew { constraint }
+            | Self::NuTooOld { constraint }
+            | Self::NuUnsatisfied { constraint } => {
+                format!("needs Nu {constraint}")
+            }
+            Self::MissingTarget { triple } => format!("no artifact for {triple}"),
+        }
+    }
+}
+
+/// Package-level diagnosis when no version is compatible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageIncompatibility {
+    pub issue: Incompatibility,
+    /// Suggested managed Nu pin (`setup nu --version`), when one can be derived.
+    pub suggested_pin: Option<String>,
+    pub available_versions: Vec<String>,
 }
 
 impl<'a> Resolver<'a> {
@@ -18,63 +54,203 @@ impl<'a> Resolver<'a> {
     }
 
     pub fn resolve<'b>(&self, package: &'b Package) -> Result<&'b VersionEntry> {
+        if let Some(entry) = self.latest_compatible(package) {
+            return Ok(entry);
+        }
+
+        let diagnosis = self.diagnose_package(package);
+        bail!("{}", self.format_resolve_error(package, &diagnosis));
+    }
+
+    /// Latest compatible version, if any (semver descending).
+    pub fn latest_compatible<'b>(&self, package: &'b Package) -> Option<&'b VersionEntry> {
         let mut candidates: Vec<&VersionEntry> = package
             .versions
             .iter()
             .filter(|v| self.is_compatible(v))
             .collect();
-
         if candidates.is_empty() {
-            let available: Vec<String> = package
-                .versions
-                .iter()
-                .map(|v| v.version.to_string())
-                .collect();
-
-            match package.package_type {
-                PackageType::Plugin => {
-                    bail!(
-                        "No compatible version found for '{}'.
-       Your Nu version: {} ({})
-       Available versions: {}
-       Options:
-         - Upgrade Nu: https://www.nushell.sh/book/installation.html
-         - Install an older version: numan install {}@<version>",
-                        package.id,
-                        self.nu_version.version,
-                        self.platform.triple,
-                        available.join(", "),
-                        package.id
-                    );
-                }
-                _ => {
-                    bail!(
-                        "No compatible version found for '{}' on {}.",
-                        package.id,
-                        self.platform.triple
-                    );
-                }
-            }
+            return None;
         }
-
-        // Sort by version descending, return latest
         candidates.sort_by(|a, b| b.version.cmp(&a.version));
-        Ok(candidates[0])
+        Some(candidates[0])
+    }
+
+    pub fn has_compatible_version(&self, package: &Package) -> bool {
+        package.versions.iter().any(|v| self.is_compatible(v))
     }
 
     pub fn is_compatible(&self, version: &VersionEntry) -> bool {
-        // Check Nu version constraint
+        self.classify_version(version).is_none()
+    }
+
+    /// `None` when the version is compatible with this resolver.
+    pub fn classify_version(&self, version: &VersionEntry) -> Option<Incompatibility> {
         if !self.nu_version.matches_constraint(&version.nu_version) {
-            return false;
+            return Some(classify_nu_mismatch(self.nu_version, &version.nu_version));
         }
 
-        // For plugins, check that a binary exists for our target
-        if version.artifact.kind == "binary" {
-            return version.artifact.targets.contains_key(&self.platform.triple);
+        if version.artifact.kind == "binary"
+            && !version.artifact.targets.contains_key(&self.platform.triple)
+        {
+            return Some(Incompatibility::MissingTarget {
+                triple: self.platform.triple.clone(),
+            });
         }
 
-        // For modules/scripts/completions, just need an artifact
-        true
+        None
+    }
+
+    /// Diagnose why no version of `package` is compatible.
+    pub fn diagnose_package(&self, package: &Package) -> PackageIncompatibility {
+        let available_versions: Vec<String> = package
+            .versions
+            .iter()
+            .map(|v| v.version.to_string())
+            .collect();
+
+        if package.versions.is_empty() {
+            return PackageIncompatibility {
+                issue: Incompatibility::MissingTarget {
+                    triple: self.platform.triple.clone(),
+                },
+                suggested_pin: None,
+                available_versions,
+            };
+        }
+
+        // Prefer diagnosis of the newest version (what users usually try).
+        let mut sorted: Vec<&VersionEntry> = package.versions.iter().collect();
+        sorted.sort_by(|a, b| b.version.cmp(&a.version));
+
+        let mut nu_only: Option<(&VersionEntry, Incompatibility)> = None;
+        let mut missing_target: Option<Incompatibility> = None;
+
+        for entry in &sorted {
+            match self.classify_version(entry) {
+                None => {
+                    // Should not happen when diagnose is called after empty candidates.
+                }
+                Some(Incompatibility::MissingTarget { .. }) => {
+                    if missing_target.is_none() {
+                        missing_target = self.classify_version(entry);
+                    }
+                }
+                Some(issue) if nu_only.is_none() => {
+                    nu_only = Some((entry, issue));
+                }
+                Some(_) => {}
+            }
+        }
+
+        // If every version fails Nu first (or newest fails Nu), prefer Nu diagnosis.
+        if let Some((entry, issue)) = nu_only {
+            let all_nu = package.versions.iter().all(|v| {
+                matches!(
+                    self.classify_version(v),
+                    Some(
+                        Incompatibility::NuTooNew { .. }
+                            | Incompatibility::NuTooOld { .. }
+                            | Incompatibility::NuUnsatisfied { .. }
+                    )
+                )
+            });
+            if all_nu || missing_target.is_none() {
+                return PackageIncompatibility {
+                    suggested_pin: suggest_managed_nu_pin(entry),
+                    issue,
+                    available_versions,
+                };
+            }
+        }
+
+        if let Some(issue) = missing_target {
+            return PackageIncompatibility {
+                issue,
+                suggested_pin: None,
+                available_versions,
+            };
+        }
+
+        // Fallback: newest version's classification.
+        let newest = sorted[0];
+        let issue = self
+            .classify_version(newest)
+            .unwrap_or(Incompatibility::NuUnsatisfied {
+                constraint: newest.nu_version.clone(),
+            });
+        PackageIncompatibility {
+            suggested_pin: suggest_managed_nu_pin(newest),
+            issue,
+            available_versions,
+        }
+    }
+
+    fn format_resolve_error(
+        &self,
+        package: &Package,
+        diagnosis: &PackageIncompatibility,
+    ) -> String {
+        let available = if diagnosis.available_versions.is_empty() {
+            "(none)".to_string()
+        } else {
+            diagnosis.available_versions.join(", ")
+        };
+
+        match &diagnosis.issue {
+            Incompatibility::NuTooNew { constraint } => {
+                let mut msg = format!(
+                    "No compatible version found for '{}'.
+       Your Nu version: {} ({}) is too new for the indexed builds.
+       Required Nu: {constraint}
+       Available package versions: {available}",
+                    package.id, self.nu_version.version, self.platform.triple
+                );
+                append_nu_pin_options(&mut msg, package, diagnosis);
+                msg
+            }
+            Incompatibility::NuTooOld { constraint } => {
+                let mut msg = format!(
+                    "No compatible version found for '{}'.
+       Your Nu version: {} ({}) is too old for the indexed builds.
+       Required Nu: {constraint}
+       Available package versions: {available}",
+                    package.id, self.nu_version.version, self.platform.triple
+                );
+                append_nu_pin_options(&mut msg, package, diagnosis);
+                msg
+            }
+            Incompatibility::NuUnsatisfied { constraint } => {
+                let mut msg = format!(
+                    "No compatible version found for '{}'.
+       Your Nu version: {} ({}) does not satisfy '{constraint}'.
+       Available package versions: {available}",
+                    package.id, self.nu_version.version, self.platform.triple
+                );
+                append_nu_pin_options(&mut msg, package, diagnosis);
+                msg
+            }
+            Incompatibility::MissingTarget { triple } => {
+                if matches!(package.package_type, PackageType::Plugin) {
+                    format!(
+                        "No compatible version found for '{}'.
+       Your platform: {triple}
+       Available package versions: {available}
+       No binary artifact is indexed for this platform.
+       Options:
+         - Check for a module package that supports your platform
+         - {}",
+                        package.id,
+                        hints::run(hints::CMD_REGISTRY_SYNC)
+                    )
+                } else {
+                    format!(
+                        "No compatible version found for '{}' on {triple}.",
+                        package.id
+                    )
+                }
+            }
+        }
     }
 
     /// Resolve an exact version with compatibility validation.
@@ -101,29 +277,165 @@ impl<'a> Resolver<'a> {
                 )
             })?;
 
-        // Validate compatibility even for explicit versions
-        if !self.is_compatible(entry) {
-            let mut reasons = Vec::new();
-            if !self.nu_version.matches_constraint(&entry.nu_version) {
-                reasons.push(format!(
-                    "Nu version {} does not satisfy constraint '{}'",
-                    self.nu_version.version, entry.nu_version
-                ));
+        if let Some(issue) = self.classify_version(entry) {
+            match issue {
+                Incompatibility::NuTooNew { constraint }
+                | Incompatibility::NuTooOld { constraint }
+                | Incompatibility::NuUnsatisfied { constraint } => {
+                    let mut msg = format!(
+                        "Version {target_version} of '{}' is not compatible with your system: \
+                         Nu version {} does not satisfy constraint '{constraint}'",
+                        package.id, self.nu_version.version
+                    );
+                    if let Some(pin) = suggest_managed_nu_pin(entry) {
+                        msg.push_str(&format!(
+                            "\n       Options:\n         - Install a matching Nu: numan setup nu --version {pin}\n         - Then: {}",
+                            hints::run_then(hints::CMD_INIT_REFRESH, &hints::install_pkg(&package.id.to_string()))
+                        ));
+                    }
+                    bail!("{msg}");
+                }
+                Incompatibility::MissingTarget { triple } => {
+                    bail!(
+                        "Version {target_version} of '{}' is not compatible with your system: \
+                         No binary for target '{triple}'",
+                        package.id
+                    );
+                }
             }
-            if entry.artifact.kind == "binary"
-                && !entry.artifact.targets.contains_key(&self.platform.triple)
-            {
-                reasons.push(format!("No binary for target '{}'", self.platform.triple));
-            }
-            bail!(
-                "Version {target_version} of '{}' is not compatible with your system: {}",
-                package.id,
-                reasons.join("; ")
-            );
         }
 
         Ok(entry)
     }
+}
+
+fn append_nu_pin_options(msg: &mut String, package: &Package, diagnosis: &PackageIncompatibility) {
+    msg.push_str("\n       Options:");
+    if let Some(pin) = &diagnosis.suggested_pin {
+        msg.push_str(&format!(
+            "\n         - Install a matching managed Nu: numan setup nu --version {pin}"
+        ));
+        msg.push_str(&format!(
+            "\n         - Then: {}",
+            hints::run_then(
+                hints::CMD_INIT_REFRESH,
+                &hints::install_pkg(&package.id.to_string())
+            )
+        ));
+        msg.push_str(
+            "\n         - Note: activations are per-Nu; re-run `numan activate` after switching",
+        );
+    } else {
+        msg.push_str(&format!(
+            "\n         - Install a Nu that satisfies the package constraint: {}",
+            hints::CMD_SETUP_NU
+        ));
+    }
+    msg.push_str("\n         - Or pick a different package that supports your current Nu (`numan search <query>`)");
+}
+
+/// Classify a Nu constraint mismatch relative to the current Nu.
+pub fn classify_nu_mismatch(nu: &NuVersion, constraint: &str) -> Incompatibility {
+    let (min, max_exclusive) = parse_constraint_bounds(constraint);
+    let current = (nu.major, nu.minor, nu.patch);
+
+    if let Some(min) = min {
+        if current < min {
+            return Incompatibility::NuTooOld {
+                constraint: constraint.to_string(),
+            };
+        }
+    }
+    if let Some(max) = max_exclusive {
+        if current >= max {
+            return Incompatibility::NuTooNew {
+                constraint: constraint.to_string(),
+            };
+        }
+    }
+
+    Incompatibility::NuUnsatisfied {
+        constraint: constraint.to_string(),
+    }
+}
+
+/// Suggest a concrete Nu version to install for this package version.
+pub fn suggest_managed_nu_pin(entry: &VersionEntry) -> Option<String> {
+    // Prefer verified_with entries that satisfy the constraint.
+    let mut verified: Vec<NuVersion> = entry
+        .verified_with
+        .iter()
+        .filter_map(|v| NuVersion::parse(v).ok())
+        .filter(|v| v.matches_constraint(&entry.nu_version))
+        .collect();
+    verified.sort_by(|a, b| {
+        (a.major, a.minor, a.patch)
+            .cmp(&(b.major, b.minor, b.patch))
+            .reverse()
+    });
+    if let Some(best) = verified.first() {
+        return Some(best.version.clone());
+    }
+
+    // Derive from exclusive upper bound: `<0.114.0` + `>=0.113.0` → `0.113.1` (or `.0`).
+    let (min, max_exclusive) = parse_constraint_bounds(&entry.nu_version);
+    if let Some((maj, min_minor, _)) = max_exclusive {
+        if min_minor > 0 {
+            let candidate_minor = min_minor - 1;
+            let pin = format!("{maj}.{candidate_minor}.1");
+            if let Ok(parsed) = NuVersion::parse(&pin) {
+                if parsed.matches_constraint(&entry.nu_version) {
+                    return Some(pin);
+                }
+            }
+            let pin0 = format!("{maj}.{candidate_minor}.0");
+            if let Ok(parsed) = NuVersion::parse(&pin0) {
+                if parsed.matches_constraint(&entry.nu_version) {
+                    return Some(pin0);
+                }
+            }
+        }
+    }
+
+    if let Some((maj, min_minor, min_patch)) = min {
+        let pin = format!("{maj}.{min_minor}.{min_patch}");
+        if let Ok(parsed) = NuVersion::parse(&pin) {
+            if parsed.matches_constraint(&entry.nu_version) {
+                return Some(pin);
+            }
+        }
+    }
+
+    None
+}
+
+type VersionTriple = (u64, u64, u64);
+
+fn parse_constraint_bounds(constraint: &str) -> (Option<VersionTriple>, Option<VersionTriple>) {
+    let mut min = None;
+    let mut max_exclusive = None;
+    for part in constraint.split_whitespace() {
+        if let Some(ver) = part.strip_prefix(">=") {
+            if let Ok(v) = parse_triple(ver) {
+                min = Some(v);
+            }
+        } else if let Some(ver) = part.strip_prefix('<') {
+            if !ver.starts_with('=') {
+                if let Ok(v) = parse_triple(ver) {
+                    max_exclusive = Some(v);
+                }
+            }
+        }
+    }
+    (min, max_exclusive)
+}
+
+fn parse_triple(v: &str) -> Result<VersionTriple> {
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() != 3 {
+        bail!("Invalid version: '{v}'");
+    }
+    Ok((parts[0].parse()?, parts[1].parse()?, parts[2].parse()?))
 }
 
 #[cfg(test)]
@@ -161,7 +473,7 @@ mod tests {
                 VersionEntry {
                     version: semver::Version::new(2, 0, 0),
                     nu_version: ">=0.113.0 <0.114.0".to_string(),
-                    verified_with: vec![],
+                    verified_with: vec!["0.113.1".to_string()],
                     artifact: Artifact {
                         kind: "binary".to_string(),
                         url: None,
@@ -235,6 +547,70 @@ mod tests {
     }
 
     #[test]
+    fn resolve_error_nu_too_new_mentions_pin() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        let err = resolver.resolve(&pkg).unwrap_err().to_string();
+        assert!(err.contains("too new"), "{err}");
+        assert!(err.contains("setup nu --version 0.113.1"), "{err}");
+        assert!(!err.contains("Upgrade Nu:"), "{err}");
+        assert!(!err.contains("Install an older version:"), "{err}");
+    }
+
+    #[test]
+    fn resolve_error_nu_too_old() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.110.0").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        let err = resolver.resolve(&pkg).unwrap_err().to_string();
+        assert!(err.contains("too old"), "{err}");
+    }
+
+    #[test]
+    fn resolve_error_missing_target() {
+        let platform = Platform {
+            os: crate::core::platform::Os::Macos,
+            arch: crate::core::platform::Arch::Aarch64,
+            env: crate::core::platform::Env::Darwin,
+            triple: "aarch64-apple-darwin".to_string(),
+        };
+        let nu = NuVersion::parse("0.113.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let mut pkg = test_plugin();
+        // Keep only windows targets so linux/mac fail on missing target.
+        for v in &mut pkg.versions {
+            v.artifact.targets.retain(|k, _| k.contains("windows"));
+            v.nu_version = ">=0.113.0 <0.114.0".to_string();
+        }
+        let err = resolver.resolve(&pkg).unwrap_err().to_string();
+        assert!(
+            err.contains("No binary artifact") || err.contains("platform"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn suggest_pin_prefers_verified_with() {
+        let pkg = test_plugin();
+        let pin = suggest_managed_nu_pin(&pkg.versions[0]).unwrap();
+        assert_eq!(pin, "0.113.1");
+    }
+
+    #[test]
+    fn classify_nu_too_new_and_too_old() {
+        let nu_new = NuVersion::parse("0.114.1").unwrap();
+        let issue = classify_nu_mismatch(&nu_new, ">=0.113.0 <0.114.0");
+        assert!(matches!(issue, Incompatibility::NuTooNew { .. }));
+
+        let nu_old = NuVersion::parse("0.112.0").unwrap();
+        let issue = classify_nu_mismatch(&nu_old, ">=0.113.0 <0.114.0");
+        assert!(matches!(issue, Incompatibility::NuTooOld { .. }));
+    }
+
+    #[test]
     fn resolve_exact_compatible() {
         let platform = linux_platform();
         let nu = NuVersion::parse("0.113.1").unwrap();
@@ -251,7 +627,6 @@ mod tests {
         let nu = NuVersion::parse("0.112.5").unwrap();
         let resolver = Resolver::new(&platform, &nu);
         let pkg = test_plugin();
-        // v2.0.0 requires >=0.113.0, but we have 0.112.5
         let v = semver::Version::new(2, 0, 0);
         let result = resolver.resolve_exact(&pkg, &v);
         assert!(result.is_err());
@@ -261,15 +636,12 @@ mod tests {
 
     #[test]
     fn resolve_exact_incompatible_target() {
-        let platform = linux_platform(); // linux
+        let platform = linux_platform();
         let nu = NuVersion::parse("0.112.5").unwrap();
         let resolver = Resolver::new(&platform, &nu);
         let pkg = test_plugin();
-        // v1.0.0 only has linux target, but let's test if we can construct a version without it
-        // Actually v1.0.0 has both targets. Let's test with a missing target.
-        // We'll test this with a different package.
         let mut pkg_no_target = pkg.clone();
-        pkg_no_target.versions[1].artifact.targets.clear(); // v1.0.0 now has no targets
+        pkg_no_target.versions[1].artifact.targets.clear();
         let v = semver::Version::new(1, 0, 0);
         let result = resolver.resolve_exact(&pkg_no_target, &v);
         assert!(result.is_err());

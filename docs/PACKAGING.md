@@ -10,14 +10,14 @@ After a GitHub Release is published (see [RELEASING.md](RELEASING.md)):
 2. **Homebrew** — edit `packaging/homebrew/numan.rb`:
    - Bump `version`
    - Update each platform `sha256` (lowercase hex)
-3. **winget** — add `packaging/winget/manifests/t/tonythethompson/Numan/<version>/` with three manifests (schema **1.12.0**):
-   - `tonythethompson.Numan.yaml` (version)
-   - `tonythethompson.Numan.installer.yaml`
-   - `tonythethompson.Numan.locale.en-US.yaml`
-   - Set `PackageIdentifier` to `tonythethompson.Numan` (lowercase publisher segment)
+3. **winget** — add `packaging/winget/manifests/t/tonythethompson/numan/<version>/` with three manifests (schema **1.12.0**):
+   - `tonythethompson.numan.yaml` (version)
+   - `tonythethompson.numan.installer.yaml`
+   - `tonythethompson.numan.locale.en-US.yaml`
+   - Set `PackageIdentifier` to `tonythethompson.numan` (all-lowercase; matches open community PR)
    - Set `InstallerSha256` to uppercase hex from `SHA256SUMS`
    - Update nested `RelativeFilePath` if the archive folder name changed
-4. Open a PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) for community winget installs (use WSL/Linux so `manifests/t/tonythethompson/` path casing is preserved).
+4. Open a PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) for community winget installs (use WSL/Linux so `manifests/t/tonythethompson/numan/` path casing is preserved).
    - **One version per PR** — do not include multiple version folders in the same PR; WinGetSvc validation rejects duplicate publisher paths.
    - **New package PR** — submit only the latest version (e.g. `0.1.4`); older versions are added in separate PRs after merge.
 5. **Homebrew tap** — sync `packaging/homebrew/numan.rb` to [tonythethompson/homebrew-numan](https://github.com/tonythethompson/homebrew-numan) `Formula/numan.rb` (`scripts/sync-homebrew-tap.sh`). Keep `packaging/homebrew-tap/Formula/numan.rb` in this repo aligned for reference.
@@ -31,8 +31,8 @@ After a GitHub Release is published (see [RELEASING.md](RELEASING.md)):
 | From git | `cargo install --git https://github.com/tonythethompson/numan` |
 | Homebrew (tap) | `brew tap tonythethompson/numan && brew install numan` |
 | Homebrew (direct) | `brew install --formula https://raw.githubusercontent.com/tonythethompson/numan/master/packaging/homebrew/numan.rb` |
-| winget (local manifest) | `winget install --manifest packaging/winget/manifests/t/tonythethompson/Numan/<version>` |
-| winget (community) | `winget install tonythethompson.Numan` (after winget-pkgs PR merges) |
+| winget (local manifest) | `winget install --manifest packaging/winget/manifests/t/tonythethompson/numan/<version>` |
+| winget (community) | `winget install tonythethompson.numan` (after winget-pkgs PR merges) |
 
 ## Archive layout
 

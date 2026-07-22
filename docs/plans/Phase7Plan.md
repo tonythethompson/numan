@@ -78,7 +78,7 @@ Shipped:
 Shipped:
 
 1. **Homebrew** — `packaging/homebrew/numan.rb` (direct `--formula` URL install; optional tap documented)
-2. **winget** — `packaging/winget/manifests/t/tonythethompson/Numan/<version>/` (local `--manifest` install; winget-pkgs PR path documented)
+2. **winget** — `packaging/winget/manifests/t/tonythethompson/numan/<version>/` (local `--manifest` install; winget-pkgs PR path documented)
 3. **`cargo install --git`** — documented in README
 4. **[docs/PACKAGING.md](docs/PACKAGING.md)** — release checksum update checklist
 
@@ -93,7 +93,7 @@ Shipped in v0.1.4:
 1. **Production trust root** — `src/core/official_registry.rs` pins `official-2026-07-01` (see `scripts/update-official-trust-root.sh`)
 2. **Init auto-config** — `numan init` adds `registries.official` on first run when the built-in trust root is production
 3. **Onboarding** — quick start is `init` → `registry sync` → `search` (no manual `registry add` for official)
-4. **Distribution** — winget identifier `tonythethompson.Numan`; Homebrew tap synced for v0.1.4
+4. **Distribution** — winget identifier `tonythethompson.numan`; Homebrew tap synced for v0.1.4
 
 ---
 
@@ -109,7 +109,7 @@ Phase 7 core work is complete. Remaining work before **1.0**:
 
 | Milestone | Status |
 |-----------|--------|
-| winget community listing | 🔄 [PR #398049](https://github.com/microsoft/winget-pkgs/pull/398049) |
+| winget community listing | 🔄 [PR #400470](https://github.com/microsoft/winget-pkgs/pull/400470) |
 | Official registry seeded packages | 🔄 [docs/registry-intake-roadmap.md](docs/registry-intake-roadmap.md) — stage 1 acceptance, then curated growth |
 | Cross-platform dogfooding | 🔄 Fresh-install checklist on Linux, macOS, Windows |
 | Source builds (5.2) | 🔜 [#11](https://github.com/tonythethompson/numan/issues/11) |

@@ -21,6 +21,14 @@ pub const CMD_DOCTOR_FIX: &str = "numan doctor --fix";
 /// `numan setup nu`
 pub const CMD_SETUP_NU: &str = "numan setup nu";
 
+/// `numan setup nu --version <ver>`
+pub fn setup_nu_version(version: &str) -> String {
+    format!("numan setup nu --version {version}")
+}
+
+/// `numan try`
+pub const CMD_TRY: &str = "numan try";
+
 /// `numan setup loader`
 pub const CMD_SETUP_LOADER: &str = "numan setup loader";
 

@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::Archive as TarArchive;
+use xz2::read::XzDecoder;
 use zip::ZipArchive;
 
 /// Maximum number of files we'll extract from a single archive.
@@ -17,6 +18,7 @@ const MAX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
 pub enum ArchiveFormat {
     Zip,
     TarGz,
+    TarXz,
     Tar,
 }
 
@@ -28,6 +30,8 @@ impl ArchiveFormat {
             Some(ArchiveFormat::Zip)
         } else if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
             Some(ArchiveFormat::TarGz)
+        } else if lower.ends_with(".tar.xz") || lower.ends_with(".txz") {
+            Some(ArchiveFormat::TarXz)
         } else if lower.ends_with(".tar") {
             Some(ArchiveFormat::Tar)
         } else {
@@ -40,6 +44,7 @@ impl ArchiveFormat {
         match self {
             ArchiveFormat::Zip => "zip",
             ArchiveFormat::TarGz => "tar.gz",
+            ArchiveFormat::TarXz => "tar.xz",
             ArchiveFormat::Tar => "tar",
         }
     }
@@ -79,6 +84,13 @@ pub fn extract_archive(
             let file = File::open(archive_path)
                 .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
             let decoder = GzDecoder::new(file);
+            let mut archive = TarArchive::new(decoder);
+            extract_tar_inner(&mut archive, dest_dir, config)
+        }
+        ArchiveFormat::TarXz => {
+            let file = File::open(archive_path)
+                .with_context(|| format!("Failed to open archive: {}", archive_path.display()))?;
+            let decoder = XzDecoder::new(file);
             let mut archive = TarArchive::new(decoder);
             extract_tar_inner(&mut archive, dest_dir, config)
         }
@@ -464,6 +476,25 @@ mod tests {
         zip_path
     }
 
+    fn create_test_tar_xz(dir: &Path, files: &[(&str, &[u8])]) -> PathBuf {
+        let xz_path = dir.join("test.tar.xz");
+        let file = File::create(&xz_path).unwrap();
+        let encoder = xz2::write::XzEncoder::new(file, 6);
+        let mut builder = tar::Builder::new(encoder);
+
+        for (name, content) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *content).unwrap();
+        }
+
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap();
+        xz_path
+    }
+
     #[test]
     fn extract_zip_basic() {
         let tmp = TempDir::new().unwrap();
@@ -698,6 +729,38 @@ mod tests {
     }
 
     #[test]
+    fn extract_tar_xz_basic() {
+        let tmp = TempDir::new().unwrap();
+        let xz_path = create_test_tar_xz(
+            tmp.path(),
+            &[
+                ("test.txt", b"hello-xz"),
+                ("subdir/nested.txt", b"nested-xz"),
+            ],
+        );
+
+        let dest = tmp.path().join("extracted");
+        std::fs::create_dir(&dest).unwrap();
+
+        let result = extract_archive(
+            &xz_path,
+            &dest,
+            &ExtractConfig::default(),
+            ArchiveFormat::TarXz,
+        )
+        .unwrap();
+        assert_eq!(result.files.len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("test.txt")).unwrap(),
+            "hello-xz"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("subdir/nested.txt")).unwrap(),
+            "nested-xz"
+        );
+    }
+
+    #[test]
     fn archive_format_from_url() {
         assert_eq!(
             ArchiveFormat::from_url("https://example.com/pkg.zip"),
@@ -712,10 +775,19 @@ mod tests {
             Some(ArchiveFormat::TarGz)
         );
         assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.tar.xz"),
+            Some(ArchiveFormat::TarXz)
+        );
+        assert_eq!(
+            ArchiveFormat::from_url("https://example.com/pkg.txz"),
+            Some(ArchiveFormat::TarXz)
+        );
+        assert_eq!(
             ArchiveFormat::from_url("https://example.com/pkg.tar"),
             Some(ArchiveFormat::Tar)
         );
         assert_eq!(ArchiveFormat::from_url("https://example.com/pkg.bin"), None);
+        assert_eq!(ArchiveFormat::extension(&ArchiveFormat::TarXz), "tar.xz");
     }
 
     #[test]

@@ -2,20 +2,15 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-
-concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+    types: [opened, ready_for_review, reopened]
 
 jobs:
   claude-review:
-    if: github.event.pull_request.draft == false
+
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
       issues: read
       id-token: write
 
@@ -23,33 +18,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "*"
-          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
-          plugins: "code-review@claude-code-plugins"
-          classify_inline_comments: "false"
-          additional_permissions: |
-            actions: read
-          prompt: |
-            /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
-
-            Review this pull request like GitHub Codex: post inline PR review comments on changed lines.
-
-            Read and follow:
-            - .github/instructions/review.instructions.md (severity P0-P3, architecture invariants)
-            - AGENTS.md (project structure and conventions)
-
-            Format each inline comment like Codex:
-            - Start with a severity badge line: **P0**, **P1**, **P2**, or **P3**
-            - One concrete issue per comment, tied to a specific file and line in the PR diff
-            - Include a short fix suggestion
-
-            Only comment on problems introduced or affected by this PR. Skip pre-existing issues, style nits below P2, and findings linters already catch.
-          claude_args: |
-            --max-turns 30
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          allowed_bots: '*'
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
