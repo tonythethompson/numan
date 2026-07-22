@@ -287,12 +287,11 @@ impl<'a> Resolver<'a> {
                          Nu version {} does not satisfy constraint '{constraint}'",
                         package.id, self.nu_version.version
                     );
-                    if let Some(pin) = suggest_managed_nu_pin(entry) {
-                        msg.push_str(&format!(
-                            "\n       Options:\n         - Install a matching Nu: numan setup nu --version {pin}\n         - Then: {}",
-                            hints::run_then(hints::CMD_INIT_REFRESH, &hints::install_pkg(&package.id.to_string()))
-                        ));
-                    }
+                    append_nu_mismatch_remediation(
+                        &mut msg,
+                        package,
+                        suggest_managed_nu_pin(entry).as_deref(),
+                    );
                     bail!("{msg}");
                 }
                 Incompatibility::MissingTarget { triple } => {
@@ -310,10 +309,24 @@ impl<'a> Resolver<'a> {
 }
 
 fn append_nu_pin_options(msg: &mut String, package: &Package, diagnosis: &PackageIncompatibility) {
+    append_nu_mismatch_remediation(msg, package, diagnosis.suggested_pin.as_deref());
+}
+
+/// Shared Nu-mismatch remediation for resolve / resolve_exact.
+///
+/// Keeps `setup nu --version`, states PATH is untouched, and closes with
+/// "nothing was installed". Never suggests `registry sync` as an ABI fix.
+fn append_nu_mismatch_remediation(msg: &mut String, package: &Package, pin: Option<&str>) {
+    if matches!(package.package_type, PackageType::Plugin) {
+        msg.push_str(
+            "\n       Plugins only work with the Nu minor they were built for; \
+             this install would not load in your current shell.",
+        );
+    }
     msg.push_str("\n       Options:");
-    if let Some(pin) = &diagnosis.suggested_pin {
+    if let Some(pin) = pin {
         msg.push_str(&format!(
-            "\n         - Install a matching managed Nu: numan setup nu --version {pin}"
+            "\n         - Install a matching managed Nu: numan setup nu --version {pin}\n           (installs under your Numan root; your PATH Nu is not touched)"
         ));
         msg.push_str(&format!(
             "\n         - Then: {}",
@@ -330,8 +343,14 @@ fn append_nu_pin_options(msg: &mut String, package: &Package, diagnosis: &Packag
             "\n         - Install a Nu that satisfies the package constraint: {}",
             hints::CMD_SETUP_NU
         ));
+        msg.push_str(
+            "\n           (managed install under your Numan root; your PATH Nu is not touched)",
+        );
     }
-    msg.push_str("\n         - Or pick a different package that supports your current Nu (`numan search <query>`)");
+    msg.push_str(
+        "\n         - Or pick a different package that supports your current Nu (`numan search <query>`)",
+    );
+    msg.push_str("\n       Nothing was installed. No changes were made.");
 }
 
 /// Classify a Nu constraint mismatch relative to the current Nu.
@@ -555,8 +574,44 @@ mod tests {
         let err = resolver.resolve(&pkg).unwrap_err().to_string();
         assert!(err.contains("too new"), "{err}");
         assert!(err.contains("setup nu --version 0.113.1"), "{err}");
+        assert!(
+            err.contains("PATH Nu is not touched"),
+            "expected PATH-untouched note: {err}"
+        );
+        assert!(
+            err.contains("Nothing was installed. No changes were made."),
+            "{err}"
+        );
+        assert!(
+            err.contains("Plugins only work with the Nu minor"),
+            "expected plugin ABI note: {err}"
+        );
+        assert!(
+            !err.contains("registry sync"),
+            "must not pitch registry sync as ABI fix: {err}"
+        );
         assert!(!err.contains("Upgrade Nu:"), "{err}");
         assert!(!err.contains("Install an older version:"), "{err}");
+    }
+
+    #[test]
+    fn resolve_exact_nu_mismatch_matches_honesty_contract() {
+        let platform = linux_platform();
+        let nu = NuVersion::parse("0.114.1").unwrap();
+        let resolver = Resolver::new(&platform, &nu);
+        let pkg = test_plugin();
+        let target = semver::Version::new(2, 0, 0);
+        let err = resolver
+            .resolve_exact(&pkg, &target)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("setup nu --version 0.113.1"), "{err}");
+        assert!(err.contains("PATH Nu is not touched"), "{err}");
+        assert!(
+            err.contains("Nothing was installed. No changes were made."),
+            "{err}"
+        );
+        assert!(!err.contains("registry sync"), "{err}");
     }
 
     #[test]
