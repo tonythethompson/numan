@@ -110,13 +110,11 @@ pub fn execute_with_hooks(
             patch: 0,
         }
     });
-    // Prefer cached Nu identity for discovery when present so active-plugin
-    // updates resolve against the same Nu that owns the activation record.
+    // Prefer cached Nu identity when present so discovery and install share one
+    // Nu version (including Plain updates when PATH Nu differs or is missing).
     let cached_nu_paths = NuPaths::load(root).ok();
-    let resolve_nu_version = cached_nu_paths
-        .as_ref()
-        .and_then(|paths| NuVersion::parse(&paths.nu_version).ok())
-        .unwrap_or_else(|| path_nu_version.clone());
+    let resolve_nu_version =
+        resolve_nu_version_for_update(cached_nu_paths.as_ref(), &path_nu_version);
 
     if args.check {
         let lockfile = Lockfile::load(root)?;
@@ -283,27 +281,11 @@ pub fn execute_with_hooks(
             deactivated = true;
         }
 
-        // Orchestrated path: prefer cached Nu identity from NuPaths; Plain keeps PATH detect.
-        let orchestrated_nu;
-        let install_nu = if plan == ActiveUpdatePlan::OrchestrateActivePlugin {
-            match cached_nu_paths
-                .as_ref()
-                .and_then(|p| NuVersion::parse(&p.nu_version).ok())
-            {
-                Some(v) => {
-                    orchestrated_nu = v;
-                    &orchestrated_nu
-                }
-                None => &path_nu_version,
-            }
-        } else {
-            &path_nu_version
-        };
-
+        // Same Nu identity as discovery (`resolve_nu_version`) for Plain and orchestrated.
         let options = InstallOptions {
             root,
             platform: &platform,
-            nu_version: install_nu,
+            nu_version: &resolve_nu_version,
             force: false,
             verbose: args.verbose,
             registry_name: Some(&update.registry_name),
@@ -490,6 +472,19 @@ fn is_upgrade_available(current: &str, resolved: &semver::Version) -> bool {
     }
 }
 
+/// Nu version for both candidate discovery and install.
+///
+/// Prefer the cached `NuPaths` version when present so Plain updates cannot
+/// discover against cache and then fail (or pick a different artifact) against PATH.
+fn resolve_nu_version_for_update(
+    cached_nu_paths: Option<&NuPaths>,
+    path_nu_version: &NuVersion,
+) -> NuVersion {
+    cached_nu_paths
+        .and_then(|paths| NuVersion::parse(&paths.nu_version).ok())
+        .unwrap_or_else(|| path_nu_version.clone())
+}
+
 /// Decide whether an active plugin/module may be updated.
 ///
 /// - Active **module**: always refuse (deactivate first).
@@ -627,6 +622,24 @@ mod tests {
     fn registry_name_for_entry_falls_back_to_default() {
         let entry = base_entry();
         assert_eq!(registry_name_for_entry(&entry, "official"), "official");
+    }
+
+    #[test]
+    fn resolve_nu_version_for_update_prefers_cached_over_path() {
+        let path = NuVersion {
+            version: "0.90.0".to_string(),
+            major: 0,
+            minor: 90,
+            patch: 0,
+        };
+        let cached = matching_nu_paths();
+        let resolved = resolve_nu_version_for_update(Some(&cached), &path);
+        assert_eq!(resolved.version, "0.95.0");
+        assert_eq!(resolved.minor, 95);
+
+        let fallback = resolve_nu_version_for_update(None, &path);
+        assert_eq!(fallback.version, "0.90.0");
+        assert_eq!(fallback.minor, 90);
     }
 
     #[test]
