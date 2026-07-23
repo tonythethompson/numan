@@ -97,7 +97,7 @@ fn doctor_report_only_leaves_root_unchanged() {
         json: false,
         nupm_home: None,
     };
-    execute_with_options(&args, root, DoctorOptions::default()).unwrap();
+    execute_with_options(&args, root, test_doctor_options()).unwrap();
     assert!(!root.join("nu_state/paths.json").exists());
 }
 
@@ -121,13 +121,8 @@ fn doctor_fix_auto_creates_layout_without_network() {
         &args,
         root,
         DoctorOptions {
-            skip_network: true,
             init_repair: Some(fake_init),
-            activate_repair: None,
-            deactivate_repair: None,
-            nu_setup_repair: None,
-            discover_off_path: None,
-            nu_version_probe: None,
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -168,7 +163,7 @@ fn doctor_reports_pending_plugin_journal() {
         json: false,
         nupm_home: None,
     };
-    let report = run_checks_with_options(&args, root, &DoctorOptions::default()).unwrap();
+    let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
     assert!(report
         .findings
         .iter()
@@ -199,7 +194,7 @@ fn doctor_detects_nu_path_drift() {
         json: false,
         nupm_home: None,
     };
-    let report = run_checks_with_options(&args, root, &DoctorOptions::default()).unwrap();
+    let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
     assert!(report
         .findings
         .iter()
@@ -230,7 +225,7 @@ fn doctor_reports_off_path_nu_without_download() {
         root,
         &DoctorOptions {
             discover_off_path: Some(discover_off_path_test),
-            ..DoctorOptions::default()
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -278,7 +273,7 @@ fn doctor_fix_registers_off_path_nu_without_network() {
             skip_network: true,
             nu_setup_repair: Some(nu_setup_repair_test),
             discover_off_path: Some(discover_off_path_test),
-            ..DoctorOptions::default()
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -344,7 +339,7 @@ fn doctor_fix_reconciles_pending_plugin_deactivate_journal() {
             skip_network: true,
             init_repair: Some(fake_init),
             deactivate_repair: Some(fake_deactivate_repair),
-            ..DoctorOptions::default()
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -381,7 +376,7 @@ fn doctor_fix_stale_plugin_deactivate_runs_refresh_then_deactivate() {
             skip_network: true,
             init_repair: Some(fake_init),
             deactivate_repair: Some(fake_deactivate_repair),
-            ..DoctorOptions::default()
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -416,7 +411,7 @@ fn doctor_fix_reports_deactivate_repair_failure() {
             skip_network: true,
             init_repair: Some(fake_init),
             deactivate_repair: Some(fake_deactivate_repair),
-            ..DoctorOptions::default()
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -429,6 +424,15 @@ fn doctor_fix_reports_deactivate_repair_failure() {
 
 fn probe_fixed_version(_path: &Path) -> anyhow::Result<String> {
     Ok("0.99.9".to_string())
+}
+
+/// Skip network and never exec a real `nu` during doctor integration tests.
+fn test_doctor_options() -> DoctorOptions {
+    DoctorOptions {
+        skip_network: true,
+        nu_version_probe: Some(probe_fixed_version),
+        ..DoctorOptions::default()
+    }
 }
 
 #[test]
@@ -450,7 +454,7 @@ fn doctor_reports_path_nu_not_found_when_path_cleared() {
         root,
         &DoctorOptions {
             discover_off_path: Some(|| None),
-            ..DoctorOptions::default()
+            ..test_doctor_options()
         },
     )
     .unwrap();
@@ -492,10 +496,7 @@ fn doctor_reports_managed_and_trust_root_findings() {
             nupm_home: None,
         },
         root,
-        &DoctorOptions {
-            nu_version_probe: Some(probe_fixed_version),
-            ..DoctorOptions::default()
-        },
+        &test_doctor_options(),
     )
     .unwrap();
 
@@ -516,7 +517,9 @@ fn doctor_reports_managed_and_trust_root_findings() {
         .find(|f| f.id == "registry.trust_root")
         .expect("registry.trust_root");
     assert!(
-        trust.message.contains(numan_cli::core::official_registry::OFFICIAL_REGISTRY.key_id),
+        trust
+            .message
+            .contains(numan_cli::core::official_registry::OFFICIAL_REGISTRY.key_id),
         "unexpected: {}",
         trust.message
     );

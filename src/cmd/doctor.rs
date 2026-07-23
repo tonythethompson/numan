@@ -1518,7 +1518,7 @@ mod tests {
             json: false,
             nupm_home: None,
         };
-        let report = run_checks(&args, root).unwrap();
+        let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
         assert!(report
             .findings
             .iter()
@@ -1536,7 +1536,7 @@ mod tests {
             json: false,
             nupm_home: None,
         };
-        execute_with_options(&args, root, DoctorOptions::default()).unwrap();
+        execute_with_options(&args, root, test_doctor_options()).unwrap();
         assert!(!root.join("nu_state/paths.json").exists());
     }
 
@@ -1612,7 +1612,7 @@ mod tests {
             json: false,
             nupm_home: None,
         };
-        let report = run_checks(
+        let report = run_checks_with_options(
             &DoctorArgs {
                 fix: false,
                 yes: false,
@@ -1620,6 +1620,7 @@ mod tests {
                 nupm_home: None,
             },
             root,
+            &test_doctor_options(),
         )
         .unwrap();
         let none = report
@@ -1645,7 +1646,7 @@ mod tests {
                 deactivate_repair: None,
                 nu_setup_repair: None,
                 discover_off_path: None,
-                nu_version_probe: None,
+                nu_version_probe: Some(probe_fixed_version),
             },
         )
         .unwrap();
@@ -1661,7 +1662,7 @@ mod tests {
         std::fs::create_dir_all(root).unwrap();
         crate::config::Config::default().save(root).unwrap();
 
-        let report = run_checks(
+        let report = run_checks_with_options(
             &DoctorArgs {
                 fix: false,
                 yes: false,
@@ -1669,6 +1670,7 @@ mod tests {
                 nupm_home: None,
             },
             root,
+            &test_doctor_options(),
         )
         .unwrap();
         let none = report
@@ -1697,7 +1699,7 @@ mod tests {
             json: true,
             nupm_home: None,
         };
-        let report = run_checks(&args, root).unwrap();
+        let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
         assert_eq!(report.schema_version, 1);
         assert!(report.findings.iter().any(|f| f.id == "nu_paths.drift"));
     }
@@ -1762,7 +1764,7 @@ mod tests {
             json: false,
             nupm_home: None,
         };
-        let report = run_checks(&args, root).unwrap();
+        let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
         assert!(report
             .findings
             .iter()
@@ -1832,7 +1834,7 @@ mod tests {
             json: false,
             nupm_home: None,
         };
-        let report = run_checks(&args, root).unwrap();
+        let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
         let gated = report
             .findings
             .iter()
@@ -1918,7 +1920,7 @@ mod tests {
             json: false,
             nupm_home: None,
         };
-        let report = run_checks(&args, root).unwrap();
+        let report = run_checks_with_options(&args, root, &test_doctor_options()).unwrap();
         assert!(
             report.findings.iter().any(|f| {
                 f.id == "activation.plugin_mutation_gated" && f.severity == Severity::Info
@@ -1939,6 +1941,15 @@ mod tests {
         anyhow::bail!("simulated version probe failure")
     }
 
+    /// Skip network and never exec a real `nu` during doctor unit tests.
+    fn test_doctor_options() -> DoctorOptions {
+        DoctorOptions {
+            skip_network: true,
+            nu_version_probe: Some(probe_fixed_version),
+            ..DoctorOptions::default()
+        }
+    }
+
     #[test]
     fn doctor_reports_managed_nu_version_via_probe() {
         let dir = TempDir::new().unwrap();
@@ -1953,11 +1964,7 @@ mod tests {
                 nupm_home: None,
             },
             root,
-            &DoctorOptions {
-                skip_network: true,
-                nu_version_probe: Some(probe_fixed_version),
-                ..DoctorOptions::default()
-            },
+            &test_doctor_options(),
         )
         .unwrap();
 
@@ -2034,7 +2041,9 @@ mod tests {
             path_finding.message
         );
         assert!(
-            path_finding.message.contains("simulated version probe failure"),
+            path_finding
+                .message
+                .contains("simulated version probe failure"),
             "unexpected: {}",
             path_finding.message
         );
@@ -2074,7 +2083,9 @@ mod tests {
             managed_finding.message
         );
         assert!(
-            managed_finding.message.contains("simulated version probe failure"),
+            managed_finding
+                .message
+                .contains("simulated version probe failure"),
             "unexpected: {}",
             managed_finding.message
         );
@@ -2094,11 +2105,7 @@ mod tests {
                 nupm_home: None,
             },
             root,
-            &DoctorOptions {
-                skip_network: true,
-                nu_version_probe: Some(probe_fixed_version),
-                ..DoctorOptions::default()
-            },
+            &test_doctor_options(),
         )
         .unwrap();
 
@@ -2130,7 +2137,7 @@ mod tests {
         );
         config.save(root).unwrap();
 
-        let report = run_checks(
+        let report = run_checks_with_options(
             &DoctorArgs {
                 fix: false,
                 yes: false,
@@ -2138,6 +2145,7 @@ mod tests {
                 nupm_home: None,
             },
             root,
+            &test_doctor_options(),
         )
         .unwrap();
 
@@ -2181,11 +2189,7 @@ mod tests {
                 nupm_home: None,
             },
             root,
-            &DoctorOptions {
-                skip_network: true,
-                nu_version_probe: Some(probe_fixed_version),
-                ..DoctorOptions::default()
-            },
+            &test_doctor_options(),
         )
         .unwrap();
 
