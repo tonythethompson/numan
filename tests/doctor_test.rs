@@ -516,7 +516,7 @@ fn doctor_reports_managed_and_trust_root_findings() {
         .find(|f| f.id == "registry.trust_root")
         .expect("registry.trust_root");
     assert!(
-        trust.message.contains("official-2026-07-01"),
+        trust.message.contains(numan_cli::core::official_registry::OFFICIAL_REGISTRY.key_id),
         "unexpected: {}",
         trust.message
     );

@@ -1487,7 +1487,11 @@ mod tests {
     use crate::nu::autoload::FakeCandidateRunner;
     use crate::state::lockfile::{LockfileEntry, PluginActivation};
     use std::collections::BTreeMap;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    /// Serializes tests that mutate the process-wide `PATH` env var.
+    static TEST_PATH_GUARD: Mutex<()> = Mutex::new(());
 
     fn fake_paths(root: &Path, nu_exe: &Path) -> NuPaths {
         let bytes = std::fs::read(nu_exe).unwrap();
@@ -1583,7 +1587,7 @@ mod tests {
                 deactivate_repair: None,
                 nu_setup_repair: None,
                 discover_off_path: None,
-                nu_version_probe: None,
+                nu_version_probe: Some(probe_fixed_version),
             },
         )
         .unwrap();
@@ -1931,6 +1935,10 @@ mod tests {
         Ok("0.99.9".to_string())
     }
 
+    fn probe_version_failure(_path: &Path) -> Result<String> {
+        anyhow::bail!("simulated version probe failure")
+    }
+
     #[test]
     fn doctor_reports_managed_nu_version_via_probe() {
         let dir = TempDir::new().unwrap();
@@ -1969,12 +1977,31 @@ mod tests {
     }
 
     #[test]
-    fn doctor_reports_managed_nu_not_installed() {
+    fn doctor_reports_path_nu_version_probe_failure() {
+        let _path_guard = TEST_PATH_GUARD.lock().unwrap();
+
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root).unwrap();
 
-        let report = run_checks(
+        // Put a controlled fake `nu` binary on PATH so `find_nu_on_path()`
+        // deterministically resolves without depending on the runner's real PATH.
+        let path_dir = dir.path().join("path-nu");
+        std::fs::create_dir_all(&path_dir).unwrap();
+        let fake_nu = path_dir.join(if cfg!(windows) { "nu.exe" } else { "nu" });
+        std::fs::write(&fake_nu, b"fake").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_nu).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_nu, perms).unwrap();
+        }
+
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var("PATH", &path_dir);
+
+        let report = run_checks_with_options(
             &DoctorArgs {
                 fix: false,
                 yes: false,
@@ -1982,6 +2009,96 @@ mod tests {
                 nupm_home: None,
             },
             root,
+            &DoctorOptions {
+                skip_network: true,
+                nu_version_probe: Some(probe_version_failure),
+                ..DoctorOptions::default()
+            },
+        );
+
+        match saved_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+        let report = report.unwrap();
+
+        let path_finding = report
+            .findings
+            .iter()
+            .find(|f| f.id == "nu.path.version")
+            .expect("nu.path.version");
+        assert_eq!(path_finding.severity, Severity::Info);
+        assert!(
+            path_finding.message.contains("version probe failed"),
+            "unexpected: {}",
+            path_finding.message
+        );
+        assert!(
+            path_finding.message.contains("simulated version probe failure"),
+            "unexpected: {}",
+            path_finding.message
+        );
+    }
+
+    #[test]
+    fn doctor_reports_managed_nu_version_probe_failure() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        ensure_fake_managed_nu(root);
+
+        let report = run_checks_with_options(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: true,
+                nupm_home: None,
+            },
+            root,
+            &DoctorOptions {
+                skip_network: true,
+                nu_version_probe: Some(probe_version_failure),
+                ..DoctorOptions::default()
+            },
+        )
+        .unwrap();
+
+        let managed_finding = report
+            .findings
+            .iter()
+            .find(|f| f.id == "nu.managed.version")
+            .expect("nu.managed.version");
+        assert_eq!(managed_finding.severity, Severity::Info);
+        assert!(
+            managed_finding.message.contains("version probe failed"),
+            "unexpected: {}",
+            managed_finding.message
+        );
+        assert!(
+            managed_finding.message.contains("simulated version probe failure"),
+            "unexpected: {}",
+            managed_finding.message
+        );
+    }
+
+    #[test]
+    fn doctor_reports_managed_nu_not_installed() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root).unwrap();
+
+        let report = run_checks_with_options(
+            &DoctorArgs {
+                fix: false,
+                yes: false,
+                json: true,
+                nupm_home: None,
+            },
+            root,
+            &DoctorOptions {
+                skip_network: true,
+                nu_version_probe: Some(probe_fixed_version),
+                ..DoctorOptions::default()
+            },
         )
         .unwrap();
 
@@ -2034,7 +2151,6 @@ mod tests {
             "unexpected message: {}",
             trust.message
         );
-        assert!(trust.message.contains("official-2026-07-01"));
         assert_eq!(trust.severity, Severity::Info);
         assert_eq!(trust.repair, RepairTier::None);
     }
