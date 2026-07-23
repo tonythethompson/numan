@@ -2006,7 +2006,14 @@ mod tests {
         }
 
         let saved_path = std::env::var("PATH").ok();
-        std::env::set_var("PATH", &path_dir);
+        // Prepend the fake-nu dir; do not replace PATH. `find_nu_on_path` shells
+        // out to `which`/`where.exe`, which must remain resolvable.
+        let mut path_entries = vec![path_dir];
+        if let Some(ref existing) = saved_path {
+            path_entries.push(PathBuf::from(existing));
+        }
+        let joined = std::env::join_paths(&path_entries).expect("join PATH for test");
+        std::env::set_var("PATH", &joined);
 
         let report = run_checks_with_options(
             &DoctorArgs {
@@ -2019,6 +2026,7 @@ mod tests {
             &DoctorOptions {
                 skip_network: true,
                 nu_version_probe: Some(probe_version_failure),
+                discover_off_path: Some(|| None),
                 ..DoctorOptions::default()
             },
         );
